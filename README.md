@@ -7,7 +7,8 @@ it is line drawing; from afar it reads as hillshading.
 
 Give it a place (a name, an address, coordinates or a bounding box) and it
 downloads the elevation, draws, and writes a PNG and an SVG ready for a pen
-plotter.
+plotter. The same engine also runs in the browser: try the live map at
+[burin-map.vercel.app](https://burin-map.vercel.app) (password `folder`).
 
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
@@ -213,6 +214,36 @@ Limits worth knowing:
   show relief that isn't ground.
 - Sea is anything at or below 0.5 m, so land below sea level is left blank.
 
+## Architecture
+
+Everything that turns elevation into strokes lives in **`burin-core`**: a
+dependency-free Rust crate (fields, streamlines, dashes, style parameters).
+That crate is the single source of truth. Three thin shells sit around it:
+
+| Shell | Crate / folder | Role |
+| --- | --- | --- |
+| CLI + I/O | `crates/burin` | SRTM download, transverse Mercator, geocoding, PNG/SVG, `burin` command |
+| Python | `crates/burin-py` + `python/burin` | PyO3 bindings; the importable `burin` package |
+| Web | `crates/burin-wasm` + `web/` | WASM bindings; React + Mapbox demo that draws the current view |
+
+```text
+  elevation / place
+         │
+         ▼
+   ┌─────────────┐     style params (style.rs)
+   │  burin-core │◄──────────────────────────
+   └──────┬──────┘
+          │ Drawing { paths, svg, … }
+    ┌─────┼──────────────┐
+    ▼     ▼              ▼
+   CLI   Python         WASM → browser map
+```
+
+The browser map does not reimplement the look: it stitches Terrarium DEM
+tiles for the viewport, calls the same WASM-built engine, and overlays the
+SVG. Local style and camera are remembered in the browser; a light password
+gate keeps casual traffic out of the public demo.
+
 ## Code layout
 
 One repository, one engine, several front ends:
@@ -239,6 +270,7 @@ web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
   public/pkg/           wasm-pack output (served statically)
   serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
+examples/               PNG gallery for the README
 ```
 
 Each module opens with a comment explaining its step. The engine has no
@@ -246,9 +278,14 @@ dependencies at all, so the same code builds for the browser.
 
 ## Web map
 
+Live demo: **[burin-map.vercel.app](https://burin-map.vercel.app)** (password
+`folder`). It is a PWA you can add to a phone home screen.
+
 React + DaisyUI (wireframe) + Mapbox. Explore the basemap freely; when you
 stop, elevation tiles for that view are fetched, drawn in WASM, and shown as
-an overlay. Moving again fades the overlay and cancels any in-flight draw.
+an overlay. Moving again clears the overlay so you can navigate, then redraws
+when you settle. On mobile the map is full-screen; **Controls** opens the
+style panel.
 
 ```bash
 cd web && npm install
@@ -264,8 +301,8 @@ Or, with WASM already in `web/public/pkg`:
 cd web && npm run dev
 ```
 
-Vite proxies `/terrarium/…` to AWS (S3 has no CORS on GET). For a static host
-you'd need a small edge proxy for those tiles.
+Vite proxies `/terrarium/…` to AWS (S3 has no CORS on GET). The Vercel
+deploy uses a rewrite for the same path (`web/vercel.json`).
 
 ## Development
 
