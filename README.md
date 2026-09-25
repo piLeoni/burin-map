@@ -215,7 +215,7 @@ crates/burin-py/        Python bindings (PyO3), built by maturin
 crates/burin-wasm/      WebAssembly bindings (wasm-bindgen)
 python/burin/           the Python package: a thin layer over the bindings
 python/tests/           Python API tests
-web/                    React + DaisyUI map (MapLibre / Mapbox) + WASM overlay
+web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
   public/pkg/           wasm-pack output (served statically)
   serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
@@ -226,14 +226,14 @@ dependencies at all, so the same code builds for the browser.
 
 ## Web map
 
-React + DaisyUI + MapLibre (or Mapbox with a token). Explore the basemap freely;
-when you stop, elevation tiles for that view are fetched, drawn in WASM, and
-shown as an overlay. Moving again fades the overlay and cancels any in-flight
-draw.
+React + DaisyUI (wireframe) + Mapbox. Explore the basemap freely; when you
+stop, elevation tiles for that view are fetched, drawn in WASM, and shown as
+an overlay. Moving again fades the overlay and cancels any in-flight draw.
 
 ```bash
 cd web && npm install
-cp .env.example .env.local   # optional: set VITE_MAPBOX_TOKEN for Mapbox outdoors + globe
+cp .env.example .env.local
+# edit .env.local: VITE_MAPBOX_TOKEN=pk.…  (from https://account.mapbox.com/access-tokens/)
 ./serve.sh                   # builds WASM if needed, then `npm run dev`
 # → http://127.0.0.1:8765
 ```

@@ -10,8 +10,8 @@ export default function App() {
   const onDrawing = useCallback((d) => setDrawing(d), [])
 
   return (
-    <div className="flex h-full flex-col lg:flex-row">
-      <main className="min-h-[55vh] flex-1 lg:min-h-0">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row">
+      <main className="min-h-0 min-w-0 flex-1">
         <MapView style={style} onStatus={onStatus} onDrawing={onDrawing} />
       </main>
       <Sidebar style={style} setStyle={setStyle} status={status} drawing={drawing} />

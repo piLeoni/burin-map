@@ -56,13 +56,12 @@ function fmt(v) {
 
 /**
  * @param {{
- *   style: Record<string, number>,
  *   setStyle: (s: Record<string, number>) => void,
  *   status: { phase: string, detail?: string },
  *   drawing: { svg: string, lines: number, dashes: number, ms: number } | null,
  * }} props
  */
-export default function Sidebar({ style, setStyle, status, drawing }) {
+export default function Sidebar({ setStyle, status, drawing }) {
   const [params, setParams] = useState([])
   const [draft, setDraft] = useState({})
 
@@ -102,27 +101,20 @@ export default function Sidebar({ style, setStyle, status, drawing }) {
     URL.revokeObjectURL(a.href)
   }
 
-  const phaseBadge = {
-    exploring: 'badge-ghost',
-    working: 'badge-warning',
-    ready: 'badge-success',
-    error: 'badge-error',
-  }[status.phase] || 'badge-ghost'
-
   const Slider = ({ p }) => {
     const isInt = p.name === 'seed'
     const [lo, hi] = RANGES[p.name] || [0, Math.max(1, p.default * 2)]
     const step = isInt ? 1 : (hi - lo) / 200
     const v = draft[p.name] ?? p.default
     return (
-      <fieldset className="fieldset py-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <legend className="fieldset-legend py-0 text-xs font-mono opacity-70">{p.name}</legend>
-          <span className="font-mono text-xs">{fmt(v)}</span>
+      <div className="w-full min-w-0">
+        <div className="flex w-full min-w-0 items-baseline justify-between gap-2">
+          <span className="min-w-0 truncate font-mono text-xs">{p.name}</span>
+          <span className="shrink-0 font-mono text-xs opacity-60">{fmt(v)}</span>
         </div>
         <input
           type="range"
-          className="range range-xs range-primary"
+          className="range range-xs w-full"
           min={lo}
           max={hi}
           step={step}
@@ -137,90 +129,71 @@ export default function Sidebar({ style, setStyle, status, drawing }) {
             commit(p.name, isInt ? Math.round(+el.value) : +el.value)
           }}
         />
-        <p className="label text-[0.7rem] leading-snug opacity-60">{p.help}</p>
-      </fieldset>
+        <p className="mt-0.5 w-full text-xs leading-snug wrap-break-word opacity-50">{p.help}</p>
+      </div>
     )
   }
 
   return (
-    <aside className="flex h-full w-full flex-col gap-4 overflow-y-auto bg-base-200 p-4 lg:w-80 lg:shrink-0 lg:border-l lg:border-base-300">
-      <header>
-        <h1 className="font-mono text-2xl font-semibold tracking-tight">burin</h1>
-        <p className="text-sm opacity-60">pen-and-ink terrain from elevation</p>
-      </header>
+    <aside className="flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-t border-base-content lg:w-72 lg:border-t-0 lg:border-l">
+      <div className="flex min-w-0 flex-col gap-5 p-4">
+        <header className="min-w-0">
+          <h1 className="font-mono text-xl font-bold tracking-tight">burin</h1>
+          <p className="text-sm opacity-60">pen-and-ink terrain from elevation</p>
+        </header>
 
-      <div className="rounded-box bg-base-100 p-3 text-sm shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <span className={`badge badge-sm ${phaseBadge}`}>{status.phase}</span>
-        </div>
-        <p className="text-xs leading-relaxed opacity-80">{status.detail || '—'}</p>
-      </div>
+        <p className="min-w-0 text-sm leading-snug">
+          <span className="font-mono text-xs uppercase">{status.phase}</span>
+          {status.detail ? (
+            <>
+              <br />
+              <span className="opacity-70">{status.detail}</span>
+            </>
+          ) : null}
+        </p>
 
-      <div className="alert alert-info text-xs shadow-sm">
-        <span>
-          Explore freely on the map. When you stop, elevation is fetched for that view and drawn.
-          Moving again fades the overlay.
-        </span>
-      </div>
+        <p className="min-w-0 text-sm leading-snug opacity-70">
+          Explore on the basemap. When you stop, elevation for that view is drawn on top. Move again
+          and the drawing fades so you can navigate.
+        </p>
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-xs font-semibold tracking-wide uppercase opacity-60">Style</h2>
-          <button type="button" className="btn btn-ghost btn-xs" onClick={reset}>
-            reset
-          </button>
-        </div>
-        <div className="flex flex-col gap-1">
+        <section className="flex min-w-0 flex-col gap-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="font-mono text-xs font-bold tracking-wide uppercase">Style</h2>
+            <button type="button" className="btn btn-xs btn-ghost" onClick={reset}>
+              reset
+            </button>
+          </div>
           {primary.map((p) => (
             <Slider key={p.name} p={p} />
           ))}
-        </div>
-        {rest.length > 0 && (
-          <details className="mt-2">
-            <summary className="cursor-pointer font-mono text-xs opacity-60">more parameters</summary>
-            <div className="mt-2 flex flex-col gap-1">
-              {rest.map((p) => (
-                <Slider key={p.name} p={p} />
-              ))}
-            </div>
-          </details>
-        )}
-      </section>
-
-      <div className="mt-auto flex flex-col gap-2 pt-2">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={!drawing?.svg}
-          onClick={download}
-        >
-          Download SVG
-        </button>
-        <p className="text-[0.7rem] leading-snug opacity-50">
-          Elevation:{' '}
-          <a
-            className="link"
-            href="https://registry.opendata.aws/terrain-tiles/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            AWS Terrain Tiles
-          </a>
-          .           Map:{' '}
-          {import.meta.env.VITE_MAPBOX_TOKEN ? (
-            <a className="link" href="https://www.mapbox.com/" target="_blank" rel="noreferrer">
-              Mapbox
-            </a>
-          ) : (
-            <>
-              <a className="link" href="https://openfreemap.org/" target="_blank" rel="noreferrer">
-                OpenFreeMap
-              </a>{' '}
-              via MapLibre (set <code className="text-[0.65rem]">VITE_MAPBOX_TOKEN</code> for Mapbox
-              outdoors + globe).
-            </>
+          {rest.length > 0 && (
+            <details className="min-w-0">
+              <summary className="cursor-pointer font-mono text-xs opacity-60">
+                more parameters
+              </summary>
+              <div className="mt-3 flex min-w-0 flex-col gap-4">
+                {rest.map((p) => (
+                  <Slider key={p.name} p={p} />
+                ))}
+              </div>
+            </details>
           )}
-        </p>
+        </section>
+
+        <div className="mt-2 flex min-w-0 flex-col gap-2">
+          <button
+            type="button"
+            className="btn w-full"
+            disabled={!drawing?.svg}
+            onClick={download}
+          >
+            Download SVG
+          </button>
+          <p className="min-w-0 text-xs leading-snug wrap-break-word opacity-50">
+            Elevation from AWS Terrain Tiles. Basemap: Mapbox.
+          </p>
+        </div>
       </div>
     </aside>
   )

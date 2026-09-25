@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "mapbox-gl": "^3.31.0",
-    "maplibre-gl": "^6.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

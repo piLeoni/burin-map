@@ -1,13 +1,22 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: winter --default, night --prefersdark;
+  themes: wireframe --default;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
-.maplibregl-ctrl-attrib a {
+/* Keep map controls readable on wireframe */
+.mapboxgl-ctrl-group {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border: 1px solid #000 !important;
+}
+.mapboxgl-ctrl-attrib a {
   color: inherit;
 }
