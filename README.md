@@ -12,6 +12,26 @@ plotter.
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
 
+<p align="center">
+  <img src="examples/san-francisco.png" width="720" alt="San Francisco Bay Area" />
+  <br />
+  <em>San Francisco</em>
+</p>
+
+<p align="center">
+  <img src="examples/twin-peaks.png" width="360" alt="Twin Peaks, San Francisco" />
+  &nbsp;
+  <img src="examples/matterhorn.png" width="360" alt="Matterhorn" />
+  <br />
+  <em>Twin Peaks · Matterhorn</em>
+</p>
+
+<p align="center">
+  <img src="examples/bern.png" width="720" alt="Bern and surroundings" />
+  <br />
+  <em>Bern</em>
+</p>
+
 ## Install
 
 The engine is written in Rust and usable three ways: a command-line tool, a
