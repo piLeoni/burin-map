@@ -215,9 +215,10 @@ crates/burin-py/        Python bindings (PyO3), built by maturin
 crates/burin-wasm/      WebAssembly bindings (wasm-bindgen)
 python/burin/           the Python package: a thin layer over the bindings
 python/tests/           Python API tests
-web/                    live map page (terrarium tiles + WASM)
-  serve.py              local server with a tile proxy (S3 has no CORS on GET)
-  pkg/                  built by `wasm-pack` (committed for convenience)
+web/                    React + DaisyUI map (MapLibre / Mapbox) + WASM overlay
+  src/                  UI and terrarium → DEM stitching
+  public/pkg/           wasm-pack output (served statically)
+  serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
 ```
 
 Each module opens with a comment explaining its step. The engine has no
@@ -225,25 +226,26 @@ dependencies at all, so the same code builds for the browser.
 
 ## Web map
 
+React + DaisyUI + MapLibre (or Mapbox with a token). Explore the basemap freely;
+when you stop, elevation tiles for that view are fetched, drawn in WASM, and
+shown as an overlay. Moving again fades the overlay and cancels any in-flight
+draw.
+
 ```bash
-./web/serve.sh          # builds WASM if needed, then opens a local server
+cd web && npm install
+cp .env.example .env.local   # optional: set VITE_MAPBOX_TOKEN for Mapbox outdoors + globe
+./serve.sh                   # builds WASM if needed, then `npm run dev`
 # → http://127.0.0.1:8765
 ```
 
-Or, with WASM already built:
+Or, with WASM already in `web/public/pkg`:
 
 ```bash
-python3 web/serve.py
+cd web && npm run dev
 ```
 
-Pan and zoom like a map; when you stop, the page fetches [terrarium](https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium)
-elevation tiles, runs the same engine in WebAssembly, and draws on a canvas.
-Style sliders match the CLI; **Download SVG** exports the current view.
-
-The tile proxy in `serve.py` is only needed locally: AWS S3 answers CORS
-preflights but not GETs, so the browser can't read the PNG pixels directly.
-For a static host (GitHub Pages) you'd put a small edge proxy in front, or
-serve tiles yourself.
+Vite proxies `/terrarium/…` to AWS (S3 has no CORS on GET). For a static host
+you'd need a small edge proxy for those tiles.
 
 ## Development
 

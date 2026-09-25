@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: winter --default, night --prefersdark;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: inherit;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "burin-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings for the burin drawing engine",
+  "version": "0.1.0",
+  "files": [
+    "burin_wasm_bg.wasm",
+    "burin_wasm.js",
+    "burin_wasm.d.ts"
+  ],
+  "main": "burin_wasm.js",
+  "types": "burin_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
