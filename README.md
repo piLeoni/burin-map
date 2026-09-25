@@ -5,58 +5,59 @@ strokes that follow the lie of the land, dense and solid on shadowed slopes,
 sparse stipple on flat ground, a few scattered marks on lit slopes. Up close
 it is line drawing; from afar it reads as hillshading.
 
+The engine is **Rust** (`burin-core`), with a **Python wrapper** for the same
+API, a command-line tool, and a browser build (WASM). Nothing is on crates.io
+or PyPI yet; publishing a Cargo crate and a `pip` package (likely
+`burin-maps`) is on the roadmap. Until then, install from this repo.
+
 Give it a place (a name, an address, coordinates or a bounding box) and it
 downloads the elevation, draws, and writes a PNG and an SVG ready for a pen
-plotter. The same engine also runs in the browser: try the live map at
+plotter. The same engine runs in the browser: try the live map at
 [burin-map.vercel.app](https://burin-map.vercel.app) (password `folder`).
 
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
 
 <p align="center">
-  <img src="examples/san-francisco.png" width="720" alt="San Francisco Bay Area" />
+  <img src="examples/bay-area.png" width="720" alt="San Francisco Bay Area" />
   <br />
-  <em>San Francisco</em>
+  <em>Bay Area</em>
 </p>
 
 <p align="center">
-  <img src="examples/twin-peaks.png" width="360" alt="Twin Peaks, San Francisco" />
+  <img src="examples/twin-peaks.png" width="360" alt="Twin Peaks — denser, more wobble" />
   &nbsp;
-  <img src="examples/matterhorn.png" width="360" alt="Matterhorn" />
+  <img src="examples/mount-tam.png" width="360" alt="Mount Tamalpais — broader, quieter lines" />
   <br />
-  <em>Twin Peaks · Matterhorn</em>
-</p>
-
-<p align="center">
-  <img src="examples/bern.png" width="720" alt="Bern and surroundings" />
+  <em>Twin Peaks · Mount Tamalpais</em>
   <br />
-  <em>Bern</em>
+  <sub>Closer views with different style settings</sub>
 </p>
 
 ## Install
 
-The engine is written in Rust and usable three ways: a command-line tool, a
-Python package, and a live map in the browser. None is published yet; from a
-clone you need a [Rust toolchain](https://rustup.rs). For the web map you
-also need [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
+From a clone you need a [Rust toolchain](https://rustup.rs). For the web map
+you also need [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
 (`cargo install wasm-pack`).
 
-Command line only:
+Command line:
 
 ```bash
 cargo install --path crates/burin      # puts `burin` in ~/.cargo/bin
 ```
 
-Python package (also installs the same `burin` command):
+Python (compiles the Rust engine via maturin; needs Rust for now):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install .                          # compiles the Rust engine, ~1 min
+pip install .                          # ~1 min first build
 ```
 
-Once on PyPI it will be `pip install burin-maps` (`burin` is taken there;
-the command and the import are still `burin`), with prebuilt wheels so no
-Rust is needed. Python ≥ 3.10, numpy is the only dependency.
+The import and the CLI entry point are both `burin`. When published, the
+plan is `cargo install burin` (or depend on `burin` / `burin-core` on
+crates.io) and `pip install burin-maps` on PyPI (`burin` is taken there),
+with wheels so Python users do not need a Rust toolchain. Python ≥ 3.10;
+numpy is the only runtime dependency of the wrapper.
 
 Elevation is downloaded on demand (see [Data](#data)); addresses are looked
 up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
