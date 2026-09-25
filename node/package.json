@@ -1,0 +1,51 @@
+{
+  "name": "burin-map",
+  "version": "0.1.0",
+  "description": "Pen-and-ink terrain maps from real elevation data",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "burin-map": "cli.js"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "cli.js",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir .",
+    "build:debug": "napi build --platform --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir .",
+    "test": "node --test test.mjs"
+  },
+  "napi": {
+    "binaryName": "burin-map",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/piLeoni/burin-map.git"
+  },
+  "keywords": [
+    "terrain",
+    "hillshade",
+    "cartography",
+    "srtm",
+    "map",
+    "generative-art"
+  ],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@napi-rs/cli": "^3"
+  }
+}

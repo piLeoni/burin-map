@@ -1,6 +1,12 @@
 [workspace]
-members = ["crates/burin-map-core", "crates/burin-map", "crates/burin-map-py", "crates/burin-map-wasm"]
-# burin-map-py / burin-map-wasm are built by maturin / wasm-pack, not a plain cargo build.
+members = [
+  "crates/burin-map-core",
+  "crates/burin-map",
+  "crates/burin-map-py",
+  "crates/burin-map-wasm",
+  "crates/burin-map-node",
+]
+# py / wasm / node are built by maturin / wasm-pack / napi, not a plain cargo build.
 default-members = ["crates/burin-map-core", "crates/burin-map"]
 resolver = "2"
 

@@ -1,0 +1,17 @@
+[package]
+name = "burin-map-node"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+burin-map = { path = "../burin-map" }
+burin-map-core = { path = "../burin-map-core" }
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

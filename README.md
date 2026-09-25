@@ -5,17 +5,15 @@ strokes that follow the lie of the land, dense and solid on shadowed slopes,
 sparse stipple on flat ground, a few scattered marks on lit slopes. Up close
 it is line drawing; from afar it reads as hillshading.
 
-**burin-map** is the project: Rust engine, CLI, Python API (`import burin_map`),
-and the interactive site **BurinMap** at [burin-map.vercel.app](https://burin-map.vercel.app)
+**burin-map** is the project: Rust engine, CLI, Python and Node APIs, and the
+interactive site **BurinMap** at [burin-map.vercel.app](https://burin-map.vercel.app)
 (password `folder`) — same engine in the browser, not a different product.
 
 ```bash
 cargo install burin-map
 pip install burin-map          # or: conda install -c conda-forge burin-map
+npm install -g burin-map       # or: npx burin-map …
 ```
-
-Until those land on crates.io / PyPI / conda-forge, install from this repo
-(see [Rust](#rust) and [Python](#python)).
 
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
@@ -126,6 +124,35 @@ Elevation is downloaded on demand (see [Data](#data)); addresses are looked
 up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
 per run, no key).
 
+## Node
+
+Same engine as a native Node addon ([napi-rs](https://napi.rs/)): usable from
+code and as `npx burin-map` / the `burin-map` command. Node ≥ 18.
+
+```bash
+npm install burin-map
+# or:  npm install -g burin-map
+# or:  npx burin-map --at "Twin Peaks, San Francisco" --size 8km -o tp.png
+```
+
+That installs `import` / `require("burin-map")` and the `burin-map` command.
+Prebuilt binaries cover the usual platforms; from source you need a
+[Rust toolchain](https://rustup.rs).
+
+```js
+import { locate, boundsAround, draw, drawElevation } from "burin-map";
+import { writeFileSync } from "node:fs";
+
+const [lat, lon] = locate("Twin Peaks, San Francisco");
+const [west, south, east, north] = boundsAround(lat, lon, 14, 14);
+
+const d = draw(west, south, east, north, { shade_gain: 4, wobble: 30 });
+writeFileSync("tp.png", d.png());
+writeFileSync("tp.svg", d.svg());
+
+// Or any elevation grid you already have (metres, row 0 = north):
+// const d = drawElevation(elevFloat32Array, width, height, pxM, { spacing: 6 });
+```
 
 ## How it works
 
@@ -235,12 +262,13 @@ Limits worth knowing:
 
 Everything that turns elevation into strokes lives in **`burin-map-core`**: a
 dependency-free Rust crate (fields, streamlines, dashes, style parameters).
-That crate is the single source of truth. Three thin shells sit around it:
+That crate is the single source of truth. Thin shells sit around it:
 
 | Shell | Crate / folder | Role |
 | --- | --- | --- |
 | CLI + I/O | `crates/burin-map` | SRTM download, transverse Mercator, geocoding, PNG/SVG, `burin-map` command |
 | Python | `crates/burin-map-py` + `python/burin_map` | PyO3 bindings; the importable `burin_map` package |
+| Node | `crates/burin-map-node` + `node/` | napi-rs bindings; `require` / `import` and `npx burin-map` |
 | Web | `crates/burin-map-wasm` + `web/` | WASM bindings; React + Mapbox demo that draws the current view |
 
 ```text
@@ -251,9 +279,9 @@ That crate is the single source of truth. Three thin shells sit around it:
    │  burin-map-core │◄──────────────────────────
    └────────┬────────┘
             │ Drawing { paths, svg, … }
-      ┌─────┼──────────────┐
-      ▼     ▼              ▼
-     CLI   Python         WASM → browser map
+      ┌─────┼──────────┬──────────┐
+      ▼     ▼          ▼          ▼
+     CLI  Python      Node      WASM → browser map
 ```
 
 The browser map does not reimplement the look: it stitches Terrarium DEM
@@ -280,9 +308,11 @@ crates/burin-map/       Rust library + `burin-map` command
   raster.rs             PNG
   cli.rs                command line (also run by the Python package)
 crates/burin-map-py/    Python bindings (PyO3), built by maturin
+crates/burin-map-node/  Node bindings (napi-rs), built from `node/`
 crates/burin-map-wasm/  WebAssembly bindings (wasm-bindgen)
 python/burin_map/       the Python package: a thin layer over the bindings
 python/tests/           Python API tests
+node/                   npm package: loader, `cli.js` for `npx`, native `.node`
 web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
   public/pkg/           wasm-pack output (served statically)
@@ -358,13 +388,14 @@ deploy uses a rewrite for the same path (`web/vercel.json`).
 cargo test                                  # engine, CLI, projection
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" && pytest           # Python package
+cd node && npm install && npm run build && npm test   # Node addon
 cargo run --release -- --place bern -o bern.png   # try the CLI without installing
 ./web/serve.sh                              # WASM map demo
 ```
 
 After changing Rust code, `pip install -e .` again to rebuild the Python
-extension, and re-run `./web/serve.sh` (or just the `wasm-pack` line in it)
-for the browser.
+extension, `cd node && npm run build` for the Node addon, and re-run
+`./web/serve.sh` (or just the `wasm-pack` line in it) for the browser.
 
 ## Licence
 
