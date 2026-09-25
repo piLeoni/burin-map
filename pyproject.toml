@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "burin-maps"
+dynamic = ["version"]
+description = "Pen-and-ink terrain maps from real elevation data"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["terrain", "hillshade", "cartography", "streamlines", "generative-art", "srtm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pillow>=10.0",
+    "rasterio>=1.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+burin = "burin.cli:main"
+
+[tool.hatch.version]
+path = "src/burin/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/burin"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
