@@ -10,3 +10,6 @@ build/
 # drawings generated while trying things out
 /*.png
 /*.svg
+
+# Rust
+/target

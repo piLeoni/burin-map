@@ -1,0 +1,8 @@
+[package]
+name = "burin-core"
+version = "0.1.0"
+edition = "2021"
+description = "Drawing engine of burin: pen-and-ink terrain lines from an elevation grid"
+publish = false
+
+[dependencies]
