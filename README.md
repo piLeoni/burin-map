@@ -15,8 +15,10 @@ centuries.*
 ## Install
 
 The engine is written in Rust and usable three ways: a command-line tool, a
-Python package, and (planned) a web page. None is published yet; from a
-clone you need a [Rust toolchain](https://rustup.rs).
+Python package, and a live map in the browser. None is published yet; from a
+clone you need a [Rust toolchain](https://rustup.rs). For the web map you
+also need [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
+(`cargo install wasm-pack`).
 
 Command line only:
 
@@ -156,6 +158,7 @@ The ones worth touching first:
 | parameter | default | effect |
 |---|---|---|
 | `spacing` | 4.8 | distance between lines, px |
+| `spacing_steep` | 0.6 | how much steeper ground tightens spacing (`1` = off) |
 | `shade_gain` | 3.0 | contrast of the relief: higher = more solid shadows and whiter lights |
 | `flat_level` | 0.25 | how much stipple flat ground keeps |
 | `lit_floor` | 0.06 | how many scattered dashes stay on fully lit slopes (0 = pure white) |
@@ -209,13 +212,38 @@ crates/burin/           Rust library + `burin` command
   raster.rs             PNG
   cli.rs                command line (also run by the Python package)
 crates/burin-py/        Python bindings (PyO3), built by maturin
+crates/burin-wasm/      WebAssembly bindings (wasm-bindgen)
 python/burin/           the Python package: a thin layer over the bindings
 python/tests/           Python API tests
-web/                    (planned) WASM build and live map page
+web/                    live map page (terrarium tiles + WASM)
+  serve.py              local server with a tile proxy (S3 has no CORS on GET)
+  pkg/                  built by `wasm-pack` (committed for convenience)
 ```
 
 Each module opens with a comment explaining its step. The engine has no
 dependencies at all, so the same code builds for the browser.
+
+## Web map
+
+```bash
+./web/serve.sh          # builds WASM if needed, then opens a local server
+# → http://127.0.0.1:8765
+```
+
+Or, with WASM already built:
+
+```bash
+python3 web/serve.py
+```
+
+Pan and zoom like a map; when you stop, the page fetches [terrarium](https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium)
+elevation tiles, runs the same engine in WebAssembly, and draws on a canvas.
+Style sliders match the CLI; **Download SVG** exports the current view.
+
+The tile proxy in `serve.py` is only needed locally: AWS S3 answers CORS
+preflights but not GETs, so the browser can't read the PNG pixels directly.
+For a static host (GitHub Pages) you'd put a small edge proxy in front, or
+serve tiles yourself.
 
 ## Development
 
@@ -224,10 +252,12 @@ cargo test                                  # engine, CLI, projection
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" && pytest           # Python package
 cargo run --release -- --place bern -o bern.png   # try the CLI without installing
+./web/serve.sh                              # WASM map demo
 ```
 
 After changing Rust code, `pip install -e .` again to rebuild the Python
-extension.
+extension, and re-run `./web/serve.sh` (or just the `wasm-pack` line in it)
+for the browser.
 
 ## Licence
 

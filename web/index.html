@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>burin</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="map">
+    <canvas id="canvas"></canvas>
+    <div id="hud">
+      <span id="status">loading…</span>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <header>
+      <h1>burin</h1>
+      <p class="tag">pen-and-ink terrain from elevation</p>
+    </header>
+
+    <section>
+      <label for="place">Place</label>
+      <div class="row">
+        <input id="place" type="search" placeholder="address, or lat, lon" autocomplete="off" />
+        <button id="go" type="button">Go</button>
+      </div>
+      <div class="presets">
+        <button type="button" data-at="37.75,-122.45" data-km="20">Twin Peaks</button>
+        <button type="button" data-at="37.75,-122.4" data-km="70">SF Bay</button>
+        <button type="button" data-at="46.02,7.75" data-km="15">Zermatt</button>
+        <button type="button" data-at="46.95,7.45" data-km="50">Bern</button>
+        <button type="button" data-at="45.83,6.86" data-km="30">Mont Blanc</button>
+      </div>
+    </section>
+
+    <section>
+      <label for="size">Width <span id="size-val">20 km</span></label>
+      <input id="size" type="range" min="2" max="120" step="1" value="20" />
+      <p class="hint">Drag the map to pan · scroll to zoom · lines redraw when you stop.</p>
+    </section>
+
+    <section class="style-section">
+      <div class="row between">
+        <label>Style</label>
+        <button id="reset-style" type="button" class="text">reset</button>
+      </div>
+      <div id="style-controls"></div>
+    </section>
+
+    <footer>
+      <button id="export" type="button" class="primary">Download SVG</button>
+      <p class="attrib">Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> (SRTM). Addresses via Nominatim.</p>
+    </footer>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

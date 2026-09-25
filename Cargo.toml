@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/burin-core", "crates/burin", "crates/burin-py"]
-# burin-py is a Python extension: built by maturin (`pip install .`), not cargo.
+members = ["crates/burin-core", "crates/burin", "crates/burin-py", "crates/burin-wasm"]
+# burin-py / burin-wasm are built by maturin / wasm-pack, not a plain cargo build.
 default-members = ["crates/burin-core", "crates/burin"]
 resolver = "2"
 
