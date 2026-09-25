@@ -11,12 +11,34 @@ body,
   overflow: hidden;
 }
 
-/* Keep map controls readable on wireframe */
-.mapboxgl-ctrl-group {
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  border: 1px solid #000 !important;
+/* Hide Mapbox chrome: attribution, logo, leftover controls */
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right,
+.mapboxgl-ctrl-top-left,
+.mapboxgl-ctrl-top-right,
+.mapboxgl-ctrl-attrib-inner,
+a.mapboxgl-ctrl-logo {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
-.mapboxgl-ctrl-attrib a {
-  color: inherit;
+
+/* Burin SVG sits on the viewport; stretch to the map pane */
+.burin-svg-overlay > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Keep map FABs above the home indicator / curved screen edge */
+.safe-fab {
+  bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 1024px) {
+  .safe-fab-lg {
+    bottom: 1rem;
+  }
 }

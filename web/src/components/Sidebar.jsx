@@ -1,20 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { useAtom } from 'jotai'
 import { loadBurin } from '../lib/burin'
-
-const PRIMARY = new Set([
-  'spacing',
-  'spacing_steep',
-  'shade_gain',
-  'flat_level',
-  'lit_floor',
-  'broad_weight',
-  'flow_blur',
-  'jitter',
-  'wobble',
-  'breaks',
-  'azimuth',
-  'stroke',
-])
+import { styleAtom } from '../state'
 
 const RANGES = {
   spacing: [1, 12],
@@ -49,151 +36,247 @@ const RANGES = {
   seed: [0, 100],
 }
 
-function fmt(v) {
-  if (Number.isInteger(v)) return String(v)
-  return String(Math.round(v * 1000) / 1000)
+/** Integer-only parameters. */
+const INT_PARAMS = new Set([
+  'seed',
+  'azimuth',
+  'altitude',
+  'wobble',
+  'wobble_size',
+  'min_len',
+  'flow_blur',
+  'broad_blur',
+])
+
+function isIntParam(name) {
+  return INT_PARAMS.has(name)
+}
+
+function clamp(name, n) {
+  const [lo, hi] = RANGES[name] || [n, n]
+  return Math.min(hi, Math.max(lo, n))
+}
+
+/** Max one decimal for floats; whole numbers for int params. */
+function quantize(name, raw) {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return null
+  const c = clamp(name, n)
+  if (isIntParam(name)) return Math.round(c)
+  return Math.round(c * 10) / 10
+}
+
+function fmt(name, v) {
+  if (isIntParam(name)) return String(Math.round(v))
+  const q = Math.round(v * 10) / 10
+  return Number.isInteger(q) ? String(q) : q.toFixed(1)
+}
+
+function fmtCount(n) {
+  return Number(n).toLocaleString()
+}
+
+/** Stable slider — must live outside Sidebar or drag remounts mid-gesture. */
+function StyleSlider({ p, value, onDrag, onCommit }) {
+  const int = isIntParam(p.name)
+  const [lo, hi] = RANGES[p.name] || [0, Math.max(1, p.default * 2)]
+  const step = int ? 1 : 0.1
+  const [text, setText] = useState(() => fmt(p.name, value))
+  const [editing, setEditing] = useState(false)
+
+  // Keep the input in sync unless the user is typing.
+  useEffect(() => {
+    if (!editing) setText(fmt(p.name, value))
+  }, [value, p.name, editing])
+
+  const commitText = () => {
+    setEditing(false)
+    const q = quantize(p.name, text)
+    if (q == null) {
+      setText(fmt(p.name, value))
+      return
+    }
+    setText(fmt(p.name, q))
+    onCommit(p.name, q)
+  }
+
+  return (
+    <div className="w-full min-w-0">
+      <div className="flex w-full min-w-0 items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-xs">{p.name}</span>
+        <input
+          type="text"
+          inputMode={int ? 'numeric' : 'decimal'}
+          className="input input-xs w-14 shrink-0 text-right font-mono"
+          value={text}
+          onFocus={() => setEditing(true)}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commitText}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              setText(fmt(p.name, value))
+              setEditing(false)
+              e.currentTarget.blur()
+            }
+          }}
+        />
+      </div>
+      <input
+        type="range"
+        className="range range-xs w-full"
+        min={lo}
+        max={hi}
+        step={step}
+        value={value}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onChange={(e) => {
+          const q = quantize(p.name, e.target.value)
+          if (q != null) onDrag(p.name, q)
+        }}
+        onPointerUp={(e) => {
+          const q = quantize(p.name, e.currentTarget.value)
+          if (q != null) onCommit(p.name, q)
+        }}
+        onKeyUp={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+            const q = quantize(p.name, e.currentTarget.value)
+            if (q != null) onCommit(p.name, q)
+          }
+        }}
+      />
+      <p className="mt-0.5 w-full text-[10px] leading-snug wrap-break-word opacity-45">{p.help}</p>
+    </div>
+  )
 }
 
 /**
  * @param {{
- *   setStyle: (s: Record<string, number>) => void,
+ *   open: boolean,
+ *   onClose: () => void,
  *   status: { phase: string, detail?: string },
- *   drawing: { svg: string, lines: number, dashes: number, ms: number } | null,
+ *   drawing: { lines: number, dashes: number, ms: number } | null,
  * }} props
  */
-export default function Sidebar({ setStyle, status, drawing }) {
+export default function Sidebar({ open, onClose, status, drawing }) {
   const [params, setParams] = useState([])
+  const [style, setStyle] = useAtom(styleAtom)
+  /** Local while dragging — style atom updates only on release. */
   const [draft, setDraft] = useState({})
 
   useEffect(() => {
     loadBurin().then((m) => {
       const list = m.style_params()
       setParams(list)
-      const init = {}
-      for (const p of list) init[p.name] = p.default
-      setDraft(init)
-      setStyle(init)
+      const defaults = {}
+      for (const p of list) defaults[p.name] = quantize(p.name, p.default) ?? p.default
+      const merged = { ...defaults }
+      for (const [k, v] of Object.entries(style)) {
+        if (k in defaults && typeof v === 'number' && Number.isFinite(v)) {
+          merged[k] = quantize(k, v) ?? defaults[k]
+        }
+      }
+      setDraft(merged)
+      setStyle(merged)
     })
-  }, [setStyle])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const primary = useMemo(() => params.filter((p) => PRIMARY.has(p.name)), [params])
-  const rest = useMemo(() => params.filter((p) => !PRIMARY.has(p.name)), [params])
+  const onDrag = useCallback((name, value) => {
+    setDraft((d) => ({ ...d, [name]: value }))
+  }, [])
 
-  const commit = (name, value) => {
-    const next = { ...draft, [name]: value }
-    setDraft(next)
-    setStyle(next)
-  }
+  const onCommit = useCallback(
+    (name, value) => {
+      const q = quantize(name, value)
+      if (q == null) return
+      setDraft((d) => {
+        const next = { ...d, [name]: q }
+        setStyle(next)
+        return next
+      })
+    },
+    [setStyle],
+  )
 
   const reset = () => {
     const init = {}
-    for (const p of params) init[p.name] = p.default
+    for (const p of params) init[p.name] = quantize(p.name, p.default) ?? p.default
     setDraft(init)
     setStyle(init)
   }
 
-  const download = () => {
-    if (!drawing?.svg) return
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([drawing.svg], { type: 'image/svg+xml' }))
-    a.download = 'burin.svg'
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
-
-  const Slider = ({ p }) => {
-    const isInt = p.name === 'seed'
-    const [lo, hi] = RANGES[p.name] || [0, Math.max(1, p.default * 2)]
-    const step = isInt ? 1 : (hi - lo) / 200
-    const v = draft[p.name] ?? p.default
-    return (
-      <div className="w-full min-w-0">
-        <div className="flex w-full min-w-0 items-baseline justify-between gap-2">
-          <span className="min-w-0 truncate font-mono text-xs">{p.name}</span>
-          <span className="shrink-0 font-mono text-xs opacity-60">{fmt(v)}</span>
-        </div>
-        <input
-          type="range"
-          className="range range-xs w-full"
-          min={lo}
-          max={hi}
-          step={step}
-          value={v}
-          onChange={(e) => {
-            const n = isInt ? Math.round(+e.target.value) : +e.target.value
-            setDraft((d) => ({ ...d, [p.name]: n }))
-          }}
-          onMouseUp={(e) => commit(p.name, isInt ? Math.round(+e.target.value) : +e.target.value)}
-          onTouchEnd={(e) => {
-            const el = e.target
-            commit(p.name, isInt ? Math.round(+el.value) : +el.value)
-          }}
-        />
-        <p className="mt-0.5 w-full text-xs leading-snug wrap-break-word opacity-50">{p.help}</p>
-      </div>
-    )
-  }
-
   return (
-    <aside className="flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-t border-base-content lg:w-72 lg:border-t-0 lg:border-l">
-      <div className="flex min-w-0 flex-col gap-5 p-4">
-        <header className="min-w-0">
-          <h1 className="font-mono text-xl font-bold tracking-tight">burin</h1>
-          <p className="text-sm opacity-60">pen-and-ink terrain from elevation</p>
+    <aside
+      className={`fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-base-content bg-base-100 transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:max-h-none lg:w-80 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
+        open ? 'translate-y-0' : 'pointer-events-none translate-y-full'
+      }`}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-base-content px-4 py-2 lg:hidden">
+        <span className="font-mono text-sm font-bold">Burin</span>
+        <button
+          type="button"
+          aria-label="Close"
+          className="btn btn-sm btn-square border border-base-content"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto p-4">
+        <header className="flex min-w-0 flex-col gap-3">
+          <div>
+            <h1 className="font-mono text-3xl font-bold tracking-tight">Burin</h1>
+            <p className="mt-1 min-w-0 text-sm leading-snug opacity-70">
+              Pen-and-ink terrain from elevation. Explore on the basemap; when you stop, the view is
+              drawn on top. Move again and the drawing fades so you can navigate.
+            </p>
+          </div>
+
+          <dl className="grid grid-cols-3 gap-2 font-mono">
+            <div>
+              <dt className="text-[10px] tracking-wide uppercase opacity-45">lines</dt>
+              <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.lines) : '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] tracking-wide uppercase opacity-45">dashes</dt>
+              <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.dashes) : '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] tracking-wide uppercase opacity-45">time</dt>
+              <dd className="text-sm tabular-nums">{drawing ? `${drawing.ms} ms` : '—'}</dd>
+            </div>
+          </dl>
+          <p className="truncate font-mono text-[10px] uppercase opacity-45">
+            {status.phase}
+            {status.detail ? ` · ${status.detail}` : ''}
+          </p>
         </header>
 
-        <p className="min-w-0 text-sm leading-snug">
-          <span className="font-mono text-xs uppercase">{status.phase}</span>
-          {status.detail ? (
-            <>
-              <br />
-              <span className="opacity-70">{status.detail}</span>
-            </>
-          ) : null}
-        </p>
-
-        <p className="min-w-0 text-sm leading-snug opacity-70">
-          Explore on the basemap. When you stop, elevation for that view is drawn on top. Move again
-          and the drawing fades so you can navigate.
-        </p>
-
-        <section className="flex min-w-0 flex-col gap-4">
-          <div className="flex items-baseline justify-between gap-2">
+        <section className="flex min-w-0 flex-col gap-4 border-t border-base-content pt-5">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="font-mono text-xs font-bold tracking-wide uppercase">Style</h2>
-            <button type="button" className="btn btn-xs btn-ghost" onClick={reset}>
-              reset
+            <button type="button" className="btn btn-sm border border-base-content" onClick={reset}>
+              Reset
             </button>
           </div>
-          {primary.map((p) => (
-            <Slider key={p.name} p={p} />
+          {params.map((p) => (
+            <StyleSlider
+              key={p.name}
+              p={p}
+              value={draft[p.name] ?? p.default}
+              onDrag={onDrag}
+              onCommit={onCommit}
+            />
           ))}
-          {rest.length > 0 && (
-            <details className="min-w-0">
-              <summary className="cursor-pointer font-mono text-xs opacity-60">
-                more parameters
-              </summary>
-              <div className="mt-3 flex min-w-0 flex-col gap-4">
-                {rest.map((p) => (
-                  <Slider key={p.name} p={p} />
-                ))}
-              </div>
-            </details>
-          )}
-        </section>
-
-        <div className="mt-2 flex min-w-0 flex-col gap-2">
-          <button
-            type="button"
-            className="btn w-full"
-            disabled={!drawing?.svg}
-            onClick={download}
-          >
-            Download SVG
-          </button>
-          <p className="min-w-0 text-xs leading-snug wrap-break-word opacity-50">
+          <p className="min-w-0 text-[10px] leading-snug wrap-break-word opacity-45">
             Elevation from AWS Terrain Tiles. Basemap: Mapbox.
           </p>
-        </div>
+        </section>
       </div>
     </aside>
   )

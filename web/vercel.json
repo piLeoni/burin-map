@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/terrarium/:path*",
+      "destination": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/:path*"
+    }
+  ]
+}

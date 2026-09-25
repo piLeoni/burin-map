@@ -163,7 +163,7 @@ The ones worth touching first:
 | `flat_level` | 0.25 | how much stipple flat ground keeps |
 | `lit_floor` | 0.06 | how many scattered dashes stay on fully lit slopes (0 = pure white) |
 | `broad_weight` | 0.5 | how much the massif-scale shading counts |
-| `flow_blur` | 10 | smoothness of the line curves |
+| `flow_blur` | 6 | smoothness of the line curves |
 | `jitter` | 0.45 | irregularity of the dashes; 0 looks machine-made |
 | `wobble` | 20 | how much lines wander on flat ground, degrees |
 | `breaks` | 0.15 | how often solid shadow lines get a small break |

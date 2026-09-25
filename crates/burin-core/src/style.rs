@@ -49,7 +49,7 @@ style! {
     min_len: f32 = 4.0, "drop lines shorter than this, px";
 
     // Smoothing of the terrain (gaussian sigma, px)
-    flow_blur: f32 = 10.0, "smoothing of the surface lines follow: higher = broader curves";
+    flow_blur: f32 = 6.0, "smoothing of the surface lines follow: higher = broader curves";
     shade_blur: f32 = 1.8, "smoothing for detail shading";
     broad_blur: f32 = 11.5, "smoothing for massif-scale shading";
     broad_weight: f32 = 0.5, "mix of massif-scale shading (0 = detail only, 1 = massif only)";

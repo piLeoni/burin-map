@@ -1,63 +1,83 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useAtom } from 'jotai'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
-import { loadBurin, paintDrawing } from '../lib/burin'
+import { loadBurin } from '../lib/burin'
+import { mapViewAtom } from '../state'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
-const SOURCE = 'burin-overlay'
-const LAYER = 'burin-overlay-layer'
-const SETTLE_MS = 450
-const MAX_EDGE = 1200
+const SETTLE_MS = 90
+const MAX_EDGE = 3072
+
+function setSymbolVisibility(map, visible) {
+  if (!map?.isStyleLoaded()) return
+  const style = map.getStyle()
+  if (!style?.layers) return
+  for (const layer of style.layers) {
+    if (layer.type === 'symbol') {
+      try {
+        map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
+      } catch {
+        /* layer may be gone after a style swap */
+      }
+    }
+  }
+}
+
+/** User gesture only — Mapbox also fires move* while loading tiles. */
+function isUserGesture(e) {
+  return !!(e && e.originalEvent)
+}
 
 /**
  * @param {{
  *   style: Record<string, number>,
  *   onStatus: (s: { phase: string, detail?: string }) => void,
  *   onDrawing: (d: { svg: string, lines: number, dashes: number, ms: number } | null) => void,
+ *   drawing: { svg: string } | null,
  * }} props
  */
-export default function MapView({ style, onStatus, onDrawing }) {
+export default function MapView({ style, onStatus, onDrawing, drawing }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
-  const canvasRef = useRef(null)
   const genRef = useRef(0)
   const movingRef = useRef(false)
+  const readyRef = useRef(false)
+  const skipStyleOnceRef = useRef(true)
   const settleTimer = useRef(0)
   const styleRef = useRef(style)
   styleRef.current = style
+  const convertRef = useRef(async () => {})
+
+  const [, setMapView] = useAtom(mapViewAtom)
+  const mapViewRef = useRef(null)
+  // Read once for initial camera; later updates go through setMapView.
+  if (!mapViewRef.current) {
+    try {
+      const raw = localStorage.getItem('burin.map')
+      mapViewRef.current = raw
+        ? JSON.parse(raw)
+        : { center: [-122.45, 37.75], zoom: 12 }
+    } catch {
+      mapViewRef.current = { center: [-122.45, 37.75], zoom: 12 }
+    }
+  }
 
   const [busy, setBusy] = useState(false)
   const [busyMsg, setBusyMsg] = useState('')
 
-  /** Hide burin so the Mapbox basemap is fully visible. */
-  const showBasemap = useCallback(() => {
-    const map = mapRef.current
-    if (!map?.getLayer(LAYER)) return
-    map.setPaintProperty(LAYER, 'raster-opacity', 0)
-    map.setLayoutProperty(LAYER, 'visibility', 'none')
-  }, [])
-
-  const ensureLayer = useCallback((map, url, coordinates) => {
-    if (map.getSource(SOURCE)) {
-      map.getSource(SOURCE).updateImage({ url, coordinates })
-    } else {
-      map.addSource(SOURCE, { type: 'image', url, coordinates })
-      map.addLayer({
-        id: LAYER,
-        type: 'raster',
-        source: SOURCE,
-        layout: { visibility: 'none' },
-        paint: { 'raster-opacity': 0, 'raster-fade-duration': 0 },
-      })
-    }
-  }, [])
-
   const convert = useCallback(async () => {
     const map = mapRef.current
     if (!map || movingRef.current) return
+    if (map.getContainer().clientWidth < 2 || map.getContainer().clientHeight < 2) {
+      // Layout not ready yet — try again shortly.
+      clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(() => convertRef.current(), 100)
+      return
+    }
+
     const my = ++genRef.current
-    const canvas = canvasRef.current
     const b = map.getBounds()
     const bounds = {
       west: b.getWest(),
@@ -65,20 +85,18 @@ export default function MapView({ style, onStatus, onDrawing }) {
       east: b.getEast(),
       north: b.getNorth(),
     }
-    const coordinates = [
-      [bounds.west, bounds.north],
-      [bounds.east, bounds.north],
-      [bounds.east, bounds.south],
-      [bounds.west, bounds.south],
-    ]
 
-    const size = map.getCanvas()
-    const scale = Math.min(1, MAX_EDGE / Math.max(size.width, size.height))
-    const outW = Math.max(64, Math.round(size.width * scale))
-    const outH = Math.max(64, Math.round(size.height * scale))
+    const el = map.getContainer()
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const cssW = el.clientWidth
+    const cssH = el.clientHeight
+    const scale = Math.min(1, MAX_EDGE / Math.max(cssW * dpr, cssH * dpr))
+    const outW = Math.max(64, Math.round(cssW * dpr * scale))
+    const outH = Math.max(64, Math.round(cssH * dpr * scale))
 
-    showBasemap()
     setBusy(true)
+    setBusyMsg('Computing…')
+    onStatus({ phase: 'working', detail: 'Computing…' })
     const progress = (msg) => {
       setBusyMsg(msg)
       onStatus({ phase: 'working', detail: msg })
@@ -92,20 +110,12 @@ export default function MapView({ style, onStatus, onDrawing }) {
       const dem = await buildDem(bounds, outW, outH, progress)
       if (my !== genRef.current || movingRef.current) return
 
-      progress('Drawing lines…')
-      const result = burin.draw(dem.elev, dem.width, dem.height, dem.pxM, styleRef.current)
+      progress('Computing…')
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
       if (my !== genRef.current || movingRef.current) return
 
-      paintDrawing(canvas, result, styleRef.current)
-      const url = canvas.toDataURL('image/png')
-      ensureLayer(map, url, coordinates)
-
-      requestAnimationFrame(() => {
-        if (my !== genRef.current || movingRef.current) return
-        if (!map.getLayer(LAYER)) return
-        map.setLayoutProperty(LAYER, 'visibility', 'visible')
-        map.setPaintProperty(LAYER, 'raster-opacity', 1)
-      })
+      const result = burin.draw(dem.elev, dem.width, dem.height, dem.pxM, styleRef.current)
+      if (my !== genRef.current || movingRef.current) return
 
       onDrawing({
         svg: result.svg,
@@ -115,39 +125,41 @@ export default function MapView({ style, onStatus, onDrawing }) {
       })
       onStatus({
         phase: 'ready',
-        detail: `${result.lines.toLocaleString()} lines · ${result.dashes.toLocaleString()} dashes · ${Math.round(result.ms)} ms`,
+        detail: dem.fetched ? `Downloaded ${dem.fetched} tiles` : undefined,
       })
     } catch (e) {
       console.error(e)
       onStatus({ phase: 'error', detail: String(e.message || e) })
       onDrawing(null)
-      showBasemap()
     } finally {
       if (my === genRef.current) {
         setBusy(false)
         setBusyMsg('')
       }
     }
-  }, [ensureLayer, onDrawing, onStatus, showBasemap])
+  }, [onDrawing, onStatus])
 
-  const onMoveStart = useCallback(() => {
-    movingRef.current = true
-    clearTimeout(settleTimer.current)
-    genRef.current += 1
-    setBusy(false)
-    setBusyMsg('')
-    showBasemap()
-    onStatus({ phase: 'exploring', detail: 'Mapbox · move freely' })
-    onDrawing(null)
-  }, [showBasemap, onDrawing, onStatus])
+  convertRef.current = convert
 
-  const onMoveEnd = useCallback(() => {
-    movingRef.current = false
-    clearTimeout(settleTimer.current)
-    settleTimer.current = setTimeout(() => {
-      if (!movingRef.current) convert()
-    }, SETTLE_MS)
-  }, [convert])
+  const persistView = useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+    const c = map.getCenter()
+    setMapView({
+      center: [c.lng, c.lat],
+      zoom: map.getZoom(),
+    })
+  }, [setMapView])
+
+  const scheduleConvert = useCallback(
+    (ms = SETTLE_MS) => {
+      clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(() => {
+        if (!movingRef.current) convertRef.current()
+      }, ms)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!MAPBOX_TOKEN) {
@@ -158,42 +170,98 @@ export default function MapView({ style, onStatus, onDrawing }) {
       return
     }
 
+    const saved = mapViewRef.current
     mapboxgl.accessToken = MAPBOX_TOKEN
+    readyRef.current = false
+    skipStyleOnceRef.current = true
+    movingRef.current = false
+
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/light-v11',
-      center: [-122.45, 37.75],
-      zoom: 12,
-      projection: 'globe',
-      attributionControl: true,
+      center: saved.center,
+      zoom: saved.zoom,
+      minZoom: 2,
+      projection: 'mercator',
+      pitch: 0,
+      maxPitch: 0,
+      dragRotate: false,
+      pitchWithRotate: false,
+      renderWorldCopies: false,
+      attributionControl: false,
     })
-    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-left')
-    map.addControl(new mapboxgl.ScaleControl({ maxWidth: 120 }), 'bottom-left')
     mapRef.current = map
 
-    map.on('load', () => {
-      onStatus({ phase: 'exploring', detail: 'Mapbox ready' })
-      onMoveEnd()
+    const onMoveStart = (e) => {
+      if (!readyRef.current || !isUserGesture(e)) return
+      movingRef.current = true
+      clearTimeout(settleTimer.current)
+      genRef.current += 1
+      setBusy(false)
+      setBusyMsg('')
+      onDrawing(null)
+      onStatus({ phase: 'exploring', detail: 'Mapbox · move freely' })
+    }
+
+    const onMoveEnd = (e) => {
+      if (!readyRef.current) return
+      // After a user gesture, always settle; also accept moveend without originalEvent
+      // that follows a user movestart (movingRef still true).
+      if (!isUserGesture(e) && !movingRef.current) return
+      movingRef.current = false
+      persistView()
+      scheduleConvert()
+    }
+
+    map.on('style.load', () => {
+      setSymbolVisibility(map, false)
     })
+
+    map.on('load', () => {
+      setSymbolVisibility(map, false)
+      map.resize()
+      readyRef.current = true
+      movingRef.current = false
+      onStatus({ phase: 'working', detail: 'Computing…' })
+      // Draw immediately — don't wait for 'idle' (tiles can keep it deferred).
+      convertRef.current()
+    })
+
     map.on('movestart', onMoveStart)
     map.on('moveend', onMoveEnd)
-    map.on('pitchstart', onMoveStart)
-    map.on('rotatestart', onMoveStart)
+    map.on('zoomstart', onMoveStart)
+    map.on('zoomend', onMoveEnd)
 
     return () => {
       clearTimeout(settleTimer.current)
       map.remove()
       mapRef.current = null
+      readyRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    if (!mapRef.current || movingRef.current) return
-    clearTimeout(settleTimer.current)
-    showBasemap()
-    settleTimer.current = setTimeout(() => convert(), 200)
-  }, [style, convert, showBasemap])
+    if (!readyRef.current || !mapRef.current || movingRef.current) return
+    // Skip the Sidebar's initial style hydrate so it doesn't cancel the first draw.
+    if (skipStyleOnceRef.current) {
+      skipStyleOnceRef.current = false
+      styleRef.current = style
+      return
+    }
+    styleRef.current = style
+    onDrawing(null)
+    scheduleConvert(120)
+  }, [style, scheduleConvert, onDrawing])
+
+  const download = () => {
+    if (!drawing?.svg) return
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([drawing.svg], { type: 'image/svg+xml' }))
+    a.download = 'burin.svg'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   if (!MAPBOX_TOKEN) {
     return (
@@ -219,16 +287,33 @@ export default function MapView({ style, onStatus, onDrawing }) {
   return (
     <div className="relative h-full w-full min-w-0">
       <div ref={containerRef} className="h-full w-full" />
-      <canvas ref={canvasRef} className="hidden" />
+
+      {drawing?.svg && !busy && (
+        <div
+          className="burin-svg-overlay pointer-events-none absolute inset-0 z-[1] bg-white"
+          dangerouslySetInnerHTML={{ __html: drawing.svg }}
+        />
+      )}
 
       {busy && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3 border border-base-content bg-base-100 px-6 py-5">
+          <div className="flex w-56 flex-col items-center gap-3 border border-base-content bg-base-100 px-6 py-5">
             <span className="loading loading-spinner loading-lg" />
-            <p className="font-mono text-sm">{busyMsg || 'Converting…'}</p>
+            <p className="w-full truncate text-center font-mono text-sm">
+              {busyMsg || 'Computing…'}
+            </p>
           </div>
         </div>
       )}
+
+      <button
+        type="button"
+        className="btn btn-sm safe-fab safe-fab-lg absolute left-4 z-20 border border-base-content bg-base-100"
+        disabled={!drawing?.svg}
+        onClick={download}
+      >
+        Download SVG
+      </button>
     </div>
   )
 }
