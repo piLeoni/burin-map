@@ -176,6 +176,26 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Rust
+
+The same pipeline is ported to Rust, about 15× faster (the bay at 2400 px:
+under 1 s of drawing against ~15 s), with the same command-line options and
+the same tile cache:
+
+```bash
+cargo run --release -- --at "Twin Peaks, San Francisco" --size 20 -o sf.png --svg
+cargo install --path crates/burin   # puts `burin` in ~/.cargo/bin
+```
+
+```text
+crates/burin-core/  drawing engine: pure computation, no I/O (also for WASM)
+crates/burin/       SRTM download and cache, transverse Mercator, geocoding,
+                    PNG, and the `burin` command
+```
+
+The plan is for the Python package to become a thin wrapper around it, and
+for a WASM build to draw live in the browser.
+
 ## Licence
 
 None chosen yet: all rights reserved for now.

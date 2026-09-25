@@ -1,0 +1,19 @@
+[package]
+name = "burin"
+version = "0.1.0"
+edition = "2021"
+description = "Pen-and-ink terrain maps from SRTM elevation data"
+publish = false
+
+[[bin]]
+name = "burin"
+path = "src/main.rs"
+
+[dependencies]
+burin-core = { path = "../burin-core" }
+clap = { version = "4", features = ["string"] }
+flate2 = "1"
+png = "0.17"
+serde_json = "1"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+ureq = { version = "2", features = ["json"] }
