@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the burin web demo and proxy terrarium tiles (S3 has no ACAO on GET)."""
+"""Serve the burin-map web demo and proxy terrarium tiles (S3 has no ACAO on GET)."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         url = f"{UPSTREAM}/{z}/{x}/{y}.png"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "burin-web"})
+            req = urllib.request.Request(url, headers={"User-Agent": "burin-map-web"})
             with urllib.request.urlopen(req, timeout=60) as r:
                 data = r.read()
                 ctype = r.headers.get("Content-Type", "image/png")
@@ -63,5 +63,5 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"burin → http://127.0.0.1:{PORT}")
+        print(f"burin-map → http://127.0.0.1:{PORT}")
         httpd.serve_forever()

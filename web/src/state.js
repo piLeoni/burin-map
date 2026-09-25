@@ -2,20 +2,20 @@ import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
 
 /** Map camera — persisted in localStorage. */
-export const mapViewAtom = atomWithStorage('burin.map', {
+export const mapViewAtom = atomWithStorage('burin-map.map', {
   center: /** @type {[number, number]} */ ([-122.45, 37.75]),
   zoom: 12,
 })
 
 /** Style slider values — persisted in localStorage. */
-export const styleAtom = atomWithStorage('burin.style', /** @type {Record<string, number>} */ ({}))
+export const styleAtom = atomWithStorage('burin-map.style', /** @type {Record<string, number>} */ ({}))
 
 /** How long a successful unlock stays valid (30 days). */
 export const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 /** Password unlock — persisted until `expiresAt`. */
 export const unlockAtom = atomWithStorage(
-  'burin.unlock',
+  'burin-map.unlock',
   /** @type {{ expiresAt: number } | null} */ (null),
 )
 

@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "burin-maps"
+name = "burin-map"
 dynamic = ["version"]
 description = "Pen-and-ink terrain maps from real elevation data"
 readme = "README.md"
@@ -21,12 +21,12 @@ dependencies = ["numpy>=1.26"]
 dev = ["pytest>=8"]
 
 [project.scripts]
-burin = "burin.cli:main"
+burin-map = "burin_map.cli:main"
 
 [tool.maturin]
-manifest-path = "crates/burin-py/Cargo.toml"
+manifest-path = "crates/burin-map-py/Cargo.toml"
 python-source = "python"
-module-name = "burin._burin"
+module-name = "burin_map._burin"
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

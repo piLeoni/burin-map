@@ -1,4 +1,4 @@
-/** Load the burin WASM module once and paint drawings to a canvas. */
+/** Load the burin-map WASM module once and paint drawings to a canvas. */
 
 let ready = null
 
@@ -6,7 +6,7 @@ export async function loadBurin() {
   if (!ready) {
     // Built by wasm-pack into public/pkg. Use Function so Vite does not try
     // to bundle / analyse the file (it rejects JS imports from /public).
-    ready = Function('return import("/pkg/burin_wasm.js")')().then(async (m) => {
+    ready = Function('return import("/pkg/burin_map_wasm.js")')().then(async (m) => {
       await m.default()
       return m
     })

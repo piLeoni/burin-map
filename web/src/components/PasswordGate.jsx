@@ -33,7 +33,7 @@ export default function PasswordGate({ children }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center bg-base-100 p-6">
       <form onSubmit={submit} className="flex w-full max-w-xs flex-col gap-3 font-mono">
-        <h1 className="text-2xl font-bold tracking-tight">Burin</h1>
+        <h1 className="text-2xl font-bold tracking-tight">BurinMap</h1>
         <input
           type="password"
           autoFocus

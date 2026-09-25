@@ -6,8 +6,8 @@ import dataclasses
 import numpy as np
 import pytest
 
-import burin
-from burin import Style, draw_elevation
+import burin_map
+from burin_map import Style, draw_elevation
 
 PX_M = 200.0
 
@@ -29,7 +29,7 @@ def test_style_mirrors_the_engine():
     st = Style()
     assert st.spacing == pytest.approx(4.8) and st.seed == 1
     assert dataclasses.replace(st, spacing=6).spacing == 6
-    assert "spacing" in burin.style_help()
+    assert "spacing" in burin_map.style_help()
     with pytest.raises(TypeError):
         Style(nope=1)
 
@@ -56,7 +56,7 @@ def test_style_changes_the_drawing(island):
 
 
 def test_fields(island):
-    f = burin.fields(island, PX_M)
+    f = burin_map.fields(island, PX_M)
     assert f.tone.shape == island.shape
     # Light from the north-west: south-east flank in shadow, north-west flank lit.
     assert f.tone[190, 190] > f.tone[110, 110]
@@ -79,12 +79,12 @@ def test_svg_physical_size(drawing):
 
 
 def test_coordinates_and_bounds():
-    lat, lon, _ = burin.locate("37.7544, -122.4477")
+    lat, lon, _ = burin_map.locate("37.7544, -122.4477")
     assert (lat, lon) == (37.7544, -122.4477)
-    w, s, e, n = burin.bounds_around(lat, lon, 20, 10)
+    w, s, e, n = burin_map.bounds_around(lat, lon, 20, 10)
     assert (n - s) * 111.32 == pytest.approx(10)
     assert (e - w) * 111.32 * np.cos(np.radians(lat)) == pytest.approx(20)
-    pw, ph = burin.projected_size((w, s, e, n))
+    pw, ph = burin_map.projected_size((w, s, e, n))
     assert pw == pytest.approx(20_000, rel=0.01) and ph == pytest.approx(10_000, rel=0.01)
 
 

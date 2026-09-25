@@ -1,19 +1,21 @@
-# burin
+# burin-map
 
 Pen-and-ink terrain maps from real elevation data: thousands of short black
 strokes that follow the lie of the land, dense and solid on shadowed slopes,
 sparse stipple on flat ground, a few scattered marks on lit slopes. Up close
 it is line drawing; from afar it reads as hillshading.
 
-The engine is **Rust** (`burin-core`), with a **Python wrapper** for the same
-API, a command-line tool, and a browser build (WASM). Nothing is on crates.io
-or PyPI yet; publishing a Cargo crate and a `pip` package (likely
-`burin-maps`) is on the roadmap. Until then, install from this repo.
+**burin-map** is the project: Rust engine, CLI, Python API (`import burin_map`),
+and the interactive site **BurinMap** at [burin-map.vercel.app](https://burin-map.vercel.app)
+(password `folder`) — same engine in the browser, not a different product.
 
-Give it a place (a name, an address, coordinates or a bounding box) and it
-downloads the elevation, draws, and writes a PNG and an SVG ready for a pen
-plotter. The same engine runs in the browser: try the live map at
-[burin-map.vercel.app](https://burin-map.vercel.app) (password `folder`).
+```bash
+cargo install burin-map
+pip install burin-map          # or: conda install -c conda-forge burin-map
+```
+
+Until those land on crates.io / PyPI / conda-forge, install from this repo
+(see [Rust](#rust) and [Python](#python)).
 
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
@@ -24,92 +26,106 @@ centuries.*
   <em>Bay Area</em>
 </p>
 
+Same place, same extent (Twin Peaks, 8 km), two styles:
+
 <p align="center">
-  <img src="examples/twin-peaks.png" width="360" alt="Twin Peaks — denser, more wobble" />
+  <img src="examples/twin-peaks-freehand.png" width="360" alt="Twin Peaks — freehand" />
   &nbsp;
-  <img src="examples/mount-tam.png" width="360" alt="Mount Tamalpais — broader, quieter lines" />
-  <br />
-  <em>Twin Peaks · Mount Tamalpais</em>
-  <br />
-  <sub>Closer views with different style settings</sub>
+  <img src="examples/twin-peaks-mechanical.png" width="360" alt="Twin Peaks — mechanical" />
 </p>
 
-## Install
+| | Freehand | Mechanical |
+| --- | --- | --- |
+| `spacing` | 6.5 | 10 |
+| `flow_blur` | 2.5 | 20 |
+| `wobble` | 55 | 0 |
+| `jitter` | 0.75 | 0 |
+| `breaks` | 0.4 | 0 |
+| `shade_gain` | 5 | 2.8 |
+| `lit_floor` | 0.18 | 0 |
+| `flat_level` | 0.4 | 0.12 |
+| `stroke` | 0.95 | 1.5 |
 
-From a clone you need a [Rust toolchain](https://rustup.rs). For the web map
-you also need [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
-(`cargo install wasm-pack`).
-
-Command line:
+## Rust
 
 ```bash
-cargo install --path crates/burin      # puts `burin` in ~/.cargo/bin
+cargo install burin-map
+# library: cargo add burin-map   /   cargo add burin-map-core
 ```
 
-Python (compiles the Rust engine via maturin; needs Rust for now):
+Until crates.io has it, from this repo (needs a [Rust toolchain](https://rustup.rs)):
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install .                          # ~1 min first build
+cargo install --path crates/burin-map      # → ~/.cargo/bin/burin-map
 ```
 
-The import and the CLI entry point are both `burin`. When published, the
-plan is `cargo install burin` (or depend on `burin` / `burin-core` on
-crates.io) and `pip install burin-maps` on PyPI (`burin` is taken there),
-with wheels so Python users do not need a Rust toolchain. Python ≥ 3.10;
-numpy is the only runtime dependency of the wrapper.
-
-Elevation is downloaded on demand (see [Data](#data)); addresses are looked
-up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
-per run, no key).
-
-## Use
-
-Command line:
-
 ```bash
-burin --place san-francisco -o sf.png --svg
-burin --at "Twin Peaks, San Francisco" --size 14km -o tp.png   # address, 14 km square
-burin --at "37.8716,-122.2727" --size 12km 8km -o berkeley.png # lat,lon; width height
-burin --at "Mount Tamalpais" --size 8mi -o tam.png            # m, km or mi
-burin --bounds -122.75 37.45 -122.05 38.05 -o bay.png          # west south east north
-burin --help                                                   # every option
+burin-map --place san-francisco -o bay.png --svg
+burin-map --at "Twin Peaks, San Francisco" --size 14km -o tp.png
+burin-map --at "37.8716,-122.2727" --size 12km 8km -o berkeley.png
+burin-map --bounds -122.75 37.45 -122.05 38.05 -o bay.png
+burin-map --help
 ```
 
 The image is 2400 px wide unless you give `--width` or a page (see
 [Plotter and print](#plotter-and-print)).
 
-Python:
-
-```python
-import burin
-
-lat, lon, name = burin.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
-area = burin.bounds_around(lat, lon, 14, 14)                 # km
-
-d = burin.draw(area)                     # 2400 px wide; width=... to change
-d.save_png("tp.png")
-d.save_svg("tp.svg")
-d.paths                                  # the dashes: list of N×2 numpy arrays, px
-
-# Tweak the style (print(burin.style_help()) lists every parameter)
-d = burin.draw(area, burin.Style(shade_gain=4, wobble=30))
-
-# For paper: sized in mm, scale follows from page and pen
-d = burin.draw(area, page_width_mm=297, page_height_mm=420, pen_mm=0.3, log=print)
-
-# Any elevation grid you already have (metres, square pixels, row 0 = north)
-d = burin.draw_elevation(elev, px_m=30.0)
-```
-
-Rust:
+As a library:
 
 ```rust
-let (lat, lon, _) = burin::locate("Twin Peaks, San Francisco")?;
-let area = burin::bounds_around(lat, lon, 14.0, 14.0);
-let map = burin::draw(&area, &burin::Style::default(), &burin::Page::default(), |m| println!("{m}"))?;
+let (lat, lon, _) = burin_map::locate("Twin Peaks, San Francisco")?;
+let area = burin_map::bounds_around(lat, lon, 14.0, 14.0);
+let map = burin_map::draw(&area, &burin_map::Style::default(), &burin_map::Page::default(), |m| println!("{m}"))?;
 std::fs::write("tp.svg", map.to_svg())?;
 ```
+
+## Python
+
+Same project. The package name is `burin-map`; the module you import is
+`burin_map`. Python ≥ 3.10; numpy is the only runtime dependency of the
+wrapper.
+
+```bash
+pip install burin-map
+# or:  conda install -c conda-forge burin-map
+```
+
+That installs `import burin_map` and the `burin-map` command. Prebuilt wheels
+cover the usual platforms; from source you need a
+[Rust toolchain](https://rustup.rs).
+
+Until the package is on PyPI / conda-forge, install from this repo:
+
+```bash
+pip install "git+https://github.com/piLeoni/burin-map.git"
+# or from a local clone:  pip install .    # editable: pip install -e ".[dev]"
+```
+
+```python
+import burin_map
+
+lat, lon, name = burin_map.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
+area = burin_map.bounds_around(lat, lon, 14, 14)                 # km
+
+d = burin_map.draw(area)                     # 2400 px wide; width=... to change
+d.save_png("tp.png")
+d.save_svg("tp.svg")
+d.paths                                  # dashes: list of N×2 numpy arrays, px
+
+# Tweak the style (print(burin_map.style_help()) lists every parameter)
+d = burin_map.draw(area, burin_map.Style(shade_gain=4, wobble=30))
+
+# For paper: sized in mm, scale follows from page and pen
+d = burin_map.draw(area, page_width_mm=297, page_height_mm=420, pen_mm=0.3, log=print)
+
+# Any elevation grid you already have (metres, square pixels, row 0 = north)
+d = burin_map.draw_elevation(elev, px_m=30.0)
+```
+
+Elevation is downloaded on demand (see [Data](#data)); addresses are looked
+up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
+per run, no key).
+
 
 ## How it works
 
@@ -142,7 +158,7 @@ any scale: a whole region or a single city.
 ## Plotter and print
 
 ```bash
-burin --place san-francisco --page-width 267 --page-height 390 --pen 0.3 -o bay.png --svg
+burin-map --place san-francisco --page-width 267 --page-height 390 --pen 0.3 -o bay.png --svg
 ```
 
 The pen takes the place of the stroke width: every proportion of the style
@@ -156,11 +172,11 @@ follows.
 
 ```bash
 # ground + paper → scale (the area takes the page's proportions)
-burin --at "Mont Blanc" --size 40km --page-width 267 --page-height 390 --svg
+burin-map --at "Mont Blanc" --size 40km --page-width 267 --page-height 390 --svg
 # paper + scale → ground: 297 mm at 1:50,000 is 14.85 km
-burin --at "Zermatt" --page-width 297 --page-height 420 --scale 1:50000 --svg
+burin-map --at "Zermatt" --page-width 297 --page-height 420 --scale 1:50000 --svg
 # ground + scale → paper
-burin --place bern --scale 1:100000 --svg
+burin-map --place bern --scale 1:100000 --svg
 ```
 
 Giving all three is an error, since they can't all hold at once.
@@ -194,16 +210,16 @@ The ones worth touching first:
 | `stroke` | 1.2 | stroke width, px |
 | `seed` | 1 | change it for a different drawing of the same place |
 
-`burin --help` (or `print(burin.style_help())` in Python) lists all of
+`burin-map --help` (or `print(burin_map.style_help())` in Python) lists all of
 them with a one-line description each. They are declared once, in
-`crates/burin-core/src/style.rs`, and the command line and Python pick them
+`crates/burin-map-core/src/style.rs`, and the command line and Python pick them
 up from there.
 
 ## Data
 
 Elevation is SRTM 1 arc-second (≈30 m, 60°S–60°N), fetched from the
 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) open
-dataset and cached in `~/.cache/burin` (override with `BURIN_CACHE`).
+dataset and cached in `~/.cache/burin-map` (override with `BURIN_MAP_CACHE`).
 SRTM is courtesy of NASA/USGS; see the dataset's
 [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md).
 
@@ -217,27 +233,27 @@ Limits worth knowing:
 
 ## Architecture
 
-Everything that turns elevation into strokes lives in **`burin-core`**: a
+Everything that turns elevation into strokes lives in **`burin-map-core`**: a
 dependency-free Rust crate (fields, streamlines, dashes, style parameters).
 That crate is the single source of truth. Three thin shells sit around it:
 
 | Shell | Crate / folder | Role |
 | --- | --- | --- |
-| CLI + I/O | `crates/burin` | SRTM download, transverse Mercator, geocoding, PNG/SVG, `burin` command |
-| Python | `crates/burin-py` + `python/burin` | PyO3 bindings; the importable `burin` package |
-| Web | `crates/burin-wasm` + `web/` | WASM bindings; React + Mapbox demo that draws the current view |
+| CLI + I/O | `crates/burin-map` | SRTM download, transverse Mercator, geocoding, PNG/SVG, `burin-map` command |
+| Python | `crates/burin-map-py` + `python/burin_map` | PyO3 bindings; the importable `burin_map` package |
+| Web | `crates/burin-map-wasm` + `web/` | WASM bindings; React + Mapbox demo that draws the current view |
 
 ```text
   elevation / place
          │
          ▼
-   ┌─────────────┐     style params (style.rs)
-   │  burin-core │◄──────────────────────────
-   └──────┬──────┘
-          │ Drawing { paths, svg, … }
-    ┌─────┼──────────────┐
-    ▼     ▼              ▼
-   CLI   Python         WASM → browser map
+   ┌─────────────────┐     style params (style.rs)
+   │  burin-map-core │◄──────────────────────────
+   └────────┬────────┘
+            │ Drawing { paths, svg, … }
+      ┌─────┼──────────────┐
+      ▼     ▼              ▼
+     CLI   Python         WASM → browser map
 ```
 
 The browser map does not reimplement the look: it stitches Terrarium DEM
@@ -250,22 +266,22 @@ gate keeps casual traffic out of the public demo.
 One repository, one engine, several front ends:
 
 ```text
-crates/burin-core/      the drawing engine: pure computation, no I/O
+crates/burin-map-core/  the drawing engine: pure computation, no I/O
   style.rs              every parameter, with its description
   fields.rs             direction field, tone, line spacing
   streamlines.rs        evenly spaced line placement
   dashes.rs             lines → dashes following the tone
   order.rs              plotting order
   grid.rs, rng.rs       blur, gradient, percentiles; deterministic RNG
-crates/burin/           Rust library + `burin` command
+crates/burin-map/       Rust library + `burin-map` command
   dem.rs                SRTM download, cache, reprojection
   tmerc.rs              transverse Mercator
   geo.rs                addresses, coordinates, lengths, scales
   raster.rs             PNG
   cli.rs                command line (also run by the Python package)
-crates/burin-py/        Python bindings (PyO3), built by maturin
-crates/burin-wasm/      WebAssembly bindings (wasm-bindgen)
-python/burin/           the Python package: a thin layer over the bindings
+crates/burin-map-py/    Python bindings (PyO3), built by maturin
+crates/burin-map-wasm/  WebAssembly bindings (wasm-bindgen)
+python/burin_map/       the Python package: a thin layer over the bindings
 python/tests/           Python API tests
 web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
@@ -277,22 +293,53 @@ examples/               PNG gallery for the README
 Each module opens with a comment explaining its step. The engine has no
 dependencies at all, so the same code builds for the browser.
 
-## Web map
+## WebAssembly
+
+The same drawing engine runs in the browser via `burin-map-wasm`. Build it
+with [wasm-pack](https://rustwasm.github.io/wasm-pack/):
+
+```bash
+cd crates/burin-map-wasm
+wasm-pack build --target web --release --out-dir ../../web/pkg
+cp -R ../../web/pkg ../../web/public/pkg   # Vite serves static files from public/
+```
+
+That produces `burin_map_wasm.js` + `.wasm`. From a page (or the demo in
+`web/`):
+
+```js
+import init, { draw, style_params } from "./pkg/burin_map_wasm.js";
+await init();
+
+// elev: Float32Array of height in metres, row 0 = north
+const result = draw(elev, width, height, pxM /* metres per pixel */, {
+  spacing: 4.8,
+  wobble: 20,
+});
+result.paths();   // packed Float32Array for canvas stroking
+result.svg();     // SVG document string
+```
+
+You still need elevation yourself (the web demo stitches Terrarium DEM tiles
+for the map viewport). Style knobs match the CLI / Python API; call
+`style_params()` for the full list.
+
+## Web map (BurinMap)
 
 Live demo: **[burin-map.vercel.app](https://burin-map.vercel.app)** (password
 `folder`). It is a PWA you can add to a phone home screen.
 
-React + DaisyUI (wireframe) + Mapbox. Explore the basemap freely; when you
-stop, elevation tiles for that view are fetched, drawn in WASM, and shown as
-an overlay. Moving again clears the overlay so you can navigate, then redraws
-when you settle. On mobile the map is full-screen; **Controls** opens the
-style panel.
+React + DaisyUI (wireframe) + Mapbox + the WASM module above. Explore the
+basemap freely; when you stop, elevation tiles for that view are fetched,
+drawn in WASM, and shown as an overlay. Moving again clears the overlay so
+you can navigate, then redraws when you settle. On mobile the map is
+full-screen; **Controls** opens the style panel.
 
 ```bash
 cd web && npm install
 cp .env.example .env.local
 # edit .env.local: VITE_MAPBOX_TOKEN=pk.…  (from https://account.mapbox.com/access-tokens/)
-./serve.sh                   # builds WASM if needed, then `npm run dev`
+./serve.sh                   # builds WASM, then `npm run dev`
 # → http://127.0.0.1:8765
 ```
 

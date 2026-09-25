@@ -55,7 +55,8 @@ export default function MapView({ style, onStatus, onDrawing, drawing }) {
   // Read once for initial camera; later updates go through setMapView.
   if (!mapViewRef.current) {
     try {
-      const raw = localStorage.getItem('burin.map')
+      const raw =
+        localStorage.getItem('burin-map.map') ?? localStorage.getItem('burin.map')
       mapViewRef.current = raw
         ? JSON.parse(raw)
         : { center: [-122.45, 37.75], zoom: 12 }
@@ -258,7 +259,7 @@ export default function MapView({ style, onStatus, onDrawing, drawing }) {
     if (!drawing?.svg) return
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([drawing.svg], { type: 'image/svg+xml' }))
-    a.download = 'burin.svg'
+    a.download = 'BurinMap.svg'
     a.click()
     URL.revokeObjectURL(a.href)
   }

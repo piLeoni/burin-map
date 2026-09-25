@@ -216,7 +216,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
       }`}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-base-content px-4 py-2 lg:hidden">
-        <span className="font-mono text-sm font-bold">Burin</span>
+        <span className="font-mono text-sm font-bold">BurinMap</span>
         <button
           type="button"
           aria-label="Close"
@@ -230,7 +230,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto p-4">
         <header className="flex min-w-0 flex-col gap-3">
           <div>
-            <h1 className="font-mono text-3xl font-bold tracking-tight">Burin</h1>
+            <h1 className="font-mono text-3xl font-bold tracking-tight">BurinMap</h1>
             <p className="mt-1 min-w-0 text-sm leading-snug opacity-70">
               Pen-and-ink terrain from elevation. Explore on the basemap; when you stop, the view is
               drawn on top. Move again and the drawing fades so you can navigate.

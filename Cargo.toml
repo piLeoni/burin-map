@@ -1,7 +1,7 @@
 [workspace]
-members = ["crates/burin-core", "crates/burin", "crates/burin-py", "crates/burin-wasm"]
-# burin-py / burin-wasm are built by maturin / wasm-pack, not a plain cargo build.
-default-members = ["crates/burin-core", "crates/burin"]
+members = ["crates/burin-map-core", "crates/burin-map", "crates/burin-map-py", "crates/burin-map-wasm"]
+# burin-map-py / burin-map-wasm are built by maturin / wasm-pack, not a plain cargo build.
+default-members = ["crates/burin-map-core", "crates/burin-map"]
 resolver = "2"
 
 [profile.release]

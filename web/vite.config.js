@@ -11,8 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
-        name: 'Burin',
-        short_name: 'Burin',
+        name: 'BurinMap',
+        short_name: 'BurinMap',
         description: 'Pen-and-ink terrain from elevation',
         theme_color: '#ffffff',
         background_color: '#ffffff',
