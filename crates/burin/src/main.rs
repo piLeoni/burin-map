@@ -4,7 +4,8 @@ fn main() -> ExitCode {
     match burin::cli::run(std::env::args_os()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("burin: {e}");
+            let red = anstyle::Style::new().bold().fg_color(Some(anstyle::AnsiColor::Red.into()));
+            anstream::eprintln!("\n{red}error{red:#} {e}");
             ExitCode::FAILURE
         }
     }

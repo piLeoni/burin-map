@@ -4,12 +4,15 @@
 //! Ground size, paper size and scale are tied together: give any two and
 //! the third follows (the log always reports the resulting scale).
 
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 use crate::geo::{parse_length_km, parse_scale};
-use crate::{bounds_around, dem::projected_size, draw, locate, Bounds, Error, Page, Style};
+use crate::progress::latlon;
+use crate::{bounds_around, dem::projected_size, draw, locate, Bounds, Error, Page, Progress, Style, TileSource};
 
 const PLACES: &[(&str, Bounds)] = &[
     ("bern", [7.10, 46.70, 7.80, 47.20]),
@@ -66,8 +69,9 @@ pub fn command() -> Command {
     cmd
 }
 
-/// Area to draw and page to draw it on, from the where / size / page / scale options.
-fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page), Error> {
+/// Area to draw, page to draw it on and a name for the area, from the
+/// where / size / page / scale options.
+fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page, String), Error> {
     let mut page = Page {
         width: *m.get_one("width").unwrap(),
         page_width_mm: m.get_one("page-width").copied(),
@@ -91,14 +95,15 @@ fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page), Error> {
         if size.is_some() {
             return Err(Error::Input("--size only applies with --at".into()));
         }
-        let bounds = match m.get_many::<f64>("bounds") {
+        let (bounds, label) = match m.get_many::<f64>("bounds") {
             Some(b) => {
                 let b: Vec<f64> = b.copied().collect();
-                [b[0], b[1], b[2], b[3]]
+                ([b[0], b[1], b[2], b[3]], format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])))
             }
             None => {
                 let name = m.get_one::<String>("place").unwrap();
-                PLACES.iter().find(|p| p.0 == name).unwrap().1
+                let title = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
+                (PLACES.iter().find(|p| p.0 == name).unwrap().1, title)
             }
         };
         if let Some(n) = scale {
@@ -108,7 +113,7 @@ fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page), Error> {
             }
             page.page_width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
         }
-        return Ok((bounds, page));
+        return Ok((bounds, page, label));
     };
 
     let (w_km, h_km) = match (size, scale, page.page_width_mm) {
@@ -123,16 +128,102 @@ fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page), Error> {
         (None, None, _) => (30.0, 30.0 * page_aspect.unwrap_or(1.0)),
     };
     let (lat, lon, label) = locate(q)?;
-    println!("{label}\n  {} × {} km", round2(w_km), round2(h_km));
-    let bounds = bounds_around(lat, lon, w_km, h_km);
+    // Degrees per km is approximate; correct against the projection so the
+    // area (and any scale derived from it) comes out as asked.
+    let mut bounds = bounds_around(lat, lon, w_km, h_km);
+    for _ in 0..2 {
+        let (pw, ph) = projected_size(&bounds);
+        let (w0, s0, e0, n0) = (bounds[0], bounds[1], bounds[2], bounds[3]);
+        let (fx, fy) = (w_km * 1000.0 / pw, h_km * 1000.0 / ph);
+        let (cx, cy, hx, hy) = ((w0 + e0) / 2.0, (s0 + n0) / 2.0, (e0 - w0) / 2.0 * fx, (n0 - s0) / 2.0 * fy);
+        bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
+    }
     if let (Some(n), None) = (scale, page.page_width_mm) {
         page.page_width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
     }
-    Ok((bounds, page))
+    Ok((bounds, page, label))
 }
 
-fn round2(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
+/// Coloured, aligned progress on stdout. Colour is dropped automatically
+/// when stdout isn't a terminal or NO_COLOR is set.
+struct Report {
+    live: bool,
+}
+
+const LABEL: Style_ = Style_::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+const DONE: Style_ = Style_::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
+const DIM: Style_ = Style_::new().dimmed();
+const BOLD: Style_ = Style_::new().bold();
+use anstyle::Style as Style_;
+
+impl Report {
+    fn new() -> Self {
+        Report { live: std::io::stdout().is_terminal() }
+    }
+
+    /// One step: label column, message, optional time on the right.
+    fn step(&self, label: &str, msg: &str, secs: Option<f64>) {
+        let clear = if self.live { "\r\x1b[2K" } else { "" };
+        let time = secs.map(|s| format!("{DIM}{s:>5.1} s{DIM:#}")).unwrap_or_default();
+        let mut out = anstream::stdout();
+        let _ = writeln!(out, "{clear}  {LABEL}{label:<10}{LABEL:#} {msg:<62}{time}");
+    }
+
+    /// Continuation line under the previous step, dimmed.
+    fn detail(&self, msg: &str) {
+        let _ = writeln!(anstream::stdout(), "  {:<10} {DIM}{msg}{DIM:#}", "");
+    }
+
+    /// Overwritten in place on a terminal, skipped otherwise.
+    fn transient(&self, label: &str, msg: &str) {
+        if self.live {
+            let mut out = anstream::stdout();
+            let _ = write!(out, "\r\x1b[2K  {LABEL}{label:<10}{LABEL:#} {DIM}{msg}{DIM:#}");
+            let _ = out.flush();
+        }
+    }
+
+    fn progress(&self, p: &Progress) {
+        use crate::progress::{distance, megabytes, thousands};
+        match *p {
+            Progress::Tile { name, source, done, total } => {
+                let what = match source {
+                    TileSource::Cache => "from cache".to_string(),
+                    TileSource::Download(b) => format!("downloaded ({})", megabytes(b)),
+                    TileSource::Sea => "open sea".to_string(),
+                };
+                self.transient("elevation", &format!("SRTM tile {done} of {total}: {name} {what}"));
+            }
+            Progress::Elevation { tiles, downloaded, bytes, width, height, px_m, highest_m, secs, .. } => {
+                let plural = if tiles == 1 { "" } else { "s" };
+                let src = match downloaded {
+                    0 => format!("{tiles} SRTM tile{plural}, all from cache"),
+                    d if d == tiles => format!("{tiles} SRTM tile{plural} downloaded ({})", megabytes(bytes)),
+                    d => format!("{tiles} SRTM tiles: {d} downloaded ({}), {} from cache", megabytes(bytes), tiles - d),
+                };
+                self.step("elevation", &src, Some(secs));
+                self.detail(&format!("projected onto {width} × {height} px, {px_m:.0} m per pixel, \
+                                      highest point {highest_m:.0} m"));
+            }
+            Progress::Page { width_mm, height_mm, scale, pen_mm, pitch_mm } => {
+                self.step("page", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
+                                           crate::progress::scale(scale)), None);
+                self.detail(&format!("{pen_mm} mm pen, lines {pitch_mm:.2} mm apart"));
+            }
+            Progress::Relief { secs } => self.step("relief", "light and shadow, slope, line directions", Some(secs)),
+            Progress::Lines { count, secs } => {
+                self.step("lines", &format!("{} lines traced along the contours", thousands(count as u64)), Some(secs))
+            }
+            Progress::Dashes { count, secs } => self.step(
+                "strokes", &format!("{} dashes, ordered so the pen moves little between them",
+                                    thousands(count as u64)), Some(secs)),
+            Progress::Plot { strokes, ink_mm, travel_mm } => {
+                self.step("plotter", &format!("{} of line to draw in {} strokes",
+                                              distance(ink_mm), thousands(strokes as u64)), None);
+                self.detail(&format!("the pen travels {} lifted between strokes", distance(travel_mm)));
+            }
+        }
+    }
 }
 
 /// Run the command with `args` (program name first), printing progress.
@@ -146,16 +237,37 @@ where
     for &(name, _) in Style::PARAMS {
         st.set(name, *m.get_one::<f64>(name).unwrap());
     }
-    let (bounds, page) = area_and_page(&m)?;
-    let map = draw(&bounds, &st, &page, |msg| println!("{msg}"))?;
+    let r = Report::new();
+    if m.get_one::<String>("at").is_some() {
+        r.transient("where", "looking up the place");
+    }
+    let (bounds, page, label) = area_and_page(&m)?;
+    let (wm, hm) = projected_size(&bounds);
+    let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
+    r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
+    r.detail(&format!("{:.1} × {:.1} km around {centre}", wm / 1000.0, hm / 1000.0));
+
+    let t = Instant::now();
+    let map = draw(&bounds, &st, &page, |p| r.progress(p))?;
     let out = PathBuf::from(m.get_one::<String>("output").unwrap());
+    let d = &map.drawing;
     std::fs::write(&out, map.to_png()?)?;
-    println!("wrote {}", out.display());
+    let mut files = vec![(out.clone(), format!("{} × {} px", d.width, d.height))];
     if m.get_flag("svg") {
         let svg = out.with_extension("svg");
         std::fs::write(&svg, map.to_svg())?;
-        println!("wrote {}", svg.display());
+        let size = match map.mm_per_px {
+            Some(k) => format!("{:.0} × {:.0} mm", d.width as f64 * k, d.height as f64 * k),
+            None => format!("{} × {} px", d.width, d.height),
+        };
+        files.push((svg, size));
     }
+    let mut out = anstream::stdout();
+    for (i, (path, size)) in files.iter().enumerate() {
+        let label = if i == 0 { "wrote" } else { "" };
+        let _ = writeln!(out, "  {DONE}{label:<10}{DONE:#} {BOLD}{}{BOLD:#}  {DIM}{size}{DIM:#}", path.display());
+    }
+    let _ = writeln!(out, "  {:<10} {DIM}done in {:.1} s{DIM:#}", "", t.elapsed().as_secs_f64());
     Ok(())
 }
 
@@ -164,7 +276,8 @@ mod tests {
     use super::*;
 
     fn resolve(args: &[&str]) -> Result<(Bounds, Page), Error> {
-        area_and_page(&command().try_get_matches_from(std::iter::once("burin").chain(args.iter().copied())).unwrap())
+        let m = command().try_get_matches_from(std::iter::once("burin").chain(args.iter().copied())).unwrap();
+        area_and_page(&m).map(|(b, p, _)| (b, p))
     }
 
     #[test]

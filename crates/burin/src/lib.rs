@@ -7,19 +7,21 @@
 //! ```no_run
 //! let (lat, lon, _) = burin::locate("Twin Peaks, San Francisco").unwrap();
 //! let area = burin::bounds_around(lat, lon, 20.0, 20.0);
-//! let map = burin::draw(&area, &burin::Style::default(), &burin::Page::default(), |m| eprintln!("{m}")).unwrap();
+//! let map = burin::draw(&area, &burin::Style::default(), &burin::Page::default(), |p| eprintln!("{p}")).unwrap();
 //! std::fs::write("sf.svg", map.to_svg()).unwrap();
 //! ```
 
 pub mod cli;
 pub mod dem;
 pub mod geo;
+pub mod progress;
 pub mod raster;
 pub mod tmerc;
 
 pub use burin_core::{Drawing, Line, Style};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
+pub use progress::{Progress, TileSource};
 
 #[derive(Debug)]
 pub enum Error {
@@ -81,8 +83,10 @@ impl Map {
 }
 
 /// Download SRTM elevation for `bounds` (west, south, east, north in degrees)
-/// and draw it. Progress messages go to `log`.
-pub fn draw(bounds: &Bounds, style: &Style, page: &Page, log: impl Fn(&str)) -> Result<Map, Error> {
+/// and draw it, reporting each step to `progress`.
+pub fn draw(bounds: &Bounds, style: &Style, page: &Page, progress: impl Fn(&Progress) + Sync)
+    -> Result<Map, Error> {
+    use std::time::Instant;
     let mut width = page.width;
     let mut mm_per_px = None;
     if let Some(pw) = page.page_width_mm {
@@ -94,22 +98,37 @@ pub fn draw(bounds: &Bounds, style: &Style, page: &Page, log: impl Fn(&str)) -> 
         width = (width_mm / k).round() as usize;
         mm_per_px = Some(k);
     }
-    let t = std::time::Instant::now();
-    let dem = load_dem(bounds, width)?;
-    let max = dem.elev.iter().copied().fold(0.0f32, f32::max);
-    log(&format!("DEM {}x{} px, {:.0} m/px, max {max:.0} m ({:.1} s)",
-                 dem.width, dem.height, dem.px_m, t.elapsed().as_secs_f64()));
+    let dem = dem::load_dem_with(bounds, width, &progress)?;
+    let (w, h) = (dem.width, dem.height);
     if let Some(k) = mm_per_px {
-        log(&format!("page {:.0}×{:.0} mm, pen {} mm, lines every {:.2} mm, scale 1:{:.0}",
-                     dem.width as f64 * k, dem.height as f64 * k, page.pen_mm,
-                     style.spacing as f64 * k, dem.px_m * 1000.0 / k));
+        progress(&Progress::Page {
+            width_mm: w as f64 * k,
+            height_mm: h as f64 * k,
+            scale: dem.px_m * 1000.0 / k,
+            pen_mm: page.pen_mm,
+            pitch_mm: style.spacing as f64 * k,
+        });
     }
-    let t = std::time::Instant::now();
-    let drawing = burin_core::draw(&dem.elev, dem.width, dem.height, dem.px_m as f32, style);
-    log(&format!("{} streamlines, {} dashes ({:.1} s)",
-                 drawing.lines.len(), drawing.paths.len(), t.elapsed().as_secs_f64()));
+
+    let t = Instant::now();
+    let f = burin_core::build_fields(&dem.elev, w, h, dem.px_m as f32, style);
+    progress(&Progress::Relief { secs: t.elapsed().as_secs_f64() });
+    let t = Instant::now();
+    let lines = burin_core::trace_streamlines(&f, style);
+    progress(&Progress::Lines { count: lines.len(), secs: t.elapsed().as_secs_f64() });
+    let t = Instant::now();
+    let lines = burin_core::plot_order(lines);
+    let paths = burin_core::dash_lines(&lines, &f.tone, w, h, style);
+    progress(&Progress::Dashes { count: paths.len(), secs: t.elapsed().as_secs_f64() });
     if let Some(k) = mm_per_px {
-        log(&format!("pen-up travel {:.1} m", burin_core::pen_up_travel(&drawing.paths) as f64 * k / 1000.0));
+        let ink: f64 = paths.iter().flat_map(|p| p.windows(2))
+            .map(|s| ((s[1][0] - s[0][0]) as f64).hypot((s[1][1] - s[0][1]) as f64)).sum();
+        progress(&Progress::Plot {
+            strokes: paths.len(),
+            ink_mm: ink * k,
+            travel_mm: burin_core::pen_up_travel(&paths) * k,
+        });
     }
+    let drawing = Drawing { width: w, height: h, paths, lines };
     Ok(Map { drawing, style: style.clone(), px_m: dem.px_m, mm_per_px })
 }

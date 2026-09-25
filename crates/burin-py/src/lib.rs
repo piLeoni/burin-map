@@ -93,11 +93,14 @@ impl Map {
     }
 }
 
-fn logger(log: Option<Py<PyAny>>) -> impl Fn(&str) {
-    move |msg: &str| {
+fn logger(log: Option<Py<PyAny>>) -> impl Fn(&burin::Progress) + Sync {
+    move |p: &burin::Progress| {
+        if let burin::Progress::Tile { source: burin::TileSource::Cache, .. } = p {
+            return;
+        }
         if let Some(f) = &log {
             Python::attach(|py| {
-                let _ = f.call1(py, (msg,));
+                let _ = f.call1(py, (p.to_string(),));
             });
         }
     }

@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::progress::{Progress, TileSource};
 use crate::tmerc::TMerc;
 use crate::Error;
 
@@ -54,25 +55,25 @@ fn tile_name(lat: i32, lon: i32) -> (String, String) {
 
 /// One SRTM tile decimated by `stride`, without its shared last row/col
 /// (side = 3600 / stride). None over open sea.
-fn tile(lat: i32, lon: i32, stride: usize) -> Result<Option<Vec<f32>>, Error> {
+fn tile(lat: i32, lon: i32, stride: usize) -> Result<(Option<Vec<f32>>, TileSource), Error> {
     let (dir, name) = tile_name(lat, lon);
     let cache = cache_dir();
     let cached = cache.join(format!("{name}_s{stride}.npy"));
     let missing = cache.join(format!("{name}.missing"));
     if let Ok(bytes) = std::fs::read(&cached) {
         if let Some(v) = npy::read_f32(&bytes, TILE / stride) {
-            return Ok(Some(v));
+            return Ok((Some(v), TileSource::Cache));
         }
     }
     if missing.exists() {
-        return Ok(None);
+        return Ok((None, TileSource::Sea));
     }
     let url = format!("{SKADI}/{dir}/{name}.hgt.gz");
     let resp = match ureq::get(&url).set("User-Agent", "burin").call() {
         Ok(r) => r,
         Err(ureq::Error::Status(403 | 404, _)) => {
             let _ = std::fs::write(&missing, b"");
-            return Ok(None);
+            return Ok((None, TileSource::Sea));
         }
         Err(e) => return Err(Error::Net(format!("{url}: {e}"))),
     };
@@ -96,7 +97,7 @@ fn tile(lat: i32, lon: i32, stride: usize) -> Result<Option<Vec<f32>>, Error> {
         }
     }
     let _ = std::fs::write(&cached, npy::write_f32(&out, side));
-    Ok(Some(out))
+    Ok((Some(out), TileSource::Download(gz.len() as u64)))
 }
 
 /// Projected extent (xmin, ymin, xmax, ymax) of the lon/lat box, densified
@@ -133,6 +134,12 @@ pub fn projected_aspect(b: &Bounds) -> f64 {
 
 /// Elevation for `bounds` on a grid `width` px wide with square metric pixels.
 pub fn load_dem(b: &Bounds, width: usize) -> Result<Dem, Error> {
+    load_dem_with(b, width, &|_| {})
+}
+
+/// `load_dem`, reporting each tile and the result to `progress`.
+pub fn load_dem_with(b: &Bounds, width: usize, progress: &(dyn Fn(&Progress) + Sync)) -> Result<Dem, Error> {
+    let t0 = std::time::Instant::now();
     let [w, s, e, n] = *b;
     if !(w < e && s < n && s >= -90.0 && n <= 90.0) {
         return Err(Error::Input(format!("bad bounds {b:?}")));
@@ -147,11 +154,11 @@ pub fn load_dem(b: &Bounds, width: usize) -> Result<Dem, Error> {
     let lats: Vec<i32> = (s.floor() as i32..=n.floor() as i32).rev().collect();
     let lons: Vec<i32> = (w.floor() as i32..=e.floor() as i32).collect();
     let jobs: Vec<(i32, i32)> = lats.iter().flat_map(|&la| lons.iter().map(move |&lo| (la, lo))).collect();
-    let tiles = fetch_all(&jobs, stride)?;
+    let tiles = fetch_all(&jobs, stride, progress)?;
     let side = TILE / stride;
     let (mw, mh) = (lons.len() * side, lats.len() * side);
     let mut mosaic = vec![0.0f32; mw * mh];
-    for (k, t) in tiles.iter().enumerate() {
+    for (k, (t, _)) in tiles.iter().enumerate() {
         if let Some(t) = t {
             let (ty, tx) = (k / lons.len(), k % lons.len());
             for r in 0..side {
@@ -192,6 +199,20 @@ pub fn load_dem(b: &Bounds, width: usize) -> Result<Dem, Error> {
             elev[yy * width + xx] = bilinear(&mosaic, mw, mh, c, r);
         }
     }
+    let downloads: Vec<u64> = tiles.iter()
+        .filter_map(|(_, s)| if let TileSource::Download(b) = s { Some(*b) } else { None })
+        .collect();
+    progress(&Progress::Elevation {
+        tiles: tiles.len(),
+        downloaded: downloads.len(),
+        bytes: downloads.iter().sum(),
+        width,
+        height,
+        px_m,
+        highest_m: elev.iter().copied().fold(0.0, f32::max),
+        centre: ((w + e) / 2.0, (s + n) / 2.0),
+        secs: t0.elapsed().as_secs_f64(),
+    });
     Ok(Dem { elev, width, height, px_m })
 }
 
@@ -208,10 +229,14 @@ fn bilinear(g: &[f32], w: usize, h: usize, x: f64, y: f64) -> f32 {
     top * (1.0 - fy) + bot * fy
 }
 
+type TileResult = Result<(Option<Vec<f32>>, TileSource), Error>;
+
 /// Fetch tiles with a few parallel downloads, in `jobs` order.
-fn fetch_all(jobs: &[(i32, i32)], stride: usize) -> Result<Vec<Option<Vec<f32>>>, Error> {
+fn fetch_all(jobs: &[(i32, i32)], stride: usize, progress: &(dyn Fn(&Progress) + Sync))
+    -> Result<Vec<(Option<Vec<f32>>, TileSource)>, Error> {
     let next = AtomicUsize::new(0);
-    let mut results: Vec<Option<Result<Option<Vec<f32>>, Error>>> = (0..jobs.len()).map(|_| None).collect();
+    let done = std::sync::Mutex::new(0usize);
+    let mut results: Vec<Option<TileResult>> = (0..jobs.len()).map(|_| None).collect();
     let slots: Vec<std::sync::Mutex<&mut Option<_>>> = results.iter_mut().map(std::sync::Mutex::new).collect();
     std::thread::scope(|sc| {
         for _ in 0..jobs.len().min(8) {
@@ -221,6 +246,13 @@ fn fetch_all(jobs: &[(i32, i32)], stride: usize) -> Result<Vec<Option<Vec<f32>>>
                     break;
                 }
                 let r = tile(jobs[k].0, jobs[k].1, stride);
+                if let Ok((_, source)) = &r {
+                    // Under the lock so reports arrive in count order.
+                    let mut d = done.lock().unwrap();
+                    *d += 1;
+                    let name = tile_name(jobs[k].0, jobs[k].1).1;
+                    progress(&Progress::Tile { name: &name, source: *source, done: *d, total: jobs.len() });
+                }
                 **slots[k].lock().unwrap() = Some(r);
             });
         }
