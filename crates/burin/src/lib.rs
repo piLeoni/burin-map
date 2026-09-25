@@ -120,15 +120,6 @@ pub fn draw(bounds: &Bounds, style: &Style, page: &Page, progress: impl Fn(&Prog
     let lines = burin_core::plot_order(lines);
     let paths = burin_core::dash_lines(&lines, &f.tone, w, h, style);
     progress(&Progress::Dashes { count: paths.len(), secs: t.elapsed().as_secs_f64() });
-    if let Some(k) = mm_per_px {
-        let ink: f64 = paths.iter().flat_map(|p| p.windows(2))
-            .map(|s| ((s[1][0] - s[0][0]) as f64).hypot((s[1][1] - s[0][1]) as f64)).sum();
-        progress(&Progress::Plot {
-            strokes: paths.len(),
-            ink_mm: ink * k,
-            travel_mm: burin_core::pen_up_travel(&paths) * k,
-        });
-    }
     let drawing = Drawing { width: w, height: h, paths, lines };
     Ok(Map { drawing, style: style.clone(), px_m: dem.px_m, mm_per_px })
 }

@@ -34,8 +34,6 @@ pub enum Progress<'a> {
     Relief { secs: f64 },
     Lines { count: usize, secs: f64 },
     Dashes { count: usize, secs: f64 },
-    /// Plotter job: pen-down length, pen-up moves, both in mm.
-    Plot { strokes: usize, ink_mm: f64, travel_mm: f64 },
 }
 
 /// "1,234,567".
@@ -56,12 +54,6 @@ pub fn thousands(n: u64) -> String {
 pub fn scale(n: f64) -> String {
     let mag = 10f64.powi(n.log10().floor() as i32 - 2).max(1.0);
     format!("1:{}", thousands(((n / mag).round() * mag) as u64))
-}
-
-/// "850 m", "12.4 km".
-pub fn distance(mm: f64) -> String {
-    let m = mm / 1000.0;
-    if m < 1000.0 { format!("{m:.0} m") } else { format!("{:.1} km", m / 1000.0) }
 }
 
 pub fn megabytes(bytes: u64) -> String {
@@ -94,16 +86,13 @@ impl fmt::Display for Progress<'_> {
                            highest point {highest_m:.0} m ({secs:.1} s)", latlon(centre.1, centre.0))
             }
             Progress::Page { width_mm, height_mm, scale, pen_mm, pitch_mm } => write!(
-                f, "page: {width_mm:.0} × {height_mm:.0} mm at {}, {pen_mm} mm pen, lines {pitch_mm:.2} mm apart",
+                f, "page: {width_mm:.0} × {height_mm:.0} mm at {}, stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart",
                 self::scale(scale)),
             Progress::Relief { secs } => write!(f, "relief: shading and line directions ({secs:.1} s)"),
             Progress::Lines { count, secs } => write!(f, "lines: {} traced ({secs:.1} s)", thousands(count as u64)),
             Progress::Dashes { count, secs } => {
-                write!(f, "strokes: {} dashes, ordered for the pen ({secs:.1} s)", thousands(count as u64))
+                write!(f, "dashes: {} ({secs:.1} s)", thousands(count as u64))
             }
-            Progress::Plot { strokes, ink_mm, travel_mm } => write!(
-                f, "plotter: {} strokes, {} of drawn line, {} of pen-up moves between strokes",
-                thousands(strokes as u64), distance(ink_mm), distance(travel_mm)),
         }
     }
 }
@@ -116,8 +105,6 @@ mod tests {
     fn formats() {
         assert_eq!(thousands(1234567), "1,234,567");
         assert_eq!(thousands(999), "999");
-        assert_eq!(distance(200_200.0), "200 m");
-        assert_eq!(distance(12_400_000.0), "12.4 km");
         assert_eq!(latlon(46.95, -7.45), "46.95°N 7.45°W");
         assert_eq!(scale(100_021.0), "1:100,000");
         assert_eq!(scale(67_540.0), "1:67,500");

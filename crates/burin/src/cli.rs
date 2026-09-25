@@ -49,15 +49,15 @@ pub fn command() -> Command {
         .arg(Arg::new("width").long("width").value_name("PX").default_value("2400")
             .value_parser(value_parser!(usize))
             .help("image width in px, when no page is given"))
-        .next_help_heading("Page (plotter / print): sizes the SVG in mm")
+        .next_help_heading("Page: sizes the SVG in mm")
         .arg(Arg::new("page-width").long("page-width").value_name("MM").value_parser(value_parser!(f64))
-            .help("drawing width on paper, mm"))
+            .help("drawing width, mm"))
         .arg(Arg::new("page-height").long("page-height").value_name("MM").value_parser(value_parser!(f64))
             .help("max drawing height, mm; the drawing shrinks to fit"))
         .arg(Arg::new("scale").long("scale").value_name("1:N")
             .help("map scale; with --page-width sets the ground size, otherwise the page size"))
         .arg(Arg::new("pen").long("pen").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
-            .help("pen tip width, mm"))
+            .help("stroke width on the page, mm (sets how many pixels --page-width becomes)"))
         .next_help_heading("Style");
     for &(name, help) in Style::PARAMS {
         // Through f32 so 4.8 prints as 4.8, not 4.800000190734863.
@@ -184,7 +184,7 @@ impl Report {
     }
 
     fn progress(&self, p: &Progress) {
-        use crate::progress::{distance, megabytes, thousands};
+        use crate::progress::{megabytes, thousands};
         match *p {
             Progress::Tile { name, source, done, total } => {
                 let what = match source {
@@ -208,19 +208,14 @@ impl Report {
             Progress::Page { width_mm, height_mm, scale, pen_mm, pitch_mm } => {
                 self.step("page", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
                                            crate::progress::scale(scale)), None);
-                self.detail(&format!("{pen_mm} mm pen, lines {pitch_mm:.2} mm apart"));
+                self.detail(&format!("stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart"));
             }
             Progress::Relief { secs } => self.step("relief", "light and shadow, slope, line directions", Some(secs)),
             Progress::Lines { count, secs } => {
                 self.step("lines", &format!("{} lines traced along the contours", thousands(count as u64)), Some(secs))
             }
-            Progress::Dashes { count, secs } => self.step(
-                "strokes", &format!("{} dashes, ordered so the pen moves little between them",
-                                    thousands(count as u64)), Some(secs)),
-            Progress::Plot { strokes, ink_mm, travel_mm } => {
-                self.step("plotter", &format!("{} of line to draw in {} strokes",
-                                              distance(ink_mm), thousands(strokes as u64)), None);
-                self.detail(&format!("the pen travels {} lifted between strokes", distance(travel_mm)));
+            Progress::Dashes { count, secs } => {
+                self.step("dashes", &format!("{} dashes", thousands(count as u64)), Some(secs))
             }
         }
     }
