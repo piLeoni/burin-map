@@ -11,14 +11,15 @@
 //! std::fs::write("sf.svg", map.to_svg()).unwrap();
 //! ```
 
+pub mod cli;
 pub mod dem;
 pub mod geo;
 pub mod raster;
 pub mod tmerc;
 
 pub use burin_core::{Drawing, Line, Style};
-pub use dem::{load_dem, projected_aspect, Bounds, Dem};
-pub use geo::{bounds_around, locate};
+pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
+pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
 
 #[derive(Debug)]
 pub enum Error {

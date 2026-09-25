@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/burin-core", "crates/burin"]
+members = ["crates/burin-core", "crates/burin", "crates/burin-py"]
 resolver = "2"
 
 [profile.release]

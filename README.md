@@ -14,18 +14,30 @@ centuries.*
 
 ## Install
 
-Not on PyPI yet (it will be `burin-maps`: `burin` is taken there; the
-command and the import are still `burin`). From a clone:
+The engine is written in Rust and usable three ways: a command-line tool, a
+Python package, and (planned) a web page. None is published yet; from a
+clone you need a [Rust toolchain](https://rustup.rs).
+
+Command line only:
+
+```bash
+cargo install --path crates/burin      # puts `burin` in ~/.cargo/bin
+```
+
+Python package (also installs the same `burin` command):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install .
+pip install .                          # compiles the Rust engine, ~1 min
 ```
 
-Python ≥ 3.10; depends on numpy, scipy, pillow and rasterio. Elevation is
-downloaded on demand (see [Data](#data)); addresses are looked up with
-OpenStreetMap's [Nominatim](https://nominatim.org/) (one request per run,
-no key).
+Once on PyPI it will be `pip install burin-maps` (`burin` is taken there;
+the command and the import are still `burin`), with prebuilt wheels so no
+Rust is needed. Python ≥ 3.10, numpy is the only dependency.
+
+Elevation is downloaded on demand (see [Data](#data)); addresses are looked
+up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
+per run, no key).
 
 ## Use
 
@@ -33,11 +45,15 @@ Command line:
 
 ```bash
 burin --place san-francisco -o sf.png --svg
-burin --at "Twin Peaks, San Francisco" --size 14 -o tp.png   # address, 14 km wide
-burin --at "37.8716,-122.2727" --size 12 -o berkeley.png     # lat,lon
-burin --bounds -122.75 37.45 -122.05 38.05 -o bay.png        # west south east north
-burin --help                                                 # every parameter
+burin --at "Twin Peaks, San Francisco" --size 14km -o tp.png   # address, 14 km square
+burin --at "37.8716,-122.2727" --size 12km 8km -o berkeley.png # lat,lon; width height
+burin --at "Mount Tamalpais" --size 8mi -o tam.png            # m, km or mi
+burin --bounds -122.75 37.45 -122.05 38.05 -o bay.png          # west south east north
+burin --help                                                   # every option
 ```
+
+The image is 2400 px wide unless you give `--width` or a page (see
+[Plotter and print](#plotter-and-print)).
 
 Python:
 
@@ -47,15 +63,28 @@ import burin
 lat, lon, name = burin.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
 area = burin.bounds_around(lat, lon, 14, 14)                 # km
 
-d = burin.draw(area)
+d = burin.draw(area)                     # 2400 px wide; width=... to change
 d.save_png("tp.png")
 d.save_svg("tp.svg")
+d.paths                                  # the dashes: list of N×2 numpy arrays, px
 
-# Tweak the style
+# Tweak the style (print(burin.style_help()) lists every parameter)
 d = burin.draw(area, burin.Style(shade_gain=4, wobble=30))
+
+# For paper: sized in mm, scale follows from page and pen
+d = burin.draw(area, page_width_mm=297, page_height_mm=420, pen_mm=0.3, log=print)
 
 # Any elevation grid you already have (metres, square pixels, row 0 = north)
 d = burin.draw_elevation(elev, px_m=30.0)
+```
+
+Rust:
+
+```rust
+let (lat, lon, _) = burin::locate("Twin Peaks, San Francisco")?;
+let area = burin::bounds_around(lat, lon, 14.0, 14.0);
+let map = burin::draw(&area, &burin::Style::default(), &burin::Page::default(), |m| println!("{m}"))?;
+std::fs::write("tp.svg", map.to_svg())?;
 ```
 
 ## How it works
@@ -98,9 +127,19 @@ The drawing fits inside the page, the SVG has its size in millimetres and
 no background, and lines are ordered to keep pen-up travel short. The log
 reports page size, line pitch, scale and pen-up travel.
 
-With `--at` and a page size, the area takes the page's proportions:
-`--at "Mont Blanc" --size 40 --page-width 267 --page-height 390` fills the
-sheet exactly.
+Ground size, paper size and scale are tied: give any two and the third
+follows.
+
+```bash
+# ground + paper → scale (the area takes the page's proportions)
+burin --at "Mont Blanc" --size 40km --page-width 267 --page-height 390 --svg
+# paper + scale → ground: 297 mm at 1:50,000 is 14.85 km
+burin --at "Zermatt" --page-width 297 --page-height 420 --scale 1:50000 --svg
+# ground + scale → paper
+burin --place bern --scale 1:100000 --svg
+```
+
+Giving all three is an error, since they can't all hold at once.
 
 Lines are always 4 pen widths apart, so a finer pen means more lines and
 more detail on the same sheet, and a longer plot:
@@ -116,7 +155,6 @@ The ones worth touching first:
 
 | parameter | default | effect |
 |---|---|---|
-| `width` | 2400 | output width in px (ignored with `--page-width`) |
 | `spacing` | 4.8 | distance between lines, px |
 | `shade_gain` | 3.0 | contrast of the relief: higher = more solid shadows and whiter lights |
 | `flat_level` | 0.25 | how much stipple flat ground keeps |
@@ -131,8 +169,10 @@ The ones worth touching first:
 | `stroke` | 1.2 | stroke width, px |
 | `seed` | 1 | change it for a different drawing of the same place |
 
-`burin --help` lists all of them, with a one-line description each; the
-same descriptions live in `src/burin/style.py`.
+`burin --help` (or `print(burin.style_help())` in Python) lists all of
+them with a one-line description each. They are declared once, in
+`crates/burin-core/src/style.rs`, and the command line and Python pick them
+up from there.
 
 ## Data
 
@@ -152,49 +192,42 @@ Limits worth knowing:
 
 ## Code layout
 
+One repository, one engine, several front ends:
+
 ```text
-src/burin/
-  __init__.py     draw(), draw_elevation(), Drawing: the public API
-  style.py        every parameter, with its description
-  geo.py          addresses and coordinates → bounding box
-  dem.py          SRTM download, cache, reprojection
-  fields.py       direction field, tone, line spacing
-  streamlines.py  evenly spaced line placement
-  dashes.py       lines → dashes following the tone
-  render.py       plotting order, PNG, SVG
-  cli.py          command line
-tests/            offline tests on a synthetic island
+crates/burin-core/      the drawing engine: pure computation, no I/O
+  style.rs              every parameter, with its description
+  fields.rs             direction field, tone, line spacing
+  streamlines.rs        evenly spaced line placement
+  dashes.rs             lines → dashes following the tone
+  order.rs              plotting order
+  grid.rs, rng.rs       blur, gradient, percentiles; deterministic RNG
+crates/burin/           Rust library + `burin` command
+  dem.rs                SRTM download, cache, reprojection
+  tmerc.rs              transverse Mercator
+  geo.rs                addresses, coordinates, lengths, scales
+  raster.rs             PNG
+  cli.rs                command line (also run by the Python package)
+crates/burin-py/        Python bindings (PyO3), built by maturin
+python/burin/           the Python package: a thin layer over the bindings
+python/tests/           Python API tests
+web/                    (planned) WASM build and live map page
 ```
 
-Each module opens with a docstring explaining its step.
+Each module opens with a comment explaining its step. The engine has no
+dependencies at all, so the same code builds for the browser.
 
 ## Development
 
 ```bash
+cargo test                                  # engine, CLI, projection
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
+pip install -e ".[dev]" && pytest           # Python package
+cargo run --release -- --place bern -o bern.png   # try the CLI without installing
 ```
 
-## Rust
-
-The same pipeline is ported to Rust, about 15× faster (the bay at 2400 px:
-under 1 s of drawing against ~15 s), with the same command-line options and
-the same tile cache:
-
-```bash
-cargo run --release -- --at "Twin Peaks, San Francisco" --size 20 -o sf.png --svg
-cargo install --path crates/burin   # puts `burin` in ~/.cargo/bin
-```
-
-```text
-crates/burin-core/  drawing engine: pure computation, no I/O (also for WASM)
-crates/burin/       SRTM download and cache, transverse Mercator, geocoding,
-                    PNG, and the `burin` command
-```
-
-The plan is for the Python package to become a thin wrapper around it, and
-for a WASM build to draw live in the browser.
+After changing Rust code, `pip install -e .` again to rebuild the Python
+extension.
 
 ## Licence
 

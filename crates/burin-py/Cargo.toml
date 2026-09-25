@@ -1,0 +1,14 @@
+[package]
+name = "burin-py"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "_burin"
+crate-type = ["cdylib"]
+
+[dependencies]
+burin = { path = "../burin" }
+burin-core = { path = "../burin-core" }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"] }

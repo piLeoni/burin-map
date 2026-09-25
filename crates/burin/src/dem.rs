@@ -119,10 +119,16 @@ fn centred(b: &Bounds) -> TMerc {
     TMerc::new((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
 }
 
+/// Width and height of the area once projected, metres.
+pub fn projected_size(b: &Bounds) -> (f64, f64) {
+    let [x0, y0, x1, y1] = projected_extent(b, &centred(b));
+    (x1 - x0, y1 - y0)
+}
+
 /// Height / width of the area once projected.
 pub fn projected_aspect(b: &Bounds) -> f64 {
-    let [x0, y0, x1, y1] = projected_extent(b, &centred(b));
-    (y1 - y0) / (x1 - x0)
+    let (w, h) = projected_size(b);
+    h / w
 }
 
 /// Elevation for `bounds` on a grid `width` px wide with square metric pixels.
