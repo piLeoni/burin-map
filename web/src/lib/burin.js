@@ -25,7 +25,7 @@ export function paintDrawing(canvas, drawing, style) {
 
   const paths = drawing.paths
   const ends = drawing.ends
-  const stroke = style.stroke ?? 1.2
+  const stroke = style.batch_stroke ?? 1.2
   ctx.strokeStyle = '#000000'
   ctx.lineWidth = stroke
   ctx.lineCap = 'round'

@@ -27,7 +27,12 @@ export class Drawing {
 export function draw(elev: Float32Array, width: number, height: number, px_m: number, style: any): Drawing;
 
 /**
- * (name, default, help) for every style parameter — drives the web UI.
+ * (id, blurb) for each style group — section headers in the web UI.
+ */
+export function style_groups(): any;
+
+/**
+ * (name, default, help, group) for every style parameter — drives the web UI.
  */
 export function style_params(): any;
 
@@ -45,6 +50,7 @@ export interface InitOutput {
     readonly drawing_paths: (a: number) => any;
     readonly drawing_svg: (a: number) => [number, number];
     readonly drawing_width: (a: number) => number;
+    readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;

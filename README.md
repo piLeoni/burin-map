@@ -34,15 +34,15 @@ Same place, same extent (Twin Peaks, 8 km), two styles:
 
 | | Freehand | Mechanical |
 | --- | --- | --- |
-| `spacing` | 6.5 | 10 |
-| `flow_blur` | 2.5 | 20 |
-| `wobble` | 55 | 0 |
-| `jitter` | 0.75 | 0 |
-| `breaks` | 0.4 | 0 |
-| `shade_gain` | 5 | 2.8 |
-| `lit_floor` | 0.18 | 0 |
-| `flat_level` | 0.4 | 0.12 |
-| `stroke` | 0.95 | 1.5 |
+| `space` | 6.5 | 10 |
+| `mod_smooth` | 2.5 | 20 |
+| `mod_wobble` | 55 | 0 |
+| `mod_jitter` | 0.75 | 0 |
+| `mod_breaks` | 0.4 | 0 |
+| `input_gain` | 5 | 2.8 |
+| `input_light_floor` | 0.18 | 0 |
+| `input_flat` | 0.4 | 0.12 |
+| `batch_stroke` | 0.95 | 1.5 |
 
 ## Rust
 
@@ -58,14 +58,14 @@ cargo install --path crates/burin-map      # → ~/.cargo/bin/burin-map
 ```
 
 ```bash
-burin-map --place san-francisco -o bay.png --svg
-burin-map --at "Twin Peaks, San Francisco" --size 14km -o tp.png
-burin-map --at "37.8716,-122.2727" --size 12km 8km -o berkeley.png
-burin-map --bounds -122.75 37.45 -122.05 38.05 -o bay.png
+burin-map --terrain-place san-francisco --out-file bay.png --out-format both
+burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 14km --out-file tp.png
+burin-map --tat "37.8716,-122.2727" --ts 12km 8km --of berkeley.png
+burin-map --terrain-bounds -122.75 37.45 -122.05 38.05 --out-file bay.png
 burin-map --help
 ```
 
-The image is 2400 px wide unless you give `--width` or a page (see
+The image is 2400 px wide unless you give `--frame-px` or a frame size in mm (see
 [Plotter and print](#plotter-and-print)).
 
 As a library:
@@ -73,7 +73,7 @@ As a library:
 ```rust
 let (lat, lon, _) = burin_map::locate("Twin Peaks, San Francisco")?;
 let area = burin_map::bounds_around(lat, lon, 14.0, 14.0);
-let map = burin_map::draw(&area, &burin_map::Style::default(), &burin_map::Page::default(), |m| println!("{m}"))?;
+let map = burin_map::draw(&area, &burin_map::Style::default(), &burin_map::Frame::default(), |m| println!("{m}"))?;
 std::fs::write("tp.svg", map.to_svg())?;
 ```
 
@@ -105,16 +105,16 @@ import burin_map
 lat, lon, name = burin_map.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
 area = burin_map.bounds_around(lat, lon, 14, 14)                 # km
 
-d = burin_map.draw(area)                     # 2400 px wide; width=... to change
+d = burin_map.draw(area)                     # 2400 px wide; frame_px=... to change
 d.save_png("tp.png")
 d.save_svg("tp.svg")
 d.paths                                  # dashes: list of N×2 numpy arrays, px
 
 # Tweak the style (print(burin_map.style_help()) lists every parameter)
-d = burin_map.draw(area, burin_map.Style(shade_gain=4, wobble=30))
+d = burin_map.draw(area, burin_map.Style(input_gain=4, mod_wobble=30))
 
-# For paper: sized in mm, scale follows from page and pen
-d = burin_map.draw(area, page_width_mm=297, page_height_mm=420, pen_mm=0.3, log=print)
+# Frame in mm (plotter / print): scale follows from frame and pen
+d = burin_map.draw(area, frame_width_mm=297, frame_height_mm=420, frame_pen_mm=0.3, log=print)
 
 # Any elevation grid you already have (metres, square pixels, row 0 = north)
 d = burin_map.draw_elevation(elev, px_m=30.0)
@@ -132,7 +132,7 @@ code and as `npx burin-map` / the `burin-map` command. Node ≥ 18.
 ```bash
 npm install burin-map
 # or:  npm install -g burin-map
-# or:  npx burin-map --at "Twin Peaks, San Francisco" --size 8km -o tp.png
+# or:  npx burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 8km --out-file tp.png
 ```
 
 That installs `import` / `require("burin-map")` and the `burin-map` command.
@@ -146,12 +146,12 @@ import { writeFileSync } from "node:fs";
 const [lat, lon] = locate("Twin Peaks, San Francisco");
 const [west, south, east, north] = boundsAround(lat, lon, 14, 14);
 
-const d = draw(west, south, east, north, { shade_gain: 4, wobble: 30 });
+const d = draw(west, south, east, north, { input_gain: 4, mod_wobble: 30 });
 writeFileSync("tp.png", d.png());
 writeFileSync("tp.svg", d.svg());
 
 // Or any elevation grid you already have (metres, row 0 = north):
-// const d = drawElevation(elevFloat32Array, width, height, pxM, { spacing: 6 });
+// const d = drawElevation(elevFloat32Array, width, height, pxM, { space: 6 });
 ```
 
 ## How it works
@@ -165,14 +165,14 @@ writeFileSync("tp.svg", d.svg());
    even curves instead of bunching up on steep ground.
 3. **Lines.** Streamlines are traced through that field at an even distance
    from each other (Jobard & Lefer, 1997), a little tighter on steep ground
-   and in shadow. Gaps too narrow for a new line at full spacing but still
+   and in shadow. Gaps too narrow for a new line at full space but still
    wide get one in the middle, so lines don't bunch into bands.
-4. **Tone.** Lambert shading at two scales: detail (ridges, valleys) and
+4. **Input.** Lambert shading at two scales: detail (ridges, valleys) and
    whole massifs, so an entire mountain side reads as one shadow from afar.
-   Flat ground sits at a fixed tone, shadow raises it towards solid, light
-   lowers it towards white.
+   Flat ground sits at a fixed value (`input_flat`), shadow raises it towards 1, light
+   lowers it towards 0.
 5. **Dashes.** Every line is broken into dashes whose length follows the
-   tone: solid in shadow, stipple on the flat. On lit slopes dashes are
+   input: solid in shadow, stipple on the flat. On lit slopes dashes are
    dropped at random rather than shortened, so a few strokes still hint at
    the form.
 6. **Hand.** Dash length and pitch are randomised, on flat ground the line
@@ -185,25 +185,26 @@ any scale: a whole region or a single city.
 ## Plotter and print
 
 ```bash
-burin-map --place san-francisco --page-width 267 --page-height 390 --pen 0.3 -o bay.png --svg
+burin-map --terrain-place san-francisco --frame-width 267 --frame-height 390 --frame-pen 0.3 \
+  --out-file bay.png --out-format both
 ```
 
 The pen takes the place of the stroke width: every proportion of the style
-is kept, and resolution, line pitch and map scale follow from page and pen.
-The drawing fits inside the page, the SVG has its size in millimetres and
+is kept, and resolution, line pitch and map scale follow from frame and pen.
+The drawing fits inside the frame, the SVG has its size in millimetres and
 no background, and lines are ordered to keep pen-up travel short. The log
-reports page size, line pitch, scale and pen-up travel.
+reports frame size, line pitch, scale and pen-up travel.
 
-Ground size, paper size and scale are tied: give any two and the third
+Terrain size, frame size and scale are tied: give any two and the third
 follows.
 
 ```bash
-# ground + paper → scale (the area takes the page's proportions)
-burin-map --at "Mont Blanc" --size 40km --page-width 267 --page-height 390 --svg
-# paper + scale → ground: 297 mm at 1:50,000 is 14.85 km
-burin-map --at "Zermatt" --page-width 297 --page-height 420 --scale 1:50000 --svg
-# ground + scale → paper
-burin-map --place bern --scale 1:100000 --svg
+# terrain + frame → scale (the area takes the frame's proportions)
+burin-map --terrain-at "Mont Blanc" --terrain-size 40km --frame-width 267 --frame-height 390 --out-format svg
+# frame + scale → terrain: 297 mm at 1:50,000 is 14.85 km
+burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg
+# terrain + scale → frame
+burin-map --terrain-place bern --frame-scale 1:100000 --out-format svg
 ```
 
 Giving all three is an error, since they can't all hold at once.
@@ -218,60 +219,71 @@ more detail on the same sheet, and a longer plot:
 
 ## Style parameters
 
+Grammar is grouped by what it controls. Long names are descriptive; short
+aliases work on the CLI (e.g. `--sl` for `--space-light`).
+
+| group | idea |
+|---|---|
+| `space_*` | distance between lines — `space_light` / `space_dark` set the range |
+| `dash_*` | ink along each line — `dash_light` / `dash_dark` set the range |
+| `mod_*` | hand-drawn character (jitter, breaks, wobble, smooth) |
+| `input_*` | 0…1 field from terrain + sun (feeds space and dash) |
+| `sun_*` | light direction |
+| `engine_*` | streamline tracer (usually leave alone) |
+| `batch_*` | per-pass floor, stroke, seed |
+
 The ones worth touching first:
 
 | parameter | default | effect |
 |---|---|---|
-| `spacing` | 4.8 | base distance between lines, px |
-| `shade_dash` | 1 | light/shadow as **dashes** (0 = continuous strokes) |
-| `shade_gap` | 1 | light/shadow as **spacing** (0 = uniform gaps) |
-| `spacing_dark` | 0.7 | denser lines in shadow (with `shade_gap`) |
-| `spacing_lit` | 1 | thinner lines in light if >1 (with `shade_gap`) |
-| `spacing_steep` | 0.6 | denser on steep ground (`1` = off) |
-| `shade_gain` | 3.0 | contrast of the relief |
-| `flat_level` | 0.25 | tone of flat ground |
-| `lit_floor` | 0.06 | tone kept in full light |
-| `flow_blur` | 6 | smoothness of the line curves |
-| `jitter` | 0.45 | dash irregularity; 0 looks machine-made |
-| `wobble` | 20 | wander on flat ground, degrees |
-| `breaks` | 0.15 | breaks in solid runs (scaled by `shade_dash`) |
-| `stroke` | 1.2 | stroke width, px |
-| `seed` | 1 | different drawing of the same place |
+| `space` | 4.8 | base distance between lines, px |
+| `space_light` | 1.0 | space multiplier in full light (>1 = more open) |
+| `space_dark` | 0.7 | space multiplier in full dark (<1 = denser) |
+| `space_steep` | 0.4 | how much steep ground tightens space (`0` = off, `1` = max) |
+| `dash_light` | 0.15 | ink fraction in full light |
+| `dash_dark` | 1.0 | ink fraction in full dark |
+| `dash_drop` | 1.0 | drop random dashes on flat/light (`0` = off) |
+| `dash_period` | 2.2 | dash+gap length, × `space` |
+| `mod_jitter` | 0.45 | dash irregularity; 0 looks machine-made |
+| `mod_breaks` | 0.15 | breaks in otherwise solid runs |
+| `mod_smooth` | 6 | smoothness of the line curves |
+| `input_gain` | 3.0 | contrast of the relief |
+| `batch_stroke` | 1.2 | stroke width, px |
+| `batch_seed` | 1 | different drawing of the same place |
 
-Shading is two parallel channels: turn **`shade_dash`** down for continuous
-lines, turn **`shade_gap`** up with `spacing_dark` / `spacing_lit` for relief
-by density. Use either, or both (the default).
+Flat ranges mean a flat channel: `--space-light 1 --space-dark 1` keeps
+uniform space; `--dash-light 1 --dash-dark 1 --dash-drop 0` draws continuous
+lines.
 
-`burin-map --help` (or `print(burin_map.style_help())` in Python) lists all of
-them with a one-line description each. They are declared once, in
-`crates/burin-map-core/src/style.rs`, and the command line and Python pick them
-up from there.
+Every flag has a short form made of its initials (`--space-light` → `--sl`,
+`--dash-drop` → `--ddrop`, `--terrain-at` → `--ta`, `--frame-width` → `--fw`,
+`--out-format` → `--fmt`). `burin-map --help` (or
+`print(burin_map.style_help())` in Python) lists all of them. They are declared once in `crates/burin-map-core/src/style.rs`.
 
-### Multiple hatching passes
+### Multiple batch passes
 
 By default there is one pass at angle 0° (lines along the contours). Each
-`--hatch` starts another pass; style flags after it apply only to that pass
-until the next `--hatch`. `--angle` is degrees from the contour tangent
-(0 = along, 90 = downslope) 
-Passes run in parallel.
+`--batch` starts another parallel pass; style flags after it apply only to
+that pass until the next `--batch` (`-b`). `--batch-angle` (`--ba`) is degrees
+from the contour tangent (0 = along, 90 = downslope).
 
 ```bash
 # simple — one pass, all defaults
-burin-map --place bern
+burin-map --terrain-place bern
 
-# still one pass, with style
-burin-map --place bern --spacing 5
+# still one pass, with style (short forms)
+burin-map --tp bern --s 5 --dl 0.3
 
 # along + broken cross-hatch in shadow
-burin-map --at "Twin Peaks, San Francisco" --size 8km -o tp.png \
-  --hatch --spacing 6 --breaks 0.12 \
-  --hatch --angle 90 --breaks 0.85 --hatch-floor 0.45
+burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 8km --out-file tp.png \
+  --batch --space 6 --mod-breaks 0.12 \
+  --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45
 
-# three angles
-burin-map --place bern \
-  --hatch --spacing 6 \
-  --hatch --angle 90 --breaks 0.8 --hatch-floor 0.4 \
-  --hatch --angle 45 --breaks 0.7 --hatch-floor 0.5
+# three angles, short forms
+burin-map --tp bern \
+  -b --s 6 \
+  -b --ba 90 --mb 0.8 --bf 0.4 \
+  -b --ba 45 --mb 0.7 --bf 0.5
 ```
 
 ## Data
@@ -328,9 +340,9 @@ One repository, one engine, several front ends:
 ```text
 crates/burin-map-core/  the drawing engine: pure computation, no I/O
   style.rs              every parameter, with its description
-  fields.rs             direction field, tone, line spacing
+  fields.rs             direction field, input, space
   streamlines.rs        evenly spaced line placement
-  dashes.rs             lines → dashes following the tone
+  dashes.rs             lines → dashes following the input
   order.rs              plotting order
   grid.rs, rng.rs       blur, gradient, percentiles; deterministic RNG
 crates/burin-map/       Rust library + `burin-map` command
@@ -375,8 +387,8 @@ await init();
 
 // elev: Float32Array of height in metres, row 0 = north
 const result = draw(elev, width, height, pxM /* metres per pixel */, {
-  spacing: 4.8,
-  wobble: 20,
+  space: 4.8,
+  mod_wobble: 20,
 });
 result.paths();   // packed Float32Array for canvas stroking
 result.svg();     // SVG document string
@@ -421,7 +433,7 @@ cargo test                                  # engine, CLI, projection
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" && pytest           # Python package
 cd node && npm install && npm run build && npm test   # Node addon
-cargo run --release -- --place bern -o bern.png   # try the CLI without installing
+cargo run --release -- --terrain-place bern --out-file bern.png   # try the CLI without installing
 ./web/serve.sh                              # WASM map demo
 ```
 

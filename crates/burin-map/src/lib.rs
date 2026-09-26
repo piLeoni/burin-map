@@ -2,12 +2,12 @@
 //!
 //! The drawing engine is `burin-map-core` (pure computation, also built for WASM);
 //! this crate adds everything around it: geocoding, elevation download and
-//! reprojection, PNG output and page sizing.
+//! reprojection, PNG output and frame sizing.
 //!
 //! ```no_run
 //! let (lat, lon, _) = burin_map::locate("Twin Peaks, San Francisco").unwrap();
 //! let area = burin_map::bounds_around(lat, lon, 20.0, 20.0);
-//! let map = burin_map::draw(&area, &burin_map::Style::default(), &burin_map::Page::default(), |p| eprintln!("{p}")).unwrap();
+//! let map = burin_map::draw(&area, &burin_map::Style::default(), &burin_map::Frame::default(), |p| eprintln!("{p}")).unwrap();
 //! std::fs::write("sf.svg", map.to_svg()).unwrap();
 //! ```
 
@@ -18,7 +18,7 @@ pub mod progress;
 pub mod raster;
 pub mod tmerc;
 
-pub use burin_map_core::{Drawing, Hatch, Line, Style};
+pub use burin_map_core::{Batch, Drawing, Line, Style};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
 pub use progress::{Progress, TileSource};
@@ -43,22 +43,22 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Output size. With `page_width_mm` the drawing is sized for paper: the pen
-/// takes the place of `style.stroke`, so every proportion of the style is
-/// kept and the pixel width follows from page and pen. With `page_height_mm`
-/// too, the drawing shrinks to fit inside both.
+/// The rectangle of the drawing. With `width_mm` it has a physical size: the
+/// pen takes the place of `style.batch_stroke`, so every proportion of the
+/// style is kept and the pixel width follows from frame and pen. With
+/// `height_mm` too, the drawing shrinks to fit inside both.
 #[derive(Clone, Debug)]
-pub struct Page {
-    /// Pixel width when no page is given.
-    pub width: usize,
-    pub page_width_mm: Option<f64>,
-    pub page_height_mm: Option<f64>,
+pub struct Frame {
+    /// Pixel width when no `width_mm` is given.
+    pub px: usize,
+    pub width_mm: Option<f64>,
+    pub height_mm: Option<f64>,
     pub pen_mm: f64,
 }
 
-impl Default for Page {
+impl Default for Frame {
     fn default() -> Self {
-        Page { width: 2400, page_width_mm: None, page_height_mm: None, pen_mm: 0.3 }
+        Frame { px: 2400, width_mm: None, height_mm: None, pen_mm: 0.3 }
     }
 }
 
@@ -67,48 +67,48 @@ pub struct Map {
     pub style: Style,
     /// Metres per pixel on the ground.
     pub px_m: f64,
-    /// Physical size, when drawn for a page.
+    /// Physical size, when the frame has one.
     pub mm_per_px: Option<f64>,
 }
 
 impl Map {
     pub fn to_svg(&self) -> String {
-        self.drawing.to_svg(self.style.stroke, self.mm_per_px.map(|k| k as f32))
+        self.drawing.to_svg(self.style.batch_stroke, self.mm_per_px.map(|k| k as f32))
     }
 
     pub fn to_png(&self) -> Result<Vec<u8>, Error> {
         let d = &self.drawing;
-        raster::to_png(&d.paths, d.width, d.height, self.style.stroke)
+        raster::to_png(&d.paths, d.width, d.height, self.style.batch_stroke)
     }
 }
 
-/// Download SRTM elevation for `bounds` and draw it with a single hatch style.
+/// Download SRTM elevation for `bounds` and draw it with a single batch.
 pub fn draw(
     bounds: &Bounds,
     style: &Style,
-    page: &Page,
+    frame: &Frame,
     progress: impl Fn(&Progress) + Sync,
 ) -> Result<Map, Error> {
-    draw_hatches(bounds, &[Hatch::along(style.clone())], page, progress)
+    draw_batches(bounds, &[Batch::along(style.clone())], frame, progress)
 }
 
-/// Download SRTM and draw with one or more hatching passes (see `Hatch`).
-pub fn draw_hatches(
+/// Download SRTM and draw with one or more batch passes (see `Batch`).
+pub fn draw_batches(
     bounds: &Bounds,
-    hatches: &[Hatch],
-    page: &Page,
+    batches: &[Batch],
+    frame: &Frame,
     progress: impl Fn(&Progress) + Sync,
 ) -> Result<Map, Error> {
     use std::time::Instant;
-    assert!(!hatches.is_empty());
-    let style = &hatches[0].style;
-    let mut width = page.width;
+    assert!(!batches.is_empty());
+    let style = &batches[0].style;
+    let mut width = frame.px;
     let mut mm_per_px = None;
-    if let Some(pw) = page.page_width_mm {
-        let k = page.pen_mm / style.stroke as f64;
-        let mut width_mm = pw;
-        if let Some(ph) = page.page_height_mm {
-            width_mm = width_mm.min(ph / projected_aspect(bounds));
+    if let Some(fw) = frame.width_mm {
+        let k = frame.pen_mm / style.batch_stroke as f64;
+        let mut width_mm = fw;
+        if let Some(fh) = frame.height_mm {
+            width_mm = width_mm.min(fh / projected_aspect(bounds));
         }
         width = (width_mm / k).round() as usize;
         mm_per_px = Some(k);
@@ -116,17 +116,17 @@ pub fn draw_hatches(
     let dem = dem::load_dem_with(bounds, width, &progress)?;
     let (w, h) = (dem.width, dem.height);
     if let Some(k) = mm_per_px {
-        progress(&Progress::Page {
+        progress(&Progress::Frame {
             width_mm: w as f64 * k,
             height_mm: h as f64 * k,
             scale: dem.px_m * 1000.0 / k,
-            pen_mm: page.pen_mm,
-            pitch_mm: style.spacing as f64 * k,
+            pen_mm: frame.pen_mm,
+            pitch_mm: style.space as f64 * k,
         });
     }
 
     let t = Instant::now();
-    let drawing = burin_map_core::draw_hatches(&dem.elev, w, h, dem.px_m as f32, hatches);
+    let drawing = burin_map_core::draw_batches(&dem.elev, w, h, dem.px_m as f32, batches);
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });
     progress(&Progress::Lines { count: drawing.lines.len(), secs: secs * 0.5 });

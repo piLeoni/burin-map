@@ -1,75 +1,94 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAtom } from 'jotai'
 import { loadBurin } from '../lib/burin'
 import { styleAtom } from '../state'
 
+/** [min, max, step] — step drives the slider grain. */
 const RANGES = {
-  spacing: [1, 12],
-  spacing_steep: [0.2, 1],
-  spacing_dark: [0.2, 1],
-  spacing_gamma: [0.3, 3],
-  test_ratio: [0.2, 1],
-  fill_ratio: [0.5, 1],
-  step: [0.5, 2],
-  min_len: [1, 20],
-  flow_blur: [1, 30],
-  shade_blur: [0.5, 8],
-  broad_blur: [2, 40],
-  broad_weight: [0, 1],
-  wobble: [0, 60],
-  wobble_size: [2, 40],
-  azimuth: [0, 360],
-  altitude: [5, 85],
-  z_exag: [1, 12],
-  flat_level: [0, 0.6],
-  shade_gain: [0.5, 8],
-  dark_gamma: [0.3, 2],
-  lit_gain: [0.5, 4],
-  lit_floor: [0, 0.3],
-  period: [1, 5],
-  duty_min: [0, 0.5],
-  duty_max: [0.5, 1],
-  cutoff: [0, 0.15],
-  jitter: [0, 1],
-  breaks: [0, 0.5],
-  stroke: [0.4, 3],
-  seed: [0, 100],
+  space: [1, 12, 0.1],
+  space_light: [0.5, 3, 0.05],
+  space_dark: [0.2, 1.5, 0.05],
+  space_steep: [0, 1, 0.05],
+  space_steep_gamma: [0.3, 3, 0.1],
+  dash_light: [0, 1, 0.05],
+  dash_dark: [0, 1, 0.05],
+  dash_period: [1, 8, 0.1],
+  dash_cutoff: [0, 0.2, 0.01],
+  dash_drop: [0, 1, 0.05],
+  mod_jitter: [0, 1, 0.05],
+  mod_breaks: [0, 1, 0.05],
+  mod_wobble: [0, 60, 1],
+  mod_wobble_size: [2, 40, 1],
+  mod_smooth: [1, 30, 0.5],
+  input_flat: [0, 0.6, 0.01],
+  input_gain: [0.5, 8, 0.1],
+  input_dark_gamma: [0.3, 2, 0.05],
+  input_light_gain: [0.5, 4, 0.1],
+  input_light_floor: [0, 0.3, 0.01],
+  input_blur: [0.5, 8, 0.1],
+  input_broad_blur: [2, 40, 0.5],
+  input_broad: [0, 1, 0.05],
+  sun_azimuth: [0, 360, 1],
+  sun_altitude: [5, 85, 1],
+  sun_exag: [1, 12, 0.1],
+  engine_step: [0.5, 2, 0.1],
+  engine_min: [1, 20, 1],
+  engine_stop: [0.2, 1, 0.05],
+  engine_fill: [0.5, 1, 0.05],
+  batch_floor: [0, 1, 0.05],
+  batch_stroke: [0.4, 3, 0.1],
+  batch_seed: [0, 100, 1],
 }
 
-/** Integer-only parameters. */
 const INT_PARAMS = new Set([
-  'seed',
-  'azimuth',
-  'altitude',
-  'wobble',
-  'wobble_size',
-  'min_len',
-  'flow_blur',
-  'broad_blur',
+  'batch_seed',
+  'sun_azimuth',
+  'sun_altitude',
+  'mod_wobble',
+  'mod_wobble_size',
+  'engine_min',
 ])
+
+const GROUP_TITLE = {
+  space: 'Space',
+  dash: 'Dash',
+  mod: 'Mod',
+  input: 'Input',
+  sun: 'Sun',
+  engine: 'Engine',
+  batch: 'Batch',
+}
 
 function isIntParam(name) {
   return INT_PARAMS.has(name)
 }
 
+function rangeOf(name, fallbackDefault) {
+  return RANGES[name] || [0, Math.max(1, (fallbackDefault ?? 1) * 2), 0.1]
+}
+
 function clamp(name, n) {
-  const [lo, hi] = RANGES[name] || [n, n]
+  const [lo, hi] = rangeOf(name, n)
   return Math.min(hi, Math.max(lo, n))
 }
 
-/** Max one decimal for floats; whole numbers for int params. */
 function quantize(name, raw) {
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n)) return null
   const c = clamp(name, n)
   if (isIntParam(name)) return Math.round(c)
-  return Math.round(c * 10) / 10
+  const step = rangeOf(name, c)[2]
+  const decimals = step < 0.05 ? 2 : 1
+  const f = 10 ** decimals
+  return Math.round(c * f) / f
 }
 
 function fmt(name, v) {
   if (isIntParam(name)) return String(Math.round(v))
-  const q = Math.round(v * 10) / 10
-  return Number.isInteger(q) ? String(q) : q.toFixed(1)
+  const step = rangeOf(name, v)[2]
+  const decimals = step < 0.05 ? 2 : 1
+  const q = Number(v.toFixed(decimals))
+  return Number.isInteger(q) ? String(q) : q.toFixed(decimals)
 }
 
 function fmtCount(n) {
@@ -79,12 +98,10 @@ function fmtCount(n) {
 /** Stable slider — must live outside Sidebar or drag remounts mid-gesture. */
 function StyleSlider({ p, value, onDrag, onCommit }) {
   const int = isIntParam(p.name)
-  const [lo, hi] = RANGES[p.name] || [0, Math.max(1, p.default * 2)]
-  const step = int ? 1 : 0.1
+  const [lo, hi, step] = rangeOf(p.name, p.default)
   const [text, setText] = useState(() => fmt(p.name, value))
   const [editing, setEditing] = useState(false)
 
-  // Keep the input in sync unless the user is typing.
   useEffect(() => {
     if (!editing) setText(fmt(p.name, value))
   }, [value, p.name, editing])
@@ -128,7 +145,7 @@ function StyleSlider({ p, value, onDrag, onCommit }) {
         className="range range-xs w-full"
         min={lo}
         max={hi}
-        step={step}
+        step={int ? 1 : step}
         value={value}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId)
@@ -163,14 +180,16 @@ function StyleSlider({ p, value, onDrag, onCommit }) {
  */
 export default function Sidebar({ open, onClose, status, drawing }) {
   const [params, setParams] = useState([])
+  const [groups, setGroups] = useState([])
   const [style, setStyle] = useAtom(styleAtom)
-  /** Local while dragging — style atom updates only on release. */
   const [draft, setDraft] = useState({})
 
   useEffect(() => {
     loadBurin().then((m) => {
       const list = m.style_params()
+      const g = typeof m.style_groups === 'function' ? m.style_groups() : []
       setParams(list)
+      setGroups(g)
       const defaults = {}
       for (const p of list) defaults[p.name] = quantize(p.name, p.default) ?? p.default
       const merged = { ...defaults }
@@ -208,6 +227,19 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     setDraft(init)
     setStyle(init)
   }
+
+  const grouped = useMemo(() => {
+    const blurbs = Object.fromEntries(groups.map((g) => [g.id, g.blurb]))
+    const order = groups.length ? groups.map((g) => g.id) : [...new Set(params.map((p) => p.group))]
+    return order
+      .map((id) => ({
+        id,
+        title: GROUP_TITLE[id] || id,
+        blurb: blurbs[id] || '',
+        params: params.filter((p) => p.group === id),
+      }))
+      .filter((g) => g.params.length > 0)
+  }, [params, groups])
 
   return (
     <aside
@@ -257,26 +289,36 @@ export default function Sidebar({ open, onClose, status, drawing }) {
           </p>
         </header>
 
-        <section className="flex min-w-0 flex-col gap-4 border-t border-base-content pt-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-mono text-xs font-bold tracking-wide uppercase">Style</h2>
-            <button type="button" className="btn btn-sm border border-base-content" onClick={reset}>
-              Reset
-            </button>
-          </div>
-          {params.map((p) => (
-            <StyleSlider
-              key={p.name}
-              p={p}
-              value={draft[p.name] ?? p.default}
-              onDrag={onDrag}
-              onCommit={onCommit}
-            />
-          ))}
-          <p className="min-w-0 text-[10px] leading-snug wrap-break-word opacity-45">
-            Elevation from AWS Terrain Tiles. Basemap: Mapbox.
-          </p>
-        </section>
+        <div className="flex items-center justify-between gap-2 border-t border-base-content pt-5">
+          <h2 className="font-mono text-xs font-bold tracking-wide uppercase">Style</h2>
+          <button type="button" className="btn btn-sm border border-base-content" onClick={reset}>
+            Reset
+          </button>
+        </div>
+
+        {grouped.map((g) => (
+          <section key={g.id} className="flex min-w-0 flex-col gap-3 border-t border-base-content/40 pt-4">
+            <div>
+              <h3 className="font-mono text-xs font-bold tracking-wide uppercase">{g.title}</h3>
+              {g.blurb ? (
+                <p className="mt-1 text-[11px] leading-snug opacity-60">{g.blurb}</p>
+              ) : null}
+            </div>
+            {g.params.map((p) => (
+              <StyleSlider
+                key={p.name}
+                p={p}
+                value={draft[p.name] ?? p.default}
+                onDrag={onDrag}
+                onCommit={onCommit}
+              />
+            ))}
+          </section>
+        ))}
+
+        <p className="min-w-0 text-[10px] leading-snug wrap-break-word opacity-45">
+          Elevation from AWS Terrain Tiles. Basemap: Mapbox.
+        </p>
       </div>
     </aside>
   )

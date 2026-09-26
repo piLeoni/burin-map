@@ -785,5 +785,6 @@ module.exports.drawElevation = nativeBinding.drawElevation
 module.exports.locate = nativeBinding.locate
 module.exports.projectedSize = nativeBinding.projectedSize
 module.exports.runCli = nativeBinding.runCli
+module.exports.styleGroups = nativeBinding.styleGroups
 module.exports.styleParams = nativeBinding.styleParams
 module.exports.version = nativeBinding.version

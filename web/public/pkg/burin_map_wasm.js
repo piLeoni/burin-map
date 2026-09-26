@@ -110,7 +110,19 @@ export function draw(elev, width, height, px_m, style) {
 }
 
 /**
- * (name, default, help) for every style parameter — drives the web UI.
+ * (id, blurb) for each style group — section headers in the web UI.
+ * @returns {any}
+ */
+export function style_groups() {
+    const ret = wasm.style_groups();
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * (name, default, help, group) for every style parameter — drives the web UI.
  * @returns {any}
  */
 export function style_params() {

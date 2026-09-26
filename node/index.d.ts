@@ -27,7 +27,7 @@ export declare class Drawing {
 export declare function boundsAround(lat: number, lon: number, widthKm: number, heightKm: number): [number, number, number, number]
 
 /** Download SRTM for the lon/lat box and draw it. */
-export declare function draw(west: number, south: number, east: number, north: number, style?: object | undefined | null, width?: number | undefined | null, pageWidthMm?: number | undefined | null, pageHeightMm?: number | undefined | null, penMm?: number | undefined | null): Drawing
+export declare function draw(west: number, south: number, east: number, north: number, style?: object | undefined | null, framePx?: number | undefined | null, frameWidthMm?: number | undefined | null, frameHeightMm?: number | undefined | null, framePenMm?: number | undefined | null): Drawing
 
 /** Draw any elevation grid (metres, row 0 = north). Values ≤ 0.5 m are sea. */
 export declare function drawElevation(elev: Float32Array, width: number, height: number, pxM: number, style?: object | undefined | null): Drawing
@@ -40,7 +40,10 @@ export declare function projectedSize(west: number, south: number, east: number,
 /** Run the `burin-map` CLI (`argv[0]` is the program name). */
 export declare function runCli(argv: Array<string>): void
 
-/** `(name, default, help)` for every style parameter. */
-export declare function styleParams(): Array<[string, number, string]>
+/** `(id, blurb)` for each style group. */
+export declare function styleGroups(): Array<[string, string]>
+
+/** `(name, default, help, group)` for every style parameter. */
+export declare function styleParams(): Array<[string, number, string, string]>
 
 export declare function version(): string

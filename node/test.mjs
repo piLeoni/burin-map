@@ -5,7 +5,7 @@ import { boundsAround, drawElevation, styleParams, version } from './index.js'
 test('version and style params', () => {
   assert.equal(version(), '0.1.0')
   const params = styleParams()
-  assert.ok(params.some(([name]) => name === 'spacing'))
+  assert.ok(params.some(([name]) => name === 'space'))
 })
 
 test('drawElevation produces a drawing', () => {
@@ -19,7 +19,7 @@ test('drawElevation produces a drawing', () => {
       elev[y * w + x] = 200 - Math.hypot(dx, dy) * 4
     }
   }
-  const d = drawElevation(elev, w, h, 30, { spacing: 6, wobble: 0, jitter: 0 })
+  const d = drawElevation(elev, w, h, 30, { space: 6, mod_wobble: 0, mod_jitter: 0 })
   assert.equal(d.width, w)
   assert.equal(d.height, h)
   const [pts, ends] = d.paths()

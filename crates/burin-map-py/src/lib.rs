@@ -3,7 +3,7 @@
 //! under it. Arrays cross as raw little-endian bytes so the wheel needs no
 //! numpy at build time and one abi3 wheel serves every Python version.
 
-use burin_map::{Error, Page, Style};
+use burin_map::{Error, Frame, Style};
 use burin_map_core::Line;
 use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -83,7 +83,7 @@ impl Map {
     }
     #[pyo3(signature = (mm_per_px=None))]
     fn svg(&self, mm_per_px: Option<f64>) -> String {
-        self.inner.drawing.to_svg(self.inner.style.stroke, mm_per_px.map(|k| k as f32))
+        self.inner.drawing.to_svg(self.inner.style.batch_stroke, mm_per_px.map(|k| k as f32))
     }
     fn png<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         Ok(PyBytes::new(py, &self.inner.to_png().map_err(py_err)?))
@@ -106,11 +106,20 @@ fn logger(log: Option<Py<PyAny>>) -> impl Fn(&burin_map::Progress) + Sync {
     }
 }
 
-/// (name, default, help) of every style parameter.
+/// (name, default, help, group) of every style parameter.
 #[pyfunction]
-fn style_params() -> Vec<(&'static str, f64, &'static str)> {
+fn style_params() -> Vec<(&'static str, f64, &'static str, &'static str)> {
     let d = Style::default();
-    Style::PARAMS.iter().map(|&(n, h)| (n, d.get(n).unwrap() as f32 as f64, h)).collect()
+    Style::PARAMS
+        .iter()
+        .map(|p| (p.name, d.get(p.name).unwrap() as f32 as f64, p.help, p.group))
+        .collect()
+}
+
+/// (id, blurb) for each style group.
+#[pyfunction]
+fn style_groups() -> Vec<(&'static str, &'static str)> {
+    burin_map_core::GROUPS.to_vec()
 }
 
 #[pyfunction]
@@ -130,23 +139,23 @@ fn projected_size(bounds: (f64, f64, f64, f64)) -> (f64, f64) {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bounds, style=None, width=2400, page_width_mm=None, page_height_mm=None, pen_mm=0.3, log=None))]
+#[pyo3(signature = (bounds, style=None, frame_px=2400, frame_width_mm=None, frame_height_mm=None, frame_pen_mm=0.3, log=None))]
 #[allow(clippy::too_many_arguments)]
 fn draw(
     py: Python<'_>,
     bounds: (f64, f64, f64, f64),
     style: Option<&Bound<'_, PyDict>>,
-    width: usize,
-    page_width_mm: Option<f64>,
-    page_height_mm: Option<f64>,
-    pen_mm: f64,
+    frame_px: usize,
+    frame_width_mm: Option<f64>,
+    frame_height_mm: Option<f64>,
+    frame_pen_mm: f64,
     log: Option<Py<PyAny>>,
 ) -> PyResult<Map> {
     let st = style_from(style)?;
-    let page = Page { width, page_width_mm, page_height_mm, pen_mm };
+    let frame = Frame { px: frame_px, width_mm: frame_width_mm, height_mm: frame_height_mm, pen_mm: frame_pen_mm };
     let b = [bounds.0, bounds.1, bounds.2, bounds.3];
     let log = logger(log);
-    let inner = py.detach(|| burin_map::draw(&b, &st, &page, log)).map_err(py_err)?;
+    let inner = py.detach(|| burin_map::draw(&b, &st, &frame, log)).map_err(py_err)?;
     Ok(Map { inner })
 }
 
@@ -170,7 +179,7 @@ fn draw_elevation(
     Ok(Map { inner: burin_map::Map { drawing, style: st, px_m, mm_per_px: None } })
 }
 
-/// Derived rasters (tx, ty, tone, sep) as f32 bytes, for inspection.
+/// Derived rasters (tx, ty, input, space) as f32 bytes, for inspection.
 #[pyfunction]
 #[pyo3(signature = (elev, width, height, px_m, style=None))]
 #[allow(clippy::type_complexity)]
@@ -188,7 +197,7 @@ fn fields<'py>(
     let st = style_from(style)?;
     let e: Vec<f32> = elev.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
     let f = py.detach(|| burin_map_core::build_fields(&e, width, height, px_m as f32, &st));
-    Ok((f32s(py, &f.tx), f32s(py, &f.ty), f32s(py, &f.tone), f32s(py, &f.sep)))
+    Ok((f32s(py, &f.tx), f32s(py, &f.ty), f32s(py, &f.input), f32s(py, &f.space)))
 }
 
 /// Run the `burin-map` command line with `argv` (program name first).
@@ -203,6 +212,7 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<Map>()?;
     m.add_function(wrap_pyfunction!(style_params, m)?)?;
+    m.add_function(wrap_pyfunction!(style_groups, m)?)?;
     m.add_function(wrap_pyfunction!(locate, m)?)?;
     m.add_function(wrap_pyfunction!(bounds_around, m)?)?;
     m.add_function(wrap_pyfunction!(projected_size, m)?)?;

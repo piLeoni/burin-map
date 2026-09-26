@@ -3,7 +3,7 @@
 //!     cargo run --release --example draw -- dem.f32 WIDTH HEIGHT PX_M out.svg
 //!
 //! dem.f32: little-endian f32 heights in metres, row 0 = north.
-//! With BURIN_DUMP=dir, also writes the fields (tx, ty, tone, sep) there as
+//! With BURIN_DUMP=dir, also writes the fields (tx, ty, input, space) there as
 //! raw f32, for comparing against the Python implementation.
 
 use std::time::Instant;
@@ -26,7 +26,7 @@ fn main() {
     let f = build_fields(&elev, w, h, px_m, &st);
     let t1 = Instant::now();
     if let Ok(dir) = std::env::var("BURIN_DUMP") {
-        for (name, v) in [("tx", &f.tx), ("ty", &f.ty), ("tone", &f.tone), ("sep", &f.sep)] {
+        for (name, v) in [("tx", &f.tx), ("ty", &f.ty), ("input", &f.input), ("space", &f.space)] {
             let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
             std::fs::write(format!("{dir}/{name}.f32"), bytes).unwrap();
         }
@@ -35,7 +35,7 @@ fn main() {
     let t2 = Instant::now();
     let lines = plot_order(lines);
     let t3 = Instant::now();
-    let paths = dash_lines(&lines, &f.tone, w, h, &st);
+    let paths = dash_lines(&lines, &f.input, w, h, &st);
     let t4 = Instant::now();
 
     let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
@@ -47,5 +47,5 @@ fn main() {
     println!("pen-up travel {:.0} px", pen_up_travel(&paths));
 
     let d = Drawing { width: w, height: h, paths, lines };
-    std::fs::write(&a[5], d.to_svg(st.stroke, None)).expect("write svg");
+    std::fs::write(&a[5], d.to_svg(st.batch_stroke, None)).expect("write svg");
 }

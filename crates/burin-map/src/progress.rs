@@ -28,8 +28,8 @@ pub enum Progress<'a> {
         centre: (f64, f64),
         secs: f64,
     },
-    /// Sized for paper.
-    Page { width_mm: f64, height_mm: f64, scale: f64, pen_mm: f64, pitch_mm: f64 },
+    /// Frame with a physical size.
+    Frame { width_mm: f64, height_mm: f64, scale: f64, pen_mm: f64, pitch_mm: f64 },
     /// Shading, slope and line directions computed.
     Relief { secs: f64 },
     Lines { count: usize, secs: f64 },
@@ -85,8 +85,8 @@ impl fmt::Display for Progress<'_> {
                 write!(f, ", projected around {} onto {width} × {height} px, {px_m:.0} m per px, \
                            highest point {highest_m:.0} m ({secs:.1} s)", latlon(centre.1, centre.0))
             }
-            Progress::Page { width_mm, height_mm, scale, pen_mm, pitch_mm } => write!(
-                f, "page: {width_mm:.0} × {height_mm:.0} mm at {}, stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart",
+            Progress::Frame { width_mm, height_mm, scale, pen_mm, pitch_mm } => write!(
+                f, "frame: {width_mm:.0} × {height_mm:.0} mm at {}, stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart",
                 self::scale(scale)),
             Progress::Relief { secs } => write!(f, "relief: shading and line directions ({secs:.1} s)"),
             Progress::Lines { count, secs } => write!(f, "lines: {} traced ({secs:.1} s)", thousands(count as u64)),

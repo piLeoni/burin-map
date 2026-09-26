@@ -27,9 +27,10 @@ def drawing(island):
 
 def test_style_mirrors_the_engine():
     st = Style()
-    assert st.spacing == pytest.approx(4.8) and st.seed == 1
-    assert dataclasses.replace(st, spacing=6).spacing == 6
-    assert "spacing" in burin_map.style_help()
+    assert st.space == pytest.approx(4.8) and st.batch_seed == 1
+    assert dataclasses.replace(st, space=6).space == 6
+    assert "space" in burin_map.style_help()
+    assert any(g[0] == "space" for g in burin_map.style_groups())
     with pytest.raises(TypeError):
         Style(nope=1)
 
@@ -50,16 +51,16 @@ def test_nothing_drawn_at_sea(drawing, island):
 
 
 def test_style_changes_the_drawing(island):
-    sparse = draw_elevation(island, PX_M, Style(spacing=8))
-    dense = draw_elevation(island, PX_M, Style(spacing=4))
+    sparse = draw_elevation(island, PX_M, Style(space=8))
+    dense = draw_elevation(island, PX_M, Style(space=4))
     assert len(dense.lines) > 1.5 * len(sparse.lines)
 
 
 def test_fields(island):
     f = burin_map.fields(island, PX_M)
-    assert f.tone.shape == island.shape
+    assert f.input.shape == island.shape
     # Light from the north-west: south-east flank in shadow, north-west flank lit.
-    assert f.tone[190, 190] > f.tone[110, 110]
+    assert f.input[190, 190] > f.input[110, 110]
     assert np.allclose(np.hypot(f.tx, f.ty)[island > 100], 1, atol=1e-3)
 
 

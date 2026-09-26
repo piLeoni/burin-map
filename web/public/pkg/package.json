@@ -1,0 +1,16 @@
+{
+  "name": "burin-map-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings for the burin-map drawing engine",
+  "version": "0.1.0",
+  "files": [
+    "burin_map_wasm_bg.wasm",
+    "burin_map_wasm.js",
+    "burin_map_wasm.d.ts"
+  ],
+  "main": "burin_map_wasm.js",
+  "types": "burin_map_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

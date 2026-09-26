@@ -4,7 +4,7 @@
     >>> lat, lon, _ = burin_map.locate("Twin Peaks, San Francisco")  # or "37.75,-122.45"
     >>> sf = burin_map.bounds_around(lat, lon, 20, 20)                # km
     >>> bay = (-122.75, 37.45, -122.05, 38.05)                    # west, south, east, north
-    >>> d = burin_map.draw(bay, page_width_mm=420, pen_mm=0.3)       # plotter / print
+    >>> d = burin_map.draw(bay, frame_width_mm=420, frame_pen_mm=0.3)  # plotter / print
     >>> d.save_svg("bay.svg"); d.save_png("bay.png")
 
 The engine is written in Rust (the `burin_map._burin` extension); this module
@@ -23,7 +23,7 @@ import numpy as np
 from . import _burin
 
 __all__ = ["Drawing", "Style", "bounds_around", "draw", "draw_elevation", "fields",
-           "locate", "projected_size"]
+           "locate", "projected_size", "style_groups", "style_help"]
 __version__ = _burin.__version__
 
 Bounds = tuple[float, float, float, float]  # west, south, east, north (degrees)
@@ -33,9 +33,10 @@ Bounds = tuple[float, float, float, float]  # west, south, east, north (degrees)
 # same look whatever the area and scale.
 Style = dataclasses.make_dataclass(
     "Style",
-    [(name, int if name == "seed" else float,
-      field(default=int(default) if name == "seed" else default, metadata={"help": help}))
-     for name, default, help in _burin.style_params()],
+    [(name, int if name == "batch_seed" else float,
+      field(default=int(default) if name == "batch_seed" else default,
+            metadata={"help": help, "group": group}))
+     for name, default, help, group in _burin.style_params()],
     module=__name__,
 )
 Style.__doc__ = "All tunable parameters of a drawing. `help(burin_map.Style)` or " \
@@ -43,8 +44,13 @@ Style.__doc__ = "All tunable parameters of a drawing. `help(burin_map.Style)` or
 
 
 def style_help() -> str:
-    return "\n".join(f"{f.name:14} {f.default!s:>6}  {f.metadata['help']}"
+    return "\n".join(f"{f.name:20} {f.default!s:>6}  [{f.metadata['group']}]  {f.metadata['help']}"
                      for f in dataclasses.fields(Style))
+
+
+def style_groups() -> list[tuple[str, str]]:
+    """`(id, blurb)` for each style group."""
+    return list(_burin.style_groups())
 
 
 def _style_dict(style) -> dict | None:
@@ -67,7 +73,7 @@ class Drawing:
         self.width: int = native.width
         self.height: int = native.height
         self.px_m: float = native.px_m        # metres on the ground per pixel
-        self.mm_per_px = mm_per_px            # physical size, when drawn for a page
+        self.mm_per_px = mm_per_px            # physical size, when the frame has one
         self._paths = self._lines = None
 
     @property
@@ -126,19 +132,19 @@ def projected_size(bounds: Bounds) -> tuple[float, float]:
     return _burin.projected_size(tuple(bounds))
 
 
-def draw(bounds: Bounds, style: Style | None = None, *, width: int = 2400,
-         page_width_mm: float | None = None, page_height_mm: float | None = None,
-         pen_mm: float = 0.3, log: Callable[[str], None] | None = None) -> Drawing:
+def draw(bounds: Bounds, style: Style | None = None, *, frame_px: int = 2400,
+         frame_width_mm: float | None = None, frame_height_mm: float | None = None,
+         frame_pen_mm: float = 0.3, log: Callable[[str], None] | None = None) -> Drawing:
     """Download SRTM elevation for `bounds` (west, south, east, north in degrees) and draw it.
 
-    `width` is the image width in px. With `page_width_mm` the drawing is sized
-    for paper instead: the pen takes the place of `style.stroke`, so every
-    proportion of the style is kept and the pixel width follows from page and
-    pen. With `page_height_mm` too, the drawing shrinks to fit inside both.
+    `frame_px` is the image width in px. With `frame_width_mm` the frame has a
+    physical size instead: the pen takes the place of `style.batch_stroke`, so
+    every proportion of the style is kept and the pixel width follows from frame
+    and pen. With `frame_height_mm` too, the drawing shrinks to fit inside both.
     """
     st = style or Style()
-    native = _burin.draw(tuple(bounds), _style_dict(st), width, page_width_mm,
-                         page_height_mm, pen_mm, log)
+    native = _burin.draw(tuple(bounds), _style_dict(st), frame_px, frame_width_mm,
+                         frame_height_mm, frame_pen_mm, log)
     return Drawing(native, st, native.mm_per_px)
 
 
@@ -161,8 +167,8 @@ def draw_elevation(elev, px_m: float, style: Style | None = None) -> Drawing:
 class Fields:
     tx: np.ndarray    # unit vector along the contours of the smoothed surface
     ty: np.ndarray
-    tone: np.ndarray  # 0 = draw nothing … 1 = solid line
-    sep: np.ndarray   # local line spacing, px
+    input: np.ndarray  # 0 = draw nothing … 1 = solid line
+    space: np.ndarray  # local distance between lines, px
 
 
 def fields(elev, px_m: float, style: Style | None = None) -> Fields:

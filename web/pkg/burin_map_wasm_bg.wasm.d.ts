@@ -11,6 +11,7 @@ export const drawing_ms: (a: number) => number;
 export const drawing_paths: (a: number) => any;
 export const drawing_svg: (a: number) => [number, number];
 export const drawing_width: (a: number) => number;
+export const style_groups: () => [number, number, number];
 export const style_params: () => [number, number, number];
 export const __wbindgen_exn_store: (a: number) => void;
 export const __externref_table_alloc: () => number;

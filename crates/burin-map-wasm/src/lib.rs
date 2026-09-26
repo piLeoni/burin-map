@@ -14,26 +14,40 @@ fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
         return Ok(st);
     }
     let o = Object::from(obj.clone());
-    for &(name, _) in Style::PARAMS {
-        if let Ok(v) = Reflect::get(&o, &JsValue::from_str(name)) {
+    for p in Style::PARAMS {
+        if let Ok(v) = Reflect::get(&o, &p.name.into()) {
             if let Some(n) = v.as_f64() {
-                st.set(name, n);
+                st.set(p.name, n);
             }
         }
     }
     Ok(st)
 }
 
-/// (name, default, help) for every style parameter — drives the web UI.
+/// (name, default, help, group) for every style parameter — drives the web UI.
 #[wasm_bindgen]
 pub fn style_params() -> Result<JsValue, JsValue> {
     let d = Style::default();
     let arr = js_sys::Array::new();
-    for &(name, help) in Style::PARAMS {
+    for p in Style::PARAMS {
         let o = js_sys::Object::new();
-        Reflect::set(&o, &"name".into(), &name.into())?;
-        Reflect::set(&o, &"default".into(), &(d.get(name).unwrap() as f32 as f64).into())?;
-        Reflect::set(&o, &"help".into(), &help.into())?;
+        Reflect::set(&o, &"name".into(), &p.name.into())?;
+        Reflect::set(&o, &"default".into(), &(d.get(p.name).unwrap() as f32 as f64).into())?;
+        Reflect::set(&o, &"help".into(), &p.help.into())?;
+        Reflect::set(&o, &"group".into(), &p.group.into())?;
+        arr.push(&o);
+    }
+    Ok(arr.into())
+}
+
+/// (id, blurb) for each style group — section headers in the web UI.
+#[wasm_bindgen]
+pub fn style_groups() -> Result<JsValue, JsValue> {
+    let arr = js_sys::Array::new();
+    for &(id, blurb) in burin_map_core::GROUPS {
+        let o = js_sys::Object::new();
+        Reflect::set(&o, &"id".into(), &id.into())?;
+        Reflect::set(&o, &"blurb".into(), &blurb.into())?;
         arr.push(&o);
     }
     Ok(arr.into())
@@ -131,7 +145,7 @@ pub fn draw(
     let d = burin_map_core::draw(elev, w, h, px_m, &st);
     let ms = now_ms() - t0;
     let (pts, ends) = pack(&d.paths);
-    let svg = d.to_svg(st.stroke, None);
+    let svg = d.to_svg(st.batch_stroke, None);
     Ok(Drawing {
         width,
         height,

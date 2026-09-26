@@ -1,7 +1,7 @@
 //! Node.js bindings (N-API): the native addon behind the `burin-map` npm package.
 //! The public JS API is the generated `index.js` plus a thin `cli.js` for `npx`.
 
-use burin_map::{Error as BurinError, Page, Style};
+use burin_map::{Error as BurinError, Frame, Style};
 use burin_map_core::Line;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -15,13 +15,9 @@ fn style_from(obj: Option<Object>) -> Result<Style> {
     let Some(obj) = obj else {
         return Ok(st);
     };
-    for &(name, _) in Style::PARAMS {
-        if let Ok(v) = obj.get::<f64>(name) {
-            if let Some(n) = v {
-                if !st.set(name, n) {
-                    return Err(Error::from_reason(format!("unknown style parameter {name:?}")));
-                }
-            }
+    for p in Style::PARAMS {
+        if let Ok(Some(n)) = obj.get::<f64>(p.name) {
+            st.set(p.name, n);
         }
     }
     Ok(st)
@@ -86,7 +82,7 @@ impl Drawing {
     pub fn svg(&self, mm_per_px: Option<f64>) -> String {
         self.inner
             .drawing
-            .to_svg(self.inner.style.stroke, mm_per_px.map(|k| k as f32))
+            .to_svg(self.inner.style.batch_stroke, mm_per_px.map(|k| k as f32))
     }
 
     #[napi]
@@ -100,13 +96,29 @@ impl Drawing {
     }
 }
 
-/// `(name, default, help)` for every style parameter.
+/// `(name, default, help, group)` for every style parameter.
 #[napi]
-pub fn style_params() -> Vec<(String, f64, String)> {
+pub fn style_params() -> Vec<(String, f64, String, String)> {
     let d = Style::default();
     Style::PARAMS
         .iter()
-        .map(|&(n, h)| (n.to_string(), d.get(n).unwrap() as f32 as f64, h.to_string()))
+        .map(|p| {
+            (
+                p.name.to_string(),
+                d.get(p.name).unwrap() as f32 as f64,
+                p.help.to_string(),
+                p.group.to_string(),
+            )
+        })
+        .collect()
+}
+
+/// `(id, blurb)` for each style group.
+#[napi]
+pub fn style_groups() -> Vec<(String, String)> {
+    burin_map_core::GROUPS
+        .iter()
+        .map(|&(id, blurb)| (id.to_string(), blurb.to_string()))
         .collect()
 }
 
@@ -136,20 +148,20 @@ pub fn draw(
     east: f64,
     north: f64,
     style: Option<Object>,
-    width: Option<u32>,
-    page_width_mm: Option<f64>,
-    page_height_mm: Option<f64>,
-    pen_mm: Option<f64>,
+    frame_px: Option<u32>,
+    frame_width_mm: Option<f64>,
+    frame_height_mm: Option<f64>,
+    frame_pen_mm: Option<f64>,
 ) -> Result<Drawing> {
     let st = style_from(style)?;
-    let page = Page {
-        width: width.unwrap_or(2400) as usize,
-        page_width_mm,
-        page_height_mm,
-        pen_mm: pen_mm.unwrap_or(0.3),
+    let frame = Frame {
+        px: frame_px.unwrap_or(2400) as usize,
+        width_mm: frame_width_mm,
+        height_mm: frame_height_mm,
+        pen_mm: frame_pen_mm.unwrap_or(0.3),
     };
     let b = [west, south, east, north];
-    let inner = burin_map::draw(&b, &st, &page, |_| {}).map_err(js_err)?;
+    let inner = burin_map::draw(&b, &st, &frame, |_| {}).map_err(js_err)?;
     Ok(Drawing { inner })
 }
 

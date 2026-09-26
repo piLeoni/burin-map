@@ -1,5 +1,7 @@
-//! Break streamlines into dashes whose length follows the tone.
-//! Mirrors `src/burin/dashes.py`; see there for the full explanation.
+//! Break streamlines into dashes whose length follows the input field.
+//!
+//! `dash_light` / `dash_dark` set the ink fraction at input 0 and 1.
+//! `dash_drop` controls the flat-ground lottery (0 = off).
 
 use crate::rng::Rng;
 use crate::streamlines::Line;
@@ -14,17 +16,19 @@ fn at(line: &Line, s: &[f32], d: f32) -> [f32; 2] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
 
-pub fn dash_lines(lines: &[Line], tone: &[f32], w: usize, h: usize, st: &Style) -> Vec<Line> {
-    let mut rng = Rng::new(st.seed.wrapping_add(0x9e37_79b9));
-    let base = (st.period * st.spacing) as f64;
-    let shade = st.shade_dash.clamp(0.0, 1.0) as f64;
+pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style) -> Vec<Line> {
+    let mut rng = Rng::new(st.batch_seed.wrapping_add(0x9e37_79b9));
+    let base = (st.dash_period * st.space) as f64;
+    // Fully continuous: both ends solid and no drop lottery.
+    let continuous = st.dash_light >= 1.0 - 1e-6
+        && st.dash_dark >= 1.0 - 1e-6
+        && st.dash_drop <= 1e-6;
     let mut out = Vec::new();
     for line in lines {
         if line.len() < 2 {
             continue;
         }
-        // Fully continuous: emit the whole streamline as one stroke.
-        if shade <= 1e-6 {
+        if continuous {
             out.push(line.clone());
             continue;
         }
@@ -37,29 +41,31 @@ pub fn dash_lines(lines: &[Line], tone: &[f32], w: usize, h: usize, st: &Style) 
         let total = *s.last().unwrap() as f64;
         let mut cur = -rng.f64() * base;
         while cur < total {
-            let jit = st.jitter as f64;
+            let jit = st.mod_jitter as f64;
             let period = (base * rng.uniform(1.0 - jit, 1.0 + jit)).max(0.3 * base);
             let mid = (cur + period * 0.5).min(total);
             let p = at(line, &s, mid as f32);
-            let mut t = tone[(p[1] as usize).min(h - 1) * w + (p[0] as usize).min(w - 1)] as f64;
-            // shade_dash → 0 lifts tone toward solid (less fragmentation).
-            t = t * shade + (1.0 - shade);
-            let t = t as f32;
-            // Below the flat tone, keep the flat dash length and drop dashes at random.
-            let mut t = t;
-            if shade > 1e-6 && t > st.cutoff && t < st.flat_level {
-                t = if rng.f64() * (st.flat_level as f64) < t as f64 { st.flat_level } else { 0.0 };
+            let mut t = input[(p[1] as usize).min(h - 1) * w + (p[0] as usize).min(w - 1)];
+            // Flat/light lottery: with strength dash_drop, randomly drop or bump to flat.
+            if st.dash_drop > 1e-6 && t > st.dash_cutoff && t < st.input_flat {
+                if rng.f64() < st.dash_drop as f64 {
+                    t = if rng.f64() * (st.input_flat as f64) < t as f64 {
+                        st.input_flat
+                    } else {
+                        0.0
+                    };
+                }
             }
-            if t > st.cutoff {
-                let duty = (st.duty_min + (st.duty_max - st.duty_min) * t) as f64;
-                let j = st.jitter as f64 * (1.0 - t as f64);
+            if t > st.dash_cutoff {
+                let duty = (st.dash_light + (st.dash_dark - st.dash_light) * t) as f64;
+                let j = st.mod_jitter as f64 * (1.0 - t as f64);
                 let spread = if j > 1e-3 { rng.gamma(1.0 / (j * j), j * j) } else { 1.0 };
                 let a = cur.max(0.0);
                 let mut b = cur + period * duty * spread;
-                let break_p = st.breaks as f64 * shade;
+                let break_p = st.mod_breaks as f64;
                 if b >= cur + period && rng.f64() < break_p {
                     // must beat the round caps (stroke/2 each side) to show
-                    b = cur + period - st.stroke as f64 * rng.uniform(1.5, 3.0);
+                    b = cur + period - st.batch_stroke as f64 * rng.uniform(1.5, 3.0);
                 }
                 let b = b.min(total);
                 if b - a > 0.6 {

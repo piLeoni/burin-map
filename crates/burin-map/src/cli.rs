@@ -1,19 +1,21 @@
-//! Command line: `burin-map --at "Twin Peaks, San Francisco" --size 20km -o sf.png`.
+//! Command line: `burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 20km --out-file sf.png`.
 //! Lives in the library so the Python package can run the very same command.
 //!
-//! Ground size, paper size and scale are tied together: give any two and
+//! Ground size, frame size and scale are tied together: give any two and
 //! the third follows (the log always reports the resulting scale).
 
+use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use clap::parser::ValueSource;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
 use crate::{
-    bounds_around, dem::projected_size, draw_hatches, locate, Bounds, Error, Hatch, Page, Progress,
+    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Error, Frame, Progress,
     Style, TileSource,
 };
 
@@ -23,118 +25,172 @@ const PLACES: &[(&str, Bounds)] = &[
     ("san-francisco", [-122.75, 37.45, -122.05, 38.05]),
 ];
 
+/// Values taken by a terrain / frame / out flag.
+#[derive(Clone, Copy)]
+enum Takes {
+    One,
+    Four,
+    OneOrTwo,
+}
+
+/// Flags that describe the whole run rather than one batch: (long, short, values).
+/// They go to the shared prefix wherever they appear on the command line.
+const GLOBAL: &[(&str, &str, Takes)] = &[
+    ("terrain-place", "tp", Takes::One),
+    ("terrain-at", "tat", Takes::One),
+    ("terrain-bounds", "tbo", Takes::Four),
+    ("terrain-size", "ts", Takes::OneOrTwo),
+    ("frame-px", "fpx", Takes::One),
+    ("frame-width", "fw", Takes::One),
+    ("frame-height", "fh", Takes::One),
+    ("frame-scale", "fsc", Takes::One),
+    ("frame-pen", "fpen", Takes::One),
+    ("out-file", "of", Takes::One),
+    ("out-format", "fmt", Takes::One),
+];
+
+fn short_of(long: &str) -> &'static str {
+    GLOBAL.iter().find(|g| g.0 == long).unwrap().1
+}
+
 pub fn command() -> Command {
     let defaults = Style::default();
+    let global = |long: &'static str| Arg::new(long).long(long).visible_alias(short_of(long));
     let mut cmd = Command::new("burin-map")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Pen-and-ink terrain map from SRTM elevation data.")
         .after_help("Examples:\n  \
-            burin-map --at \"Twin Peaks, San Francisco\" --size 20km -o sf.png --svg\n  \
-            burin-map --place bern --spacing 5\n  \
-            burin-map --place bern --hatch --spacing 6 --breaks 0.1 \\\n  \
-            \x20   --hatch --angle 90 --breaks 0.85 --hatch-floor 0.45\n  \
-            burin-map --at \"Zermatt\" --page-width 297 --page-height 420 --scale 1:50000 --svg")
-        .next_help_heading("Where")
-        .arg(Arg::new("place").long("place").default_value("san-francisco")
+            burin-map --terrain-at \"Twin Peaks, San Francisco\" --terrain-size 20km --out-file sf.png\n  \
+            burin-map --tp bern --s 5 --dl 0.3\n  \
+            burin-map --terrain-place bern --batch --space 6 --mod-breaks 0.1 \\\n  \
+            \x20   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45\n  \
+            burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg")
+        .next_help_heading("Terrain — the ground to draw")
+        .arg(global("terrain-place").value_name("NAME").default_value("san-francisco")
             .value_parser(PLACES.iter().map(|p| p.0).collect::<Vec<_>>()).help("named area"))
-        .arg(Arg::new("bounds").long("bounds").num_args(4).value_names(["W", "S", "E", "N"])
+        .arg(global("terrain-at").value_name("WHERE").allow_hyphen_values(true)
+            .help("centre: an address or place name, or \"lat,lon\""))
+        .arg(global("terrain-bounds").num_args(4).value_names(["W", "S", "E", "N"])
             .allow_negative_numbers(true).value_parser(value_parser!(f64))
             .help("area in degrees: west south east north"))
-        .arg(Arg::new("at").long("at").value_name("WHERE").allow_hyphen_values(true)
-            .help("centre: an address or place name, or \"lat,lon\""))
-        .group(ArgGroup::new("where").args(["place", "bounds", "at"]))
-        .arg(Arg::new("size").long("size").num_args(1..=2).value_names(["WIDTH", "HEIGHT"])
-            .help("with --at: ground width [and height], e.g. 20km, 800m, 5mi; a bare number is km. \
-                   Height defaults to the page's proportions, else square. Default 30km"))
-        .next_help_heading("Output")
-        .arg(Arg::new("output").short('o').long("output").value_name("PNG").default_value("burin-map.png")
-            .help("PNG path"))
-        .arg(Arg::new("svg").long("svg").action(ArgAction::SetTrue).help("also write an SVG next to the PNG"))
-        .arg(Arg::new("width").long("width").value_name("PX").default_value("2400")
-            .value_parser(value_parser!(usize))
-            .help("image width in px, when no page is given"))
-        .next_help_heading("Page: sizes the SVG in mm")
-        .arg(Arg::new("page-width").long("page-width").value_name("MM").value_parser(value_parser!(f64))
-            .help("drawing width, mm"))
-        .arg(Arg::new("page-height").long("page-height").value_name("MM").value_parser(value_parser!(f64))
-            .help("max drawing height, mm; the drawing shrinks to fit"))
-        .arg(Arg::new("scale").long("scale").value_name("1:N")
-            .help("map scale; with --page-width sets the ground size, otherwise the page size"))
-        .arg(Arg::new("pen").long("pen").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
-            .help("stroke width on the page, mm (sets how many pixels --page-width becomes)"))
-        .next_help_heading("Hatching")
-        .arg(Arg::new("hatch").long("hatch").action(ArgAction::Append).num_args(0)
-            .help("start a hatching pass (may repeat). Flags after each --hatch apply to that \
-                   pass until the next --hatch; --angle sets degrees from the contour tangent \
-                   (0 = along, 90 = downslope). Without any --hatch there is one pass at angle 0"))
-        .next_help_heading("Style");
-    for &(name, help) in Style::PARAMS {
-        // Through f32 so 4.8 prints as 4.8, not 4.800000190734863.
-        let default = (defaults.get(name).unwrap() as f32).to_string();
-        cmd = cmd.arg(Arg::new(name).long(name.replace('_', "-")).value_name("X")
-            .default_value(default).allow_negative_numbers(true)
-            .value_parser(value_parser!(f64)).help(help));
+        .group(ArgGroup::new("terrain").args(["terrain-place", "terrain-at", "terrain-bounds"]))
+        .arg(global("terrain-size").num_args(1..=2).value_names(["WIDTH", "HEIGHT"])
+            .help("with --terrain-at: ground width [and height], e.g. 20km, 800m, 5mi; a bare number is km. \
+                   Height defaults to the frame's proportions, else square. Default 30km"))
+        .next_help_heading("Frame — the rectangle it is drawn in")
+        .arg(global("frame-px").value_name("PX").default_value("2400").value_parser(value_parser!(usize))
+            .help("width in px, when no --frame-width in mm is given"))
+        .arg(global("frame-width").value_name("MM").value_parser(value_parser!(f64))
+            .help("width, mm"))
+        .arg(global("frame-height").value_name("MM").value_parser(value_parser!(f64))
+            .help("max height, mm; the drawing shrinks to fit"))
+        .arg(global("frame-scale").value_name("1:N")
+            .help("map scale; with --frame-width sets the ground size, otherwise the frame width"))
+        .arg(global("frame-pen").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
+            .help("stroke width in the frame, mm (sets how many pixels --frame-width becomes)"))
+        .next_help_heading("Out — what gets written")
+        .arg(global("out-file").value_name("PATH").default_value("burin-map.png")
+            .help("output path"))
+        .arg(global("out-format").value_name("FMT").value_parser(["png", "svg", "both"])
+            .help("png, svg or both; default from the --out-file extension"))
+        .next_help_heading("Batch — parallel drawing passes")
+        .arg(Arg::new("batch").long("batch").short('b').action(ArgAction::Append).num_args(0)
+            .help("start a pass (may repeat). Flags after each --batch apply to that pass until the \
+                   next one; flags before the first --batch are shared. Without --batch there is one pass"))
+        .arg(Arg::new("batch-angle").long("batch-angle").visible_alias("ba").value_name("DEG")
+            .default_value("0").allow_negative_numbers(true).value_parser(value_parser!(f64))
+            .help("degrees from the contour tangent (0 = along, 90 = downslope)"));
+
+    let mut last_group = "";
+    for p in Style::PARAMS {
+        if p.group != last_group {
+            let heading = match p.group {
+                "space" => "Space — distance between lines",
+                "dash" => "Dash — ink along each line",
+                "mod" => "Mod — hand-drawn character",
+                "input" => "Input — 0…1 field from terrain + sun",
+                "sun" => "Sun",
+                "engine" => "Engine — streamline tracer",
+                "batch" => "Batch style — per-pass floor, stroke, seed",
+                other => other,
+            };
+            cmd = cmd.next_help_heading(heading);
+            last_group = p.group;
+        }
+        let default = (defaults.get(p.name).unwrap() as f32).to_string();
+        cmd = cmd.arg(
+            Arg::new(p.name)
+                .long(p.name.replace('_', "-"))
+                .visible_alias(p.short)
+                .value_name("X")
+                .default_value(default)
+                .allow_negative_numbers(true)
+                .value_parser(value_parser!(f64))
+                .help(p.help),
+        );
     }
     cmd
 }
 
-/// Area to draw, page to draw it on and a name for the area, from the
-/// where / size / page / scale options.
-fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page, String), Error> {
-    let mut page = Page {
-        width: *m.get_one("width").unwrap(),
-        page_width_mm: m.get_one("page-width").copied(),
-        page_height_mm: m.get_one("page-height").copied(),
-        pen_mm: *m.get_one("pen").unwrap(),
+/// Area to draw, frame to draw it in and a name for the area, from the
+/// terrain and frame options.
+fn area_and_frame(m: &ArgMatches) -> Result<(Bounds, Frame, String), Error> {
+    let mut frame = Frame {
+        px: *m.get_one("frame-px").unwrap(),
+        width_mm: m.get_one("frame-width").copied(),
+        height_mm: m.get_one("frame-height").copied(),
+        pen_mm: *m.get_one("frame-pen").unwrap(),
     };
-    let scale = m.get_one::<String>("scale").map(|s| parse_scale(s)).transpose()?;
-    let size = match m.get_many::<String>("size") {
+    let scale = m.get_one::<String>("frame-scale").map(|s| parse_scale(s)).transpose()?;
+    let size = match m.get_many::<String>("terrain-size") {
         Some(v) => {
             let v: Vec<f64> = v.map(|s| parse_length_km(s)).collect::<Result<_, _>>()?;
             Some((v[0], v.get(1).copied()))
         }
         None => None,
     };
-    let page_aspect = match (page.page_width_mm, page.page_height_mm) {
+    let frame_aspect = match (frame.width_mm, frame.height_mm) {
         (Some(w), Some(h)) => Some(h / w),
         _ => None,
     };
 
-    let Some(q) = m.get_one::<String>("at") else {
+    let Some(q) = m.get_one::<String>("terrain-at") else {
         if size.is_some() {
-            return Err(Error::Input("--size only applies with --at".into()));
+            return Err(Error::Input("--terrain-size only applies with --terrain-at".into()));
         }
-        let (bounds, label) = match m.get_many::<f64>("bounds") {
+        let (bounds, label) = match m.get_many::<f64>("terrain-bounds") {
             Some(b) => {
                 let b: Vec<f64> = b.copied().collect();
                 ([b[0], b[1], b[2], b[3]], format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])))
             }
             None => {
-                let name = m.get_one::<String>("place").unwrap();
+                let name = m.get_one::<String>("terrain-place").unwrap();
                 let title = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
                 (PLACES.iter().find(|p| p.0 == name).unwrap().1, title)
             }
         };
         if let Some(n) = scale {
-            if page.page_width_mm.is_some() {
+            if frame.width_mm.is_some() {
                 return Err(Error::Input(
-                    "the area, --page-width and --scale can't all be fixed: drop one".into()));
+                    "the area, --frame-width and --frame-scale can't all be fixed: drop one".into()));
             }
-            page.page_width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
+            frame.width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
         }
-        return Ok((bounds, page, label));
+        return Ok((bounds, frame, label));
     };
 
-    let (w_km, h_km) = match (size, scale, page.page_width_mm) {
+    let (w_km, h_km) = match (size, scale, frame.width_mm) {
         (Some(_), Some(_), Some(_)) => {
-            return Err(Error::Input("--size, --page-width and --scale can't all be given: drop one".into()));
+            return Err(Error::Input(
+                "--terrain-size, --frame-width and --frame-scale can't all be given: drop one".into()));
         }
-        (Some((w, h)), _, _) => (w, h.unwrap_or(w * page_aspect.unwrap_or(1.0))),
-        (None, Some(n), Some(pw)) => (pw * n / 1e6, page.page_height_mm.unwrap_or(pw) * n / 1e6),
+        (Some((w, h)), _, _) => (w, h.unwrap_or(w * frame_aspect.unwrap_or(1.0))),
+        (None, Some(n), Some(fw)) => (fw * n / 1e6, frame.height_mm.unwrap_or(fw) * n / 1e6),
         (None, Some(_), None) => {
-            return Err(Error::Input("with --at, --scale needs --size or --page-width".into()));
+            return Err(Error::Input(
+                "with --terrain-at, --frame-scale needs --terrain-size or --frame-width".into()));
         }
-        (None, None, _) => (30.0, 30.0 * page_aspect.unwrap_or(1.0)),
+        (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
     };
     let (lat, lon, label) = locate(q)?;
     // Degrees per km is approximate; correct against the projection so the
@@ -147,10 +203,10 @@ fn area_and_page(m: &ArgMatches) -> Result<(Bounds, Page, String), Error> {
         let (cx, cy, hx, hy) = ((w0 + e0) / 2.0, (s0 + n0) / 2.0, (e0 - w0) / 2.0 * fx, (n0 - s0) / 2.0 * fy);
         bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
     }
-    if let (Some(n), None) = (scale, page.page_width_mm) {
-        page.page_width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
+    if let (Some(n), None) = (scale, frame.width_mm) {
+        frame.width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
     }
-    Ok((bounds, page, label))
+    Ok((bounds, frame, label))
 }
 
 /// Coloured, aligned progress on stdout. Colour is dropped automatically
@@ -214,9 +270,9 @@ impl Report {
                 self.detail(&format!("projected onto {width} × {height} px, {px_m:.0} m per pixel, \
                                       highest point {highest_m:.0} m"));
             }
-            Progress::Page { width_mm, height_mm, scale, pen_mm, pitch_mm } => {
-                self.step("page", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
-                                           crate::progress::scale(scale)), None);
+            Progress::Frame { width_mm, height_mm, scale, pen_mm, pitch_mm } => {
+                self.step("frame", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
+                                            crate::progress::scale(scale)), None);
                 self.detail(&format!("stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart"));
             }
             Progress::Relief { secs } => self.step("relief", "light and shadow, slope, line directions", Some(secs)),
@@ -234,58 +290,61 @@ impl Report {
 pub fn run<I, T>(args: I) -> Result<(), Box<dyn std::error::Error>>
 where
     I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
+    T: Into<OsString> + Clone,
 {
-    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
-    let (prefix, hatch_secs) = split_hatch_argv(&args)?;
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let (prefix, sections) = split_batch_argv(&args)?;
     let m = command().try_get_matches_from(prefix).unwrap_or_else(|e| e.exit());
 
-    let hatches = match hatch_secs {
+    let batches = match sections {
         None => {
             let mut st = Style::default();
-            for &(name, _) in Style::PARAMS {
-                st.set(name, *m.get_one::<f64>(name).unwrap());
+            for p in Style::PARAMS {
+                st.set(p.name, *m.get_one::<f64>(p.name).unwrap());
             }
-            vec![Hatch::along(st)]
+            vec![Batch { angle: *m.get_one::<f64>("batch-angle").unwrap() as f32, style: st }]
         }
         Some(sections) => {
-            let mut base = Style::default();
-            for &(name, _) in Style::PARAMS {
-                if m.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
-                    base.set(name, *m.get_one::<f64>(name).unwrap());
-                }
-            }
+            let base = shared_style(&m);
             sections
                 .iter()
-                .map(|sec| parse_hatch_section(&base, sec))
+                .map(|sec| parse_batch_section(&base, sec))
                 .collect::<Result<Vec<_>, _>>()?
         }
     };
 
     let r = Report::new();
-    if m.get_one::<String>("at").is_some() {
+    if m.get_one::<String>("terrain-at").is_some() {
         r.transient("where", "looking up the place");
     }
-    let (bounds, page, label) = area_and_page(&m)?;
+    let (bounds, frame, label) = area_and_frame(&m)?;
     let (wm, hm) = projected_size(&bounds);
     let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
     r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
     r.detail(&format!("{:.1} × {:.1} km around {centre}", wm / 1000.0, hm / 1000.0));
-    if hatches.len() > 1 || hatches[0].angle != 0.0 {
-        let desc: Vec<String> = hatches
-            .iter()
-            .map(|h| format!("{:.0}°", h.angle))
-            .collect();
-        r.detail(&format!("{} hatch passes ({})", hatches.len(), desc.join(", ")));
+    if batches.len() > 1 || batches[0].angle != 0.0 {
+        let desc: Vec<String> = batches.iter().map(|b| format!("{:.0}°", b.angle)).collect();
+        r.detail(&format!("{} batch passes ({})", batches.len(), desc.join(", ")));
     }
 
     let t = Instant::now();
-    let map = draw_hatches(&bounds, &hatches, &page, |p| r.progress(p))?;
-    let out = PathBuf::from(m.get_one::<String>("output").unwrap());
+    let map = draw_batches(&bounds, &batches, &frame, |p| r.progress(p))?;
+    let out = PathBuf::from(m.get_one::<String>("out-file").unwrap());
     let d = &map.drawing;
-    std::fs::write(&out, map.to_png()?)?;
-    let mut files = vec![(out.clone(), format!("{} × {} px", d.width, d.height))];
-    if m.get_flag("svg") {
+    let is_svg = out.extension().map(|e| e == "svg").unwrap_or(false);
+    let (want_png, want_svg) = match m.get_one::<String>("out-format").map(|s| s.as_str()) {
+        Some("png") => (true, false),
+        Some("svg") => (false, true),
+        Some(_) => (true, true),
+        None => (!is_svg, is_svg),
+    };
+    let mut files = Vec::new();
+    if want_png {
+        let png = out.with_extension("png");
+        std::fs::write(&png, map.to_png()?)?;
+        files.push((png, format!("{} × {} px", d.width, d.height)));
+    }
+    if want_svg {
         let svg = out.with_extension("svg");
         std::fs::write(&svg, map.to_svg())?;
         let size = match map.mm_per_px {
@@ -307,26 +366,34 @@ where
     Ok(())
 }
 
-/// Split `argv` on `--hatch`. Global flags (`--at`, `-o`, …) always go to the
-/// clap prefix even if they appear after a `--hatch`. Style flags stay in the
-/// current hatch section.
-fn split_hatch_argv(
-    args: &[std::ffi::OsString],
-) -> Result<(Vec<std::ffi::OsString>, Option<Vec<Vec<std::ffi::OsString>>>), Error> {
+/// Style from the flags before the first `--batch`: defaults, overridden by
+/// whatever was given on the command line.
+fn shared_style(m: &ArgMatches) -> Style {
+    let mut st = Style::default();
+    for p in Style::PARAMS {
+        if m.value_source(p.name) == Some(ValueSource::CommandLine) {
+            st.set(p.name, *m.get_one::<f64>(p.name).unwrap());
+        }
+    }
+    st
+}
+
+/// Split `argv` on `--batch` / `-b`. Terrain, frame and out flags always go
+/// to the clap prefix, even after a `--batch`; style flags stay in the
+/// current batch section.
+fn split_batch_argv(args: &[OsString]) -> Result<(Vec<OsString>, Option<Vec<Vec<OsString>>>), Error> {
     let mut prefix = Vec::new();
-    let mut sections: Option<Vec<Vec<std::ffi::OsString>>> = None;
-    let mut cur: Option<Vec<std::ffi::OsString>> = None;
-    let mut first = true;
+    let mut sections: Option<Vec<Vec<OsString>>> = None;
+    let mut cur: Option<Vec<OsString>> = None;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
-        if first {
+        if i == 0 {
             prefix.push(a.clone());
-            first = false;
             i += 1;
             continue;
         }
-        if a == "--hatch" {
+        if a == "--batch" || a == "-b" {
             let secs = sections.get_or_insert_with(Vec::new);
             if let Some(c) = cur.take() {
                 secs.push(c);
@@ -336,115 +403,77 @@ fn split_hatch_argv(
             continue;
         }
         let flag = a.to_string_lossy();
-        if cur.is_some() && is_global_flag(&flag) {
-            let n = global_value_count(&flag, &args[i + 1..]);
-            for _ in 0..=n {
-                if i < args.len() {
-                    prefix.push(args[i].clone());
-                    i += 1;
-                }
+        if cur.is_some() {
+            if let Some(n) = global_value_count(&flag, &args[i + 1..]) {
+                let end = (i + 1 + n).min(args.len());
+                prefix.extend_from_slice(&args[i..end]);
+                i = end;
+                continue;
             }
-            continue;
         }
-        if let Some(ref mut c) = cur {
-            c.push(a.clone());
-        } else {
-            prefix.push(a.clone());
+        match cur {
+            Some(ref mut c) => c.push(a.clone()),
+            None => prefix.push(a.clone()),
         }
         i += 1;
     }
     if let Some(c) = cur {
         sections.get_or_insert_with(Vec::new).push(c);
     }
-    if let Some(ref secs) = sections {
-        if secs.is_empty() {
-            return Err(Error::Input("bare --hatch with no following pass".into()));
-        }
-    }
     Ok((prefix, sections))
 }
 
-fn is_global_flag(flag: &str) -> bool {
-    matches!(
-        flag,
-        "--place"
-            | "--bounds"
-            | "--at"
-            | "--size"
-            | "--output"
-            | "-o"
-            | "--svg"
-            | "--width"
-            | "--page-width"
-            | "--page-height"
-            | "--scale"
-            | "--pen"
-            | "--help"
-            | "-h"
-            | "--version"
-            | "-V"
-    )
-}
-
-/// How many value tokens follow this global flag.
-fn global_value_count(flag: &str, rest: &[std::ffi::OsString]) -> usize {
-    match flag {
-        "--svg" | "--help" | "-h" | "--version" | "-V" => 0,
-        "--bounds" => 4,
-        "--size" => {
-            // one or two values; take while it doesn't look like a flag
-            let mut n = 0;
-            for a in rest.iter().take(2) {
-                let s = a.to_string_lossy();
-                if s.starts_with('-') && s != "-" {
-                    break;
-                }
-                n += 1;
-            }
+/// For a run-wide flag, how many value tokens follow it; `None` for anything else.
+fn global_value_count(flag: &str, rest: &[OsString]) -> Option<usize> {
+    if matches!(flag, "--help" | "-h" | "--version" | "-V") {
+        return Some(0);
+    }
+    let name = flag.strip_prefix("--")?;
+    let takes = GLOBAL.iter().find(|g| g.0 == name || g.1 == name)?.2;
+    Some(match takes {
+        Takes::One => 1,
+        Takes::Four => 4,
+        Takes::OneOrTwo => {
+            let n = rest.iter().take(2).take_while(|a| !a.to_string_lossy().starts_with("--")).count();
             n.max(1)
         }
-        _ => 1,
-    }
+    })
 }
 
-fn parse_hatch_section(base: &Style, args: &[std::ffi::OsString]) -> Result<Hatch, Error> {
+fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> {
     let mut st = base.clone();
     let mut angle = 0.0f64;
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].to_string_lossy();
-        if !flag.starts_with("--") {
-            return Err(Error::Input(format!("unexpected {flag:?} in --hatch section")));
-        }
-        let name = flag.trim_start_matches('-').replace('-', "_");
-        i += 1;
-        if i >= args.len() {
-            return Err(Error::Input(format!("missing value for {flag}")));
-        }
-        let raw = args[i].to_string_lossy();
-        let v: f64 = raw
-            .parse()
-            .map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
-        i += 1;
-        if name == "angle" {
+        let Some(name) = flag.strip_prefix("--") else {
+            return Err(Error::Input(format!("unexpected {flag:?} in --batch section")));
+        };
+        let name = name.replace('-', "_");
+        let raw = args.get(i + 1).ok_or_else(|| Error::Input(format!("missing value for {flag}")))?;
+        let raw = raw.to_string_lossy();
+        let v: f64 = raw.parse().map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
+        i += 2;
+        if name == "batch_angle" || name == "ba" {
             angle = v;
         } else if !st.set(&name, v) {
-            return Err(Error::Input(format!("unknown hatch parameter {flag}")));
+            return Err(Error::Input(format!("unknown batch parameter {flag}")));
         }
     }
-    Ok(Hatch {
-        angle: angle as f32,
-        style: st,
-    })
+    Ok(Batch { angle: angle as f32, style: st })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn resolve(args: &[&str]) -> Result<(Bounds, Page), Error> {
+    fn resolve(args: &[&str]) -> Result<(Bounds, Frame), Error> {
         let m = command().try_get_matches_from(std::iter::once("burin-map").chain(args.iter().copied())).unwrap();
-        area_and_page(&m).map(|(b, p, _)| (b, p))
+        area_and_frame(&m).map(|(b, f, _)| (b, f))
+    }
+
+    fn argv(args: &[&str]) -> Vec<OsString> {
+        std::iter::once("burin-map").chain(args.iter().copied()).map(Into::into).collect()
     }
 
     #[test]
@@ -454,54 +483,64 @@ mod tests {
 
     #[test]
     fn scale_sets_the_missing_side() {
-        // Place + scale → page width from the projected area.
-        let (b, p) = resolve(&["--place", "bern", "--scale", "1:100000"]).unwrap();
-        let w_mm = p.page_width_mm.unwrap();
+        let (b, f) = resolve(&["--terrain-place", "bern", "--frame-scale", "1:100000"]).unwrap();
+        let w_mm = f.width_mm.unwrap();
         assert!((w_mm - projected_size(&b).0 / 100.0).abs() < 1e-6);
-        // Coordinates + page + scale → ground from the paper: 297 mm at 1:50,000 = 14.85 km.
-        let (b, _) = resolve(&["--at", "46,7.7", "--page-width", "297", "--scale", "1:50000"]).unwrap();
+        let (b, _) = resolve(&["--tat", "46,7.7", "--fw", "297", "--fsc", "1:50000"]).unwrap();
         assert!((projected_size(&b).0 / 1000.0 - 14.85).abs() < 0.1);
     }
 
     #[test]
     fn overdetermined_is_an_error() {
-        assert!(resolve(&["--place", "bern", "--scale", "1:1000", "--page-width", "200"]).is_err());
-        assert!(resolve(&["--at", "46,7", "--size", "5km", "--page-width", "200", "--scale", "1:1000"]).is_err());
-        assert!(resolve(&["--place", "bern", "--size", "5km"]).is_err());
+        assert!(resolve(&["--tp", "bern", "--fsc", "1:1000", "--fw", "200"]).is_err());
+        assert!(resolve(&["--tat", "46,7", "--ts", "5km", "--fw", "200", "--fsc", "1:1000"]).is_err());
+        assert!(resolve(&["--tp", "bern", "--ts", "5km"]).is_err());
     }
 
     #[test]
     fn size_takes_units_and_two_values() {
-        let (b, _) = resolve(&["--at", "46,7", "--size", "800m", "1.2km"]).unwrap();
+        let (b, _) = resolve(&["--terrain-at", "46,7", "--terrain-size", "800m", "1.2km"]).unwrap();
         let (w, h) = projected_size(&b);
         assert!((w - 800.0).abs() < 5.0 && (h - 1200.0).abs() < 5.0, "{w} {h}");
     }
 
     #[test]
-    fn hatch_sections_parse() {
-        let args: Vec<std::ffi::OsString> = ["burin-map", "--place", "bern", "--spacing", "6", "--hatch", "--breaks", "0.1", "--hatch", "--angle", "90", "--breaks", "0.9", "--hatch-floor", "0.4"]
-            .into_iter()
-            .map(Into::into)
-            .collect();
-        let (prefix, secs) = split_hatch_argv(&args).unwrap();
-        assert!(secs.is_some());
+    fn short_and_long_style_flags_agree() {
+        let m = command().try_get_matches_from(argv(&["--s", "6", "--dash-light", "0.3"])).unwrap();
+        let st = shared_style(&m);
+        assert!((st.space - 6.0).abs() < 1e-6);
+        assert!((st.dash_light - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn old_names_are_rejected() {
+        for old in ["--spacing", "--duty-min", "--place", "--svg", "--hatch", "--shade-gap"] {
+            assert!(command().try_get_matches_from(argv(&[old, "1"])).is_err(), "{old}");
+        }
+    }
+
+    #[test]
+    fn batch_sections_parse() {
+        let args = argv(&[
+            "--tp", "bern", "--space", "6",
+            "--batch", "--mod-breaks", "0.1", "--of", "x.png",
+            "-b", "--ba", "90", "--mb", "0.9", "--batch-floor", "0.4",
+        ]);
+        let (prefix, secs) = split_batch_argv(&args).unwrap();
         let secs = secs.unwrap();
         assert_eq!(secs.len(), 2);
         let m = command().try_get_matches_from(prefix).unwrap();
-        let mut base = Style::default();
-        for &(name, _) in Style::PARAMS {
-            if m.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
-                base.set(name, *m.get_one::<f64>(name).unwrap());
-            }
-        }
-        assert!((base.spacing - 6.0).abs() < 1e-6);
-        let h0 = parse_hatch_section(&base, &secs[0]).unwrap();
-        let h1 = parse_hatch_section(&base, &secs[1]).unwrap();
-        assert_eq!(h0.angle, 0.0);
-        assert!((h0.style.breaks - 0.1).abs() < 1e-6);
-        assert!((h0.style.spacing - 6.0).abs() < 1e-6);
-        assert_eq!(h1.angle, 90.0);
-        assert!((h1.style.breaks - 0.9).abs() < 1e-6);
-        assert!((h1.style.hatch_floor - 0.4).abs() < 1e-6);
+        assert_eq!(m.get_one::<String>("out-file").unwrap(), "x.png");
+        let base = shared_style(&m);
+        assert!((base.space - 6.0).abs() < 1e-6);
+        let b0 = parse_batch_section(&base, &secs[0]).unwrap();
+        let b1 = parse_batch_section(&base, &secs[1]).unwrap();
+        assert_eq!(b0.angle, 0.0);
+        assert!((b0.style.mod_breaks - 0.1).abs() < 1e-6);
+        assert!((b0.style.space - 6.0).abs() < 1e-6);
+        assert_eq!(b1.angle, 90.0);
+        assert!((b1.style.mod_breaks - 0.9).abs() < 1e-6);
+        assert!((b1.style.batch_floor - 0.4).abs() < 1e-6);
+        assert!(parse_batch_section(&base, &["--breaks".into(), "0.2".into()]).is_err());
     }
 }

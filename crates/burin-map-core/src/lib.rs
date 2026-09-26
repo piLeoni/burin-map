@@ -4,8 +4,8 @@
 //! pixels, get back dashes as polylines in pixel coordinates. The same code
 //! runs natively, in the browser (WASM) and behind the Python package.
 //!
-//! Pipeline: fields (direction, tone, spacing) → evenly spaced streamlines
-//! → plotting order → tone-driven dashes. Several hatching passes (angles)
+//! Pipeline: fields (direction, input, spacing) → evenly spaced streamlines
+//! → plotting order → input-driven dashes. Several batch passes (angles)
 //! run in parallel and are merged.
 
 mod dashes;
@@ -17,10 +17,10 @@ mod streamlines;
 mod style;
 
 pub use dashes::dash_lines;
-pub use fields::{build_fields, hatch_fields, Fields};
+pub use fields::{batch_fields, build_fields, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, Line};
-pub use style::{Hatch, Style};
+pub use style::{Batch, Param, Style, GROUPS};
 
 pub struct Drawing {
     pub width: usize,
@@ -31,34 +31,34 @@ pub struct Drawing {
     pub lines: Vec<Line>,
 }
 
-/// Draw with a single contour-parallel hatch (the usual look).
+/// Draw with a single contour-parallel batch (the usual look).
 pub fn draw(elev: &[f32], width: usize, height: usize, px_m: f32, style: &Style) -> Drawing {
-    draw_hatches(elev, width, height, px_m, &[Hatch::along(style.clone())])
+    draw_batches(elev, width, height, px_m, &[Batch::along(style.clone())])
 }
 
-/// Draw one or more hatching passes. `hatches` must be non-empty. Terrain
-/// fields (direction, tone) come from the first hatch's style; each pass
-/// rotates that direction by its `angle` and uses its own spacing / dashes.
+/// Draw one or more batch passes. `batches` must be non-empty. Terrain
+/// fields (direction, input) come from the first batch's style; each pass
+/// rotates that direction by its `angle` and uses its own space / dashes.
 /// Passes run in parallel.
-pub fn draw_hatches(elev: &[f32], width: usize, height: usize, px_m: f32, hatches: &[Hatch]) -> Drawing {
+pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batches: &[Batch]) -> Drawing {
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
-    assert!(!hatches.is_empty(), "need at least one hatch");
+    assert!(!batches.is_empty(), "need at least one batch");
 
-    let base = &hatches[0].style;
+    let base = &batches[0].style;
     let f = build_fields(elev, width, height, px_m, base);
-    let base_spacing = base.spacing;
+    let base_space = base.space;
 
     let parts: Vec<(Vec<Line>, Vec<Line>)> = {
         use rayon::prelude::*;
-        hatches
+        batches
             .par_iter()
             .enumerate()
-            .map(|(i, h)| {
-                let mut st = h.style.clone();
-                st.seed = st.seed.wrapping_add(i as u64 * 0x9E37_79B9);
-                let hf = hatch_fields(&f, h, base_spacing);
-                let lines = plot_order(trace_streamlines(&hf, &st));
-                let paths = dash_lines(&lines, &f.tone, width, height, &st);
+            .map(|(i, b)| {
+                let mut st = b.style.clone();
+                st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
+                let bf = batch_fields(&f, b, base_space);
+                let lines = plot_order(trace_streamlines(&bf, &st));
+                let paths = dash_lines(&lines, &f.input, width, height, &st);
                 (lines, paths)
             })
             .collect()
@@ -144,21 +144,21 @@ mod tests {
     fn shadow_darker_than_light() {
         let (w, h) = (400, 300);
         let f = build_fields(&island(w, h), w, h, 200.0, &Style::default());
-        assert!(f.tone[190 * w + 190] > f.tone[110 * w + 110]);
+        assert!(f.input[190 * w + 190] > f.input[110 * w + 110]);
     }
 
     #[test]
-    fn flat_ground_sits_at_flat_level() {
+    fn flat_ground_sits_at_input_flat() {
         let (w, h) = (80, 80);
         let mut e = vec![100.0f32; w * h];
         e[40 * w + 40] = 101.0;
         let f = build_fields(&e, w, h, 200.0, &Style::default());
         let mut mid: Vec<f32> = (20..60)
             .flat_map(|y| (20..60).map(move |x| (x, y)))
-            .map(|(x, y)| f.tone[y * w + x])
+            .map(|(x, y)| f.input[y * w + x])
             .collect();
         mid.sort_by(|a, b| a.total_cmp(b));
-        assert!((mid[mid.len() / 2] - Style::default().flat_level).abs() < 0.02);
+        assert!((mid[mid.len() / 2] - Style::default().input_flat).abs() < 0.02);
     }
 
     #[test]
@@ -178,20 +178,20 @@ mod tests {
         let st = Style::default();
         let d0 = draw(&e, w, h, 200.0, &st);
         let mut st90 = st.clone();
-        st90.hatch_floor = 0.2;
-        st90.breaks = 0.8;
-        let d1 = draw_hatches(
+        st90.batch_floor = 0.2;
+        st90.mod_breaks = 0.8;
+        let d1 = draw_batches(
             &e,
             w,
             h,
             200.0,
-            &[Hatch::along(st.clone()), Hatch { angle: 90.0, style: st90 }],
+            &[Batch::along(st.clone()), Batch { angle: 90.0, style: st90 }],
         );
         assert!(d1.lines.len() > d0.lines.len(), "off={} on={}", d0.lines.len(), d1.lines.len());
     }
 
     #[test]
-    fn shade_dash_zero_keeps_whole_lines() {
+    fn solid_dash_keeps_whole_lines() {
         let (w, h) = (120, 120);
         let mut e = vec![0.0f32; w * h];
         for y in 0..h {
@@ -202,10 +202,11 @@ mod tests {
             }
         }
         let mut st = Style::default();
-        st.shade_dash = 0.0;
-        st.shade_gap = 1.0;
-        st.spacing_dark = 0.5;
-        st.spacing_lit = 1.6;
+        st.dash_light = 1.0;
+        st.dash_dark = 1.0;
+        st.dash_drop = 0.0;
+        st.space_dark = 0.5;
+        st.space_light = 1.6;
         let d = draw(&e, w, h, 30.0, &st);
         assert_eq!(d.paths.len(), d.lines.len(), "each streamline stays one stroke");
     }

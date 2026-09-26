@@ -8,7 +8,7 @@ export const mapViewAtom = atomWithStorage('burin-map.map', {
 })
 
 /** Style slider values — persisted in localStorage. */
-export const styleAtom = atomWithStorage('burin-map.style', /** @type {Record<string, number>} */ ({}))
+export const styleAtom = atomWithStorage('burin-map.style.v3', /** @type {Record<string, number>} */ ({}))
 
 /** How long a successful unlock stays valid (30 days). */
 export const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000
