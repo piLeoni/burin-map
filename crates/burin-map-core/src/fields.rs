@@ -104,13 +104,53 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
             st.lit_floor + (st.flat_level - st.lit_floor) * (1.0 - light)
         };
         tone[i] = t * (coast[i] * 1.4 - 0.2).clamp(0.0, 1.0);
-        // Spacing: tighter on steep ground and in shadow.
-        let keep = (1.0 - (1.0 - st.spacing_steep) * steep[i].powf(st.spacing_gamma))
-            * (1.0 - (1.0 - st.spacing_dark) * if si >= 0.0 { shadow } else { 0.0 });
-        loosen[i] = 1.0 - keep;
+        // Spacing: steepness always; light/shadow scaled by shade_gap
+        // (shade_dash is the parallel channel — breaks lines instead).
+        let g = st.shade_gap.clamp(0.0, 1.0);
+        let steep_k = 1.0 - (1.0 - st.spacing_steep) * steep[i].powf(st.spacing_gamma);
+        let dark_k = 1.0 - g * (1.0 - st.spacing_dark) * shadow;
+        let lit_w = g * light;
+        let lit_k = (1.0 - lit_w) + st.spacing_lit * lit_w;
+        let keep = (steep_k * dark_k * lit_k).clamp(0.05, 4.0);
+        loosen[i] = keep; // (misnamed) holds the local spacing multiplier
     }
-    let sep: Vec<f32> = blur(&loosen, w, h, 3.0).iter().map(|l| st.spacing * (1.0 - l)).collect();
+    let sep: Vec<f32> = blur(&loosen, w, h, 3.0)
+        .iter()
+        .map(|k| st.spacing * k.clamp(0.05, 4.0))
+        .collect();
     let walkable: Vec<bool> = (0..n).map(|i| land[i] && mag[i] > 1e-7).collect();
 
     Fields { w, h, tx, ty, tone, walkable, sep }
 }
+
+/// Fields for one hatch: rotate the contour direction by `hatch.angle` degrees,
+/// rescale pitch to `hatch.style.spacing`, and optionally gate on `hatch_floor`.
+pub fn hatch_fields(base: &Fields, hatch: &crate::style::Hatch, base_spacing: f32) -> Fields {
+    let n = base.w * base.h;
+    let a = hatch.angle.to_radians();
+    let (sa, ca) = a.sin_cos();
+    let pitch = hatch.style.spacing / base_spacing.max(1e-6);
+    let floor = hatch.style.hatch_floor;
+    let mut tx = vec![0.0f32; n];
+    let mut ty = vec![0.0f32; n];
+    let mut walkable = vec![false; n];
+    let mut sep = vec![0.0f32; n];
+    for i in 0..n {
+        let (u, v) = (base.tx[i], base.ty[i]);
+        tx[i] = u * ca - v * sa;
+        ty[i] = u * sa + v * ca;
+        let ok = base.walkable[i] && (floor <= 0.0 || base.tone[i] >= floor);
+        walkable[i] = ok;
+        sep[i] = base.sep[i] * pitch;
+    }
+    Fields {
+        w: base.w,
+        h: base.h,
+        tx,
+        ty,
+        tone: base.tone.clone(),
+        walkable,
+        sep,
+    }
+}
+

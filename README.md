@@ -222,25 +222,57 @@ The ones worth touching first:
 
 | parameter | default | effect |
 |---|---|---|
-| `spacing` | 4.8 | distance between lines, px |
-| `spacing_steep` | 0.6 | how much steeper ground tightens spacing (`1` = off) |
-| `shade_gain` | 3.0 | contrast of the relief: higher = more solid shadows and whiter lights |
-| `flat_level` | 0.25 | how much stipple flat ground keeps |
-| `lit_floor` | 0.06 | how many scattered dashes stay on fully lit slopes (0 = pure white) |
-| `broad_weight` | 0.5 | how much the massif-scale shading counts |
+| `spacing` | 4.8 | base distance between lines, px |
+| `shade_dash` | 1 | light/shadow as **dashes** (0 = continuous strokes) |
+| `shade_gap` | 1 | light/shadow as **spacing** (0 = uniform gaps) |
+| `spacing_dark` | 0.7 | denser lines in shadow (with `shade_gap`) |
+| `spacing_lit` | 1 | thinner lines in light if >1 (with `shade_gap`) |
+| `spacing_steep` | 0.6 | denser on steep ground (`1` = off) |
+| `shade_gain` | 3.0 | contrast of the relief |
+| `flat_level` | 0.25 | tone of flat ground |
+| `lit_floor` | 0.06 | tone kept in full light |
 | `flow_blur` | 6 | smoothness of the line curves |
-| `jitter` | 0.45 | irregularity of the dashes; 0 looks machine-made |
-| `wobble` | 20 | how much lines wander on flat ground, degrees |
-| `breaks` | 0.15 | how often solid shadow lines get a small break |
-| `fill_ratio` | 0.8 | lower = fewer wide gaps between lines, but more short lines (1 = off) |
-| `azimuth`, `altitude` | 315, 45 | light direction, degrees |
+| `jitter` | 0.45 | dash irregularity; 0 looks machine-made |
+| `wobble` | 20 | wander on flat ground, degrees |
+| `breaks` | 0.15 | breaks in solid runs (scaled by `shade_dash`) |
 | `stroke` | 1.2 | stroke width, px |
-| `seed` | 1 | change it for a different drawing of the same place |
+| `seed` | 1 | different drawing of the same place |
+
+Shading is two parallel channels: turn **`shade_dash`** down for continuous
+lines, turn **`shade_gap`** up with `spacing_dark` / `spacing_lit` for relief
+by density. Use either, or both (the default).
 
 `burin-map --help` (or `print(burin_map.style_help())` in Python) lists all of
 them with a one-line description each. They are declared once, in
 `crates/burin-map-core/src/style.rs`, and the command line and Python pick them
 up from there.
+
+### Multiple hatching passes
+
+By default there is one pass at angle 0° (lines along the contours). Each
+`--hatch` starts another pass; style flags after it apply only to that pass
+until the next `--hatch`. `--angle` is degrees from the contour tangent
+(0 = along, 90 = downslope) 
+Passes run in parallel.
+
+```bash
+# simple — one pass, all defaults
+burin-map --place bern
+
+# still one pass, with style
+burin-map --place bern --spacing 5
+
+# along + broken cross-hatch in shadow
+burin-map --at "Twin Peaks, San Francisco" --size 8km -o tp.png \
+  --hatch --spacing 6 --breaks 0.12 \
+  --hatch --angle 90 --breaks 0.85 --hatch-floor 0.45
+
+# three angles
+burin-map --place bern \
+  --hatch --spacing 6 \
+  --hatch --angle 90 --breaks 0.8 --hatch-floor 0.4 \
+  --hatch --angle 45 --breaks 0.7 --hatch-floor 0.5
+```
 
 ## Data
 

@@ -12,7 +12,10 @@ use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
-use crate::{bounds_around, dem::projected_size, draw, locate, Bounds, Error, Page, Progress, Style, TileSource};
+use crate::{
+    bounds_around, dem::projected_size, draw_hatches, locate, Bounds, Error, Hatch, Page, Progress,
+    Style, TileSource,
+};
 
 const PLACES: &[(&str, Bounds)] = &[
     ("bern", [7.10, 46.70, 7.80, 47.20]),
@@ -27,9 +30,10 @@ pub fn command() -> Command {
         .about("Pen-and-ink terrain map from SRTM elevation data.")
         .after_help("Examples:\n  \
             burin-map --at \"Twin Peaks, San Francisco\" --size 20km -o sf.png --svg\n  \
-            burin-map --at 45.976,7.658 --size 12km 16km\n  \
-            burin-map --at \"Zermatt\" --page-width 297 --page-height 420 --scale 1:50000 --svg\n  \
-            burin-map --place bern --scale 1:100000 --svg     (page size follows)")
+            burin-map --place bern --spacing 5\n  \
+            burin-map --place bern --hatch --spacing 6 --breaks 0.1 \\\n  \
+            \x20   --hatch --angle 90 --breaks 0.85 --hatch-floor 0.45\n  \
+            burin-map --at \"Zermatt\" --page-width 297 --page-height 420 --scale 1:50000 --svg")
         .next_help_heading("Where")
         .arg(Arg::new("place").long("place").default_value("san-francisco")
             .value_parser(PLACES.iter().map(|p| p.0).collect::<Vec<_>>()).help("named area"))
@@ -58,6 +62,11 @@ pub fn command() -> Command {
             .help("map scale; with --page-width sets the ground size, otherwise the page size"))
         .arg(Arg::new("pen").long("pen").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
             .help("stroke width on the page, mm (sets how many pixels --page-width becomes)"))
+        .next_help_heading("Hatching")
+        .arg(Arg::new("hatch").long("hatch").action(ArgAction::Append).num_args(0)
+            .help("start a hatching pass (may repeat). Flags after each --hatch apply to that \
+                   pass until the next --hatch; --angle sets degrees from the contour tangent \
+                   (0 = along, 90 = downslope). Without any --hatch there is one pass at angle 0"))
         .next_help_heading("Style");
     for &(name, help) in Style::PARAMS {
         // Through f32 so 4.8 prints as 4.8, not 4.800000190734863.
@@ -227,11 +236,32 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let m = command().try_get_matches_from(args).unwrap_or_else(|e| e.exit());
-    let mut st = Style::default();
-    for &(name, _) in Style::PARAMS {
-        st.set(name, *m.get_one::<f64>(name).unwrap());
-    }
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+    let (prefix, hatch_secs) = split_hatch_argv(&args)?;
+    let m = command().try_get_matches_from(prefix).unwrap_or_else(|e| e.exit());
+
+    let hatches = match hatch_secs {
+        None => {
+            let mut st = Style::default();
+            for &(name, _) in Style::PARAMS {
+                st.set(name, *m.get_one::<f64>(name).unwrap());
+            }
+            vec![Hatch::along(st)]
+        }
+        Some(sections) => {
+            let mut base = Style::default();
+            for &(name, _) in Style::PARAMS {
+                if m.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
+                    base.set(name, *m.get_one::<f64>(name).unwrap());
+                }
+            }
+            sections
+                .iter()
+                .map(|sec| parse_hatch_section(&base, sec))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+    };
+
     let r = Report::new();
     if m.get_one::<String>("at").is_some() {
         r.transient("where", "looking up the place");
@@ -241,9 +271,16 @@ where
     let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
     r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
     r.detail(&format!("{:.1} × {:.1} km around {centre}", wm / 1000.0, hm / 1000.0));
+    if hatches.len() > 1 || hatches[0].angle != 0.0 {
+        let desc: Vec<String> = hatches
+            .iter()
+            .map(|h| format!("{:.0}°", h.angle))
+            .collect();
+        r.detail(&format!("{} hatch passes ({})", hatches.len(), desc.join(", ")));
+    }
 
     let t = Instant::now();
-    let map = draw(&bounds, &st, &page, |p| r.progress(p))?;
+    let map = draw_hatches(&bounds, &hatches, &page, |p| r.progress(p))?;
     let out = PathBuf::from(m.get_one::<String>("output").unwrap());
     let d = &map.drawing;
     std::fs::write(&out, map.to_png()?)?;
@@ -260,10 +297,145 @@ where
     let mut out = anstream::stdout();
     for (i, (path, size)) in files.iter().enumerate() {
         let label = if i == 0 { "wrote" } else { "" };
-        let _ = writeln!(out, "  {DONE}{label:<10}{DONE:#} {BOLD}{}{BOLD:#}  {DIM}{size}{DIM:#}", path.display());
+        let _ = writeln!(
+            out,
+            "  {DONE}{label:<10}{DONE:#} {BOLD}{}{BOLD:#}  {DIM}{size}{DIM:#}",
+            path.display()
+        );
     }
     let _ = writeln!(out, "  {:<10} {DIM}done in {:.1} s{DIM:#}", "", t.elapsed().as_secs_f64());
     Ok(())
+}
+
+/// Split `argv` on `--hatch`. Global flags (`--at`, `-o`, …) always go to the
+/// clap prefix even if they appear after a `--hatch`. Style flags stay in the
+/// current hatch section.
+fn split_hatch_argv(
+    args: &[std::ffi::OsString],
+) -> Result<(Vec<std::ffi::OsString>, Option<Vec<Vec<std::ffi::OsString>>>), Error> {
+    let mut prefix = Vec::new();
+    let mut sections: Option<Vec<Vec<std::ffi::OsString>>> = None;
+    let mut cur: Option<Vec<std::ffi::OsString>> = None;
+    let mut first = true;
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if first {
+            prefix.push(a.clone());
+            first = false;
+            i += 1;
+            continue;
+        }
+        if a == "--hatch" {
+            let secs = sections.get_or_insert_with(Vec::new);
+            if let Some(c) = cur.take() {
+                secs.push(c);
+            }
+            cur = Some(Vec::new());
+            i += 1;
+            continue;
+        }
+        let flag = a.to_string_lossy();
+        if cur.is_some() && is_global_flag(&flag) {
+            let n = global_value_count(&flag, &args[i + 1..]);
+            for _ in 0..=n {
+                if i < args.len() {
+                    prefix.push(args[i].clone());
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if let Some(ref mut c) = cur {
+            c.push(a.clone());
+        } else {
+            prefix.push(a.clone());
+        }
+        i += 1;
+    }
+    if let Some(c) = cur {
+        sections.get_or_insert_with(Vec::new).push(c);
+    }
+    if let Some(ref secs) = sections {
+        if secs.is_empty() {
+            return Err(Error::Input("bare --hatch with no following pass".into()));
+        }
+    }
+    Ok((prefix, sections))
+}
+
+fn is_global_flag(flag: &str) -> bool {
+    matches!(
+        flag,
+        "--place"
+            | "--bounds"
+            | "--at"
+            | "--size"
+            | "--output"
+            | "-o"
+            | "--svg"
+            | "--width"
+            | "--page-width"
+            | "--page-height"
+            | "--scale"
+            | "--pen"
+            | "--help"
+            | "-h"
+            | "--version"
+            | "-V"
+    )
+}
+
+/// How many value tokens follow this global flag.
+fn global_value_count(flag: &str, rest: &[std::ffi::OsString]) -> usize {
+    match flag {
+        "--svg" | "--help" | "-h" | "--version" | "-V" => 0,
+        "--bounds" => 4,
+        "--size" => {
+            // one or two values; take while it doesn't look like a flag
+            let mut n = 0;
+            for a in rest.iter().take(2) {
+                let s = a.to_string_lossy();
+                if s.starts_with('-') && s != "-" {
+                    break;
+                }
+                n += 1;
+            }
+            n.max(1)
+        }
+        _ => 1,
+    }
+}
+
+fn parse_hatch_section(base: &Style, args: &[std::ffi::OsString]) -> Result<Hatch, Error> {
+    let mut st = base.clone();
+    let mut angle = 0.0f64;
+    let mut i = 0;
+    while i < args.len() {
+        let flag = args[i].to_string_lossy();
+        if !flag.starts_with("--") {
+            return Err(Error::Input(format!("unexpected {flag:?} in --hatch section")));
+        }
+        let name = flag.trim_start_matches('-').replace('-', "_");
+        i += 1;
+        if i >= args.len() {
+            return Err(Error::Input(format!("missing value for {flag}")));
+        }
+        let raw = args[i].to_string_lossy();
+        let v: f64 = raw
+            .parse()
+            .map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
+        i += 1;
+        if name == "angle" {
+            angle = v;
+        } else if !st.set(&name, v) {
+            return Err(Error::Input(format!("unknown hatch parameter {flag}")));
+        }
+    }
+    Ok(Hatch {
+        angle: angle as f32,
+        style: st,
+    })
 }
 
 #[cfg(test)]
@@ -303,5 +475,33 @@ mod tests {
         let (b, _) = resolve(&["--at", "46,7", "--size", "800m", "1.2km"]).unwrap();
         let (w, h) = projected_size(&b);
         assert!((w - 800.0).abs() < 5.0 && (h - 1200.0).abs() < 5.0, "{w} {h}");
+    }
+
+    #[test]
+    fn hatch_sections_parse() {
+        let args: Vec<std::ffi::OsString> = ["burin-map", "--place", "bern", "--spacing", "6", "--hatch", "--breaks", "0.1", "--hatch", "--angle", "90", "--breaks", "0.9", "--hatch-floor", "0.4"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let (prefix, secs) = split_hatch_argv(&args).unwrap();
+        assert!(secs.is_some());
+        let secs = secs.unwrap();
+        assert_eq!(secs.len(), 2);
+        let m = command().try_get_matches_from(prefix).unwrap();
+        let mut base = Style::default();
+        for &(name, _) in Style::PARAMS {
+            if m.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
+                base.set(name, *m.get_one::<f64>(name).unwrap());
+            }
+        }
+        assert!((base.spacing - 6.0).abs() < 1e-6);
+        let h0 = parse_hatch_section(&base, &secs[0]).unwrap();
+        let h1 = parse_hatch_section(&base, &secs[1]).unwrap();
+        assert_eq!(h0.angle, 0.0);
+        assert!((h0.style.breaks - 0.1).abs() < 1e-6);
+        assert!((h0.style.spacing - 6.0).abs() < 1e-6);
+        assert_eq!(h1.angle, 90.0);
+        assert!((h1.style.breaks - 0.9).abs() < 1e-6);
+        assert!((h1.style.hatch_floor - 0.4).abs() < 1e-6);
     }
 }

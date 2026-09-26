@@ -18,7 +18,7 @@ pub mod progress;
 pub mod raster;
 pub mod tmerc;
 
-pub use burin_map_core::{Drawing, Line, Style};
+pub use burin_map_core::{Drawing, Hatch, Line, Style};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
 pub use progress::{Progress, TileSource};
@@ -82,11 +82,26 @@ impl Map {
     }
 }
 
-/// Download SRTM elevation for `bounds` (west, south, east, north in degrees)
-/// and draw it, reporting each step to `progress`.
-pub fn draw(bounds: &Bounds, style: &Style, page: &Page, progress: impl Fn(&Progress) + Sync)
-    -> Result<Map, Error> {
+/// Download SRTM elevation for `bounds` and draw it with a single hatch style.
+pub fn draw(
+    bounds: &Bounds,
+    style: &Style,
+    page: &Page,
+    progress: impl Fn(&Progress) + Sync,
+) -> Result<Map, Error> {
+    draw_hatches(bounds, &[Hatch::along(style.clone())], page, progress)
+}
+
+/// Download SRTM and draw with one or more hatching passes (see `Hatch`).
+pub fn draw_hatches(
+    bounds: &Bounds,
+    hatches: &[Hatch],
+    page: &Page,
+    progress: impl Fn(&Progress) + Sync,
+) -> Result<Map, Error> {
     use std::time::Instant;
+    assert!(!hatches.is_empty());
+    let style = &hatches[0].style;
     let mut width = page.width;
     let mut mm_per_px = None;
     if let Some(pw) = page.page_width_mm {
@@ -111,15 +126,15 @@ pub fn draw(bounds: &Bounds, style: &Style, page: &Page, progress: impl Fn(&Prog
     }
 
     let t = Instant::now();
-    let f = burin_map_core::build_fields(&dem.elev, w, h, dem.px_m as f32, style);
-    progress(&Progress::Relief { secs: t.elapsed().as_secs_f64() });
-    let t = Instant::now();
-    let lines = burin_map_core::trace_streamlines(&f, style);
-    progress(&Progress::Lines { count: lines.len(), secs: t.elapsed().as_secs_f64() });
-    let t = Instant::now();
-    let lines = burin_map_core::plot_order(lines);
-    let paths = burin_map_core::dash_lines(&lines, &f.tone, w, h, style);
-    progress(&Progress::Dashes { count: paths.len(), secs: t.elapsed().as_secs_f64() });
-    let drawing = Drawing { width: w, height: h, paths, lines };
-    Ok(Map { drawing, style: style.clone(), px_m: dem.px_m, mm_per_px })
+    let drawing = burin_map_core::draw_hatches(&dem.elev, w, h, dem.px_m as f32, hatches);
+    let secs = t.elapsed().as_secs_f64();
+    progress(&Progress::Relief { secs: secs * 0.3 });
+    progress(&Progress::Lines { count: drawing.lines.len(), secs: secs * 0.5 });
+    progress(&Progress::Dashes { count: drawing.paths.len(), secs: secs * 0.2 });
+    Ok(Map {
+        drawing,
+        style: style.clone(),
+        px_m: dem.px_m,
+        mm_per_px,
+    })
 }

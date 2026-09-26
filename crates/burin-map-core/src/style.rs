@@ -39,46 +39,70 @@ macro_rules! style {
 
 style! {
     // Line layout
-    spacing: f32 = 4.8, "distance between neighbouring lines, px";
-    spacing_steep: f32 = 0.6, "spacing multiplier on the steepest ground (1 = constant)";
-    spacing_dark: f32 = 0.7, "spacing multiplier in the deepest shadow (1 = constant)";
-    spacing_gamma: f32 = 1.0, "curve of the steepness → spacing mapping";
-    test_ratio: f32 = 0.5, "a line stops when closer than spacing × this to another";
-    fill_ratio: f32 = 0.8, "gaps wider than 2 × this × spacing get a line in the middle (1 = off)";
-    step: f32 = 1.0, "integration step, px";
-    min_len: f32 = 4.0, "drop lines shorter than this, px";
+    spacing: f32 = 4.8, "base distance between neighbouring lines, px";
+    spacing_steep: f32 = 0.6, "on the steepest ground, multiply spacing by this (1 = ignore slope)";
+    spacing_dark: f32 = 0.7, "in deepest shadow, multiply spacing by this (1 = no denser; used with shade_gap)";
+    spacing_lit: f32 = 1.0, "in full light, multiply spacing by this (>1 = thinner / more open; used with shade_gap)";
+    spacing_gamma: f32 = 1.0, "curve of how fast steepness tightens spacing";
+    test_ratio: f32 = 0.5, "stop a line when closer than spacing × this to another";
+    fill_ratio: f32 = 0.8, "seed a mid-gap line when a gap exceeds 2 × this × spacing (1 = off)";
+    step: f32 = 1.0, "integration step when tracing lines, px";
+    min_len: f32 = 4.0, "drop streamlines shorter than this, px";
 
     // Smoothing of the terrain (gaussian sigma, px)
-    flow_blur: f32 = 6.0, "smoothing of the surface lines follow: higher = broader curves";
-    shade_blur: f32 = 1.8, "smoothing for detail shading";
-    broad_blur: f32 = 11.5, "smoothing for massif-scale shading";
-    broad_weight: f32 = 0.5, "mix of massif-scale shading (0 = detail only, 1 = massif only)";
+    flow_blur: f32 = 6.0, "smooth the surface lines follow: higher = broader curves";
+    shade_blur: f32 = 1.8, "smooth the detail shading";
+    broad_blur: f32 = 11.5, "smooth the massif-scale shading";
+    broad_weight: f32 = 0.5, "mix of massif shading (0 = detail only, 1 = massif only)";
     wobble: f32 = 20.0, "random swing of line direction on flat ground, degrees";
-    wobble_size: f32 = 12.0, "size of the wobble's bends, px";
+    wobble_size: f32 = 12.0, "size of those wobble bends, px";
 
     // Light
-    azimuth: f32 = 315.0, "light direction, degrees clockwise from north";
-    altitude: f32 = 45.0, "light elevation above the horizon, degrees";
-    z_exag: f32 = 4.0, "vertical exaggeration used for shading";
+    azimuth: f32 = 315.0, "sun direction, degrees clockwise from north";
+    altitude: f32 = 45.0, "sun elevation above the horizon, degrees";
+    z_exag: f32 = 4.0, "vertical exaggeration for shading";
 
-    // Tone: 0 = nothing drawn, 1 = solid line
-    flat_level: f32 = 0.25, "tone of flat ground; keeps a minimum stipple everywhere";
-    shade_gain: f32 = 3.0, "how quickly slopes saturate to solid (shadow) or white (light)";
-    dark_gamma: f32 = 0.7, "<1 pushes shadowed slopes towards solid";
-    lit_gain: f32 = 1.5, ">1 makes lit slopes reach full light sooner";
-    lit_floor: f32 = 0.06, "tone kept in full light: a few scattered dashes hint at the form";
+    // Tone map (0 = empty … 1 = solid). Feeds both shade_dash and shade_gap.
+    flat_level: f32 = 0.25, "tone of flat ground";
+    shade_gain: f32 = 3.0, "contrast: how fast slopes go solid (shadow) or empty (light)";
+    dark_gamma: f32 = 0.7, "<1 pushes shadows toward solid sooner";
+    lit_gain: f32 = 1.5, ">1 makes lit slopes bleach sooner";
+    lit_floor: f32 = 0.06, "tone kept in full light (floor under bleaching)";
 
-    // Dashes
+    // Two parallel ways light/shadow affect the drawing (use either, or both):
+    //   shade_dash — break lines into dashes (classic look)
+    //   shade_gap  — open/tighten spacing between lines (diradamento)
+    shade_dash: f32 = 1.0, "0 = continuous strokes everywhere; 1 = light/shadow mainly as dashes (default look)";
+    shade_gap: f32 = 1.0, "0 = uniform line spacing; 1 = light/shadow also as denser/thinner gaps (see spacing_dark / spacing_lit)";
+
+    // Dashes (matter most when shade_dash > 0)
     period: f32 = 2.2, "dash + gap length, in multiples of spacing";
-    duty_min: f32 = 0.15, "dash fraction of the period at tone 0";
-    duty_max: f32 = 1.0, "dash fraction of the period at tone 1";
-    cutoff: f32 = 0.03, "below this tone nothing is drawn";
-    jitter: f32 = 0.45, "irregularity of dash length and pitch (0 = mechanical); fades in solid shadow";
-    breaks: f32 = 0.15, "chance per period of a small random break in otherwise solid line";
+    duty_min: f32 = 0.15, "dash fraction of the period at tone 0 (light)";
+    duty_max: f32 = 1.0, "dash fraction of the period at tone 1 (shadow)";
+    cutoff: f32 = 0.03, "below this tone draw nothing";
+    jitter: f32 = 0.45, "irregularity of dash length/pitch (0 = mechanical); fades in solid shadow";
+    breaks: f32 = 0.15, "chance of a small break in an otherwise solid run";
+
+    // Per-hatch gate
+    hatch_floor: f32 = 0.0, "minimum tone for this hatch pass (0 = draw on all walkable land)";
 
     // Output
     stroke: f32 = 1.2, "stroke width, px";
-    seed: u64 = 1, "random seed (seed order, dash jitter)";
+    seed: u64 = 1, "random seed (line order, dash jitter)";
+}
+
+/// One hatching pass: streamlines at `angle` degrees relative to the contour
+/// tangent (0 = along level curves, 90 = along the slope).
+#[derive(Clone, Debug)]
+pub struct Hatch {
+    pub angle: f32,
+    pub style: Style,
+}
+
+impl Hatch {
+    pub fn along(style: Style) -> Self {
+        Hatch { angle: 0.0, style }
+    }
 }
 
 #[cfg(test)]
@@ -93,6 +117,6 @@ mod tests {
         assert!(st.set("seed", 7.0));
         assert_eq!(st.seed, 7);
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 30);
+        assert_eq!(Style::PARAMS.len(), 34);
     }
 }

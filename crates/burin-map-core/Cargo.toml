@@ -6,3 +6,4 @@ description = "Drawing engine of burin-map: pen-and-ink terrain lines from an el
 publish = false
 
 [dependencies]
+rayon = "1"
