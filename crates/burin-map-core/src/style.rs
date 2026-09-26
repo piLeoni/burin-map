@@ -87,7 +87,7 @@ style! {
     space: space ("s"): f32 = 4.8, "base distance between neighbouring lines, px";
     space: space_light ("sl"): f32 = 1.0, "space multiplier in full light (>1 = more open)";
     space: space_dark ("sd"): f32 = 0.7, "space multiplier in full dark (<1 = denser)";
-    space: space_steep ("ss"): f32 = 0.4, "how much steep ground tightens space (0 = off, 1 = max)";
+    space: space_steep ("ss"): f32 = 0.4, "influence of steep ground on spacing (0 = off, 1 = full)";
     space: space_steep_gamma ("ssg"): f32 = 1.0, "curve of how fast steepness tightens space";
 
     dash: dash_light ("dl"): f32 = 0.15, "ink fraction of the period in full light (0…1)";
