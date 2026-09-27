@@ -426,6 +426,55 @@ cd web && npm run dev
 Vite proxies `/terrarium/…` to AWS (S3 has no CORS on GET). The Vercel
 deploy uses a rewrite for the same path (`web/vercel.json`).
 
+### Documents and share links
+
+A *document* is the JSON that describes a whole drawing: where (`area`) and
+how (`batches`). The CLI takes the same shape with `--style-json` /
+`--style-file`, so a file exported from the web app can be fed straight to the
+command line, and vice versa.
+
+```json
+{
+  "area": { "at": "Twin Peaks, San Francisco", "size_km": [8, 8], "px": 1600 },
+  "batches": [
+    { "angle": 0,  "style": { "space": 7, "mod_breaks": 0.1 } },
+    { "angle": 90, "style": { "space": 7, "mod_breaks": 0.85, "batch_floor": 0.45 } }
+  ]
+}
+```
+
+Every `area` field maps to a CLI flag (`at`↔`--terrain-at`, `size_km`↔
+`--terrain-size`, `px`↔`--frame-px`, `pen_mm`↔`--frame-pen`, …). Explicit
+command-line flags always win; the document fills in whatever was left unset.
+A bare `[ { "angle": …, "style": … } ]` array is also accepted.
+
+**Share** builds a `#d=…` URL from the current camera and batches, using a
+compact notation of the CLI's own short names:
+
+```
+#d=at37.75111,-122.44722,ts8x8,fpx1600|a0,s4.8,dl0.15;a90,s5.5,bf0.45
+   └───────────── area ─────────────┘│└──── batches (';' between passes) ────┘
+```
+
+`|` separates area from batches, `,` separates parameters, `;` separates
+passes, and `a` is the pass angle. Values follow their short name with no
+space — the same abbreviations the CLI accepts (`--s`, `--dl`, `--bf`).
+
+The comma is what makes it unambiguous. Short names overlap heavily (`s`,
+`sl`, `sd`, `ss`, `ssg`, `sa`, `salt`, `sx` all start with `s`), so a run-on
+form like `sa0.3` could mean `sa=0.3` (sun azimuth) or `s="a0.3"`. Split on
+commas first and every token has exactly one reading; names are matched
+longest-first, so `salt45` is the sun altitude while `sa315` is the azimuth.
+Unknown names (`zz5`) and malformed values (`sabc`) are hard errors, never
+silent misreads.
+
+That keeps a two-pass share link around **167 characters** instead of ~530 for
+base64 JSON, and it stays readable. The `#` fragment never reaches the server,
+so sharing needs no backend. Older `#doc=<base64>` links still open.
+
+`web/src/lib/shorts.js` mirrors the Rust `style!` table; `npm run
+test:render` fails if the two drift apart.
+
 ## Development
 
 ```bash
@@ -433,6 +482,7 @@ cargo test                                  # engine, CLI, projection
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" && pytest           # Python package
 cd node && npm install && npm run build && npm test   # Node addon
+cd web && npm run test:render               # sidebar + document/notation tests
 cargo run --release -- --terrain-place bern --out-file bern.png   # try the CLI without installing
 ./web/serve.sh                              # WASM map demo
 ```

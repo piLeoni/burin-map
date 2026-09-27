@@ -406,13 +406,24 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     }
   }
 
+  /** The document as it stands: stored area (if any) plus the live camera. */
+  const currentDoc = () => {
+    const area = { ...(areaRef.current || {}) }
+    if (!area.at && !area.bounds && !area.place && mapView?.center) {
+      area.at = `${mapView.center[1].toFixed(5)},${mapView.center[0].toFixed(5)}`
+    }
+    return { area, batches: list }
+  }
+
   const importJson = () => {
     const raw = prompt('Paste document JSON (area + batches):')
     if (raw) applyJson(raw)
   }
 
   const downloadJson = () => {
-    const blob = new Blob([jsonText], { type: 'application/json' })
+    const doc = currentDoc()
+    areaRef.current = doc.area
+    const blob = new Blob([docToJson(doc)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url; a.download = 'burin-doc.json'; a.click()
@@ -420,12 +431,13 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   }
 
   const copyShareLink = async () => {
-    const hash = docToHash({ area: areaRef.current, batches: list })
+    const doc = currentDoc()
+    areaRef.current = doc.area
     const loc = globalThis.location
-    const url = `${loc.origin}${loc.pathname}${hash}`
+    const url = `${loc.origin}${loc.pathname}${docToHash(doc)}`
     try {
       await navigator.clipboard.writeText(url)
-      setShareNote('Link copied')
+      setShareNote(`Link copied (${url.length} chars)`)
     } catch {
       setShareNote(url)
     }
