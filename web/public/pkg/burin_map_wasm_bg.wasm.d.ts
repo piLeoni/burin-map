@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_drawing_free: (a: number, b: number) => void;
 export const draw: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];
+export const draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const drawing_dashes: (a: number) => number;
 export const drawing_ends: (a: number) => any;
 export const drawing_height: (a: number) => number;
@@ -18,5 +19,6 @@ export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_start: () => void;

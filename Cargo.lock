@@ -171,6 +171,7 @@ version = "0.1.0"
 dependencies = [
  "burin-map-core",
  "js-sys",
+ "serde_json",
  "wasm-bindgen",
 ]
 

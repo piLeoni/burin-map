@@ -4,7 +4,7 @@
 //! flat `f32` height grid. Paths come back packed for canvas stroking; [`svg`]
 //! builds an SVG document for download.
 
-use burin_map_core::{Line, Style};
+use burin_map_core::{Batch, Line, Style};
 use js_sys::{Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::prelude::*;
 
@@ -160,4 +160,45 @@ pub fn draw(
 
 fn now_ms() -> f64 {
     js_sys::Date::now()
+}
+
+/// Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
+#[wasm_bindgen]
+pub fn draw_batches(
+    elev: &[f32],
+    width: u32,
+    height: u32,
+    px_m: f32,
+    json: &str,
+) -> Result<Drawing, JsValue> {
+    let (w, h) = (width as usize, height as usize);
+    if elev.len() != w * h {
+        return Err(JsValue::from_str(&format!(
+            "elevation length {} ≠ {}×{}",
+            elev.len(),
+            w,
+            h
+        )));
+    }
+    let batches: Vec<Batch> = serde_json::from_str(json)
+        .map_err(|e| JsValue::from_str(&format!("invalid batch JSON: {e}")))?;
+    if batches.is_empty() {
+        return Err(JsValue::from_str("batch list is empty"));
+    }
+    let t0 = now_ms();
+    let d = burin_map_core::draw_batches(elev, w, h, px_m, &batches);
+    let ms = now_ms() - t0;
+    let (pts, ends) = pack(&d.paths);
+    let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);
+    let svg = d.to_svg(stroke, None);
+    Ok(Drawing {
+        width,
+        height,
+        paths: Float32Array::from(pts.as_slice()),
+        ends: Uint32Array::from(ends.as_slice()),
+        n_lines: d.lines.len() as u32,
+        n_dashes: d.paths.len() as u32,
+        ms,
+        svg,
+    })
 }

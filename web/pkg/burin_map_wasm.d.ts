@@ -27,6 +27,11 @@ export class Drawing {
 export function draw(elev: Float32Array, width: number, height: number, px_m: number, style: any): Drawing;
 
 /**
+ * Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
+ */
+export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string): Drawing;
+
+/**
  * (id, blurb) for each style group — section headers in the web UI.
  */
 export function style_groups(): any;
@@ -42,6 +47,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_drawing_free: (a: number, b: number) => void;
     readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];
+    readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly drawing_dashes: (a: number) => number;
     readonly drawing_ends: (a: number) => any;
     readonly drawing_height: (a: number) => number;
@@ -57,6 +63,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }

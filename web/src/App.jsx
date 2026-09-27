@@ -3,10 +3,10 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import PasswordGate from './components/PasswordGate'
-import { drawingAtom, statusAtom, styleAtom } from './state'
+import { drawingAtom, firstStyle, statusAtom, styleAtom } from './state'
 
 export default function App() {
-  const style = useAtomValue(styleAtom)
+  const batches = useAtomValue(styleAtom)
   const status = useAtomValue(statusAtom)
   const drawing = useAtomValue(drawingAtom)
   const setStatus = useSetAtom(statusAtom)
@@ -17,7 +17,7 @@ export default function App() {
     <PasswordGate>
       <div className="relative flex h-full min-h-0 w-full flex-col lg:flex-row">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <MapView style={style} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
+          <MapView batches={batches} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
 
           <button
             type="button"

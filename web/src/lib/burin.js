@@ -25,7 +25,7 @@ export function paintDrawing(canvas, drawing, style) {
 
   const paths = drawing.paths
   const ends = drawing.ends
-  const stroke = style.batch_stroke ?? 1.2
+  const stroke = style?.batch_stroke ?? 1.2
   ctx.strokeStyle = '#000000'
   ctx.lineWidth = stroke
   ctx.lineCap = 'round'
@@ -49,4 +49,24 @@ export function paintDrawing(canvas, drawing, style) {
     ctx.stroke()
     start = end
   }
+}
+
+/**
+ * Draw with multiple batch passes using draw_batches.
+ * @param {object} burin
+ * @param {Float32Array} elev
+ * @param {number} width
+ * @param {number} height
+ * @param {number} pxM
+ * @param {Array<{angle:number,style:Record<string,number>}>} batches
+ * @returns {object} drawing result
+ */
+export function drawBatches(burin, elev, width, height, pxM, batches) {
+  const json = JSON.stringify(batches.map((b) => ({
+    angle: b.angle,
+    style: Object.fromEntries(
+      Object.entries(b.style).filter(([, v]) => v != null && typeof v === 'number' && Number.isFinite(v)),
+    ),
+  })))
+  return burin.draw_batches(elev, width, height, pxM, json)
 }

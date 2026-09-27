@@ -3,7 +3,7 @@ import { useAtom } from 'jotai'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
-import { loadBurin } from '../lib/burin'
+import { loadBurin, drawBatches } from '../lib/burin'
 import { mapViewAtom } from '../state'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -32,13 +32,13 @@ function isUserGesture(e) {
 
 /**
  * @param {{
- *   style: Record<string, number>,
+ *   batches: Array<{ angle: number, style: Record<string, number> }>,
  *   onStatus: (s: { phase: string, detail?: string }) => void,
  *   onDrawing: (d: { svg: string, lines: number, dashes: number, ms: number } | null) => void,
  *   drawing: { svg: string } | null,
  * }} props
  */
-export default function MapView({ style, onStatus, onDrawing, drawing }) {
+export default function MapView({ batches, onStatus, onDrawing, drawing }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const genRef = useRef(0)
@@ -46,8 +46,8 @@ export default function MapView({ style, onStatus, onDrawing, drawing }) {
   const readyRef = useRef(false)
   const skipStyleOnceRef = useRef(true)
   const settleTimer = useRef(0)
-  const styleRef = useRef(style)
-  styleRef.current = style
+  const batchesRef = useRef(batches)
+  batchesRef.current = batches
   const convertRef = useRef(async () => {})
 
   const [, setMapView] = useAtom(mapViewAtom)
@@ -115,7 +115,7 @@ export default function MapView({ style, onStatus, onDrawing, drawing }) {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
       if (my !== genRef.current || movingRef.current) return
 
-      const result = burin.draw(dem.elev, dem.width, dem.height, dem.pxM, styleRef.current)
+      const result = drawBatches(burin, dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current)
       if (my !== genRef.current || movingRef.current) return
 
       onDrawing({
@@ -247,13 +247,13 @@ export default function MapView({ style, onStatus, onDrawing, drawing }) {
     // Skip the Sidebar's initial style hydrate so it doesn't cancel the first draw.
     if (skipStyleOnceRef.current) {
       skipStyleOnceRef.current = false
-      styleRef.current = style
+      batchesRef.current = batches
       return
     }
-    styleRef.current = style
+    batchesRef.current = batches
     onDrawing(null)
     scheduleConvert(120)
-  }, [style, scheduleConvert, onDrawing])
+  }, [batches, scheduleConvert, onDrawing])
 
   const download = () => {
     if (!drawing?.svg) return

@@ -1,9 +1,13 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAtom } from 'jotai'
+import Editor from '@monaco-editor/react'
 import { loadBurin } from '../lib/burin'
 import { styleAtom } from '../state'
 
-/** [min, max, step] — step drives the slider grain. */
+/* ---------------------------------------------------------------- */
+/*  Ranges, int params, group metadata                               */
+/* ---------------------------------------------------------------- */
+
 const RANGES = {
   space: [1, 12, 0.1],
   space_light: [0.5, 3, 0.05],
@@ -59,13 +63,12 @@ const GROUP_TITLE = {
   batch: 'Batch',
 }
 
-function isIntParam(name) {
-  return INT_PARAMS.has(name)
-}
+/* ---------------------------------------------------------------- */
+/*  Helpers                                                          */
+/* ---------------------------------------------------------------- */
 
-function rangeOf(name, fallbackDefault) {
-  return RANGES[name] || [0, Math.max(1, (fallbackDefault ?? 1) * 2), 0.1]
-}
+function isIntParam(name) { return INT_PARAMS.has(name) }
+function rangeOf(name, falback) { return RANGES[name] || [0, Math.max(1, (falback ?? 1) * 2), 0.1] }
 
 function clamp(name, n) {
   const [lo, hi] = rangeOf(name, n)
@@ -79,8 +82,7 @@ function quantize(name, raw) {
   if (isIntParam(name)) return Math.round(c)
   const step = rangeOf(name, c)[2]
   const decimals = step < 0.05 ? 2 : 1
-  const f = 10 ** decimals
-  return Math.round(c * f) / f
+  return Math.round(c * 10 ** decimals) / 10 ** decimals
 }
 
 function fmt(name, v) {
@@ -91,142 +93,111 @@ function fmt(name, v) {
   return Number.isInteger(q) ? String(q) : q.toFixed(decimals)
 }
 
-function fmtCount(n) {
-  return Number(n).toLocaleString()
+function fmtCount(n) { return Number(n).toLocaleString() }
+
+function defaultsFrom(params) {
+  const d = {}
+  for (const p of params) d[p.name] = quantize(p.name, p.default) ?? p.default
+  return d
 }
 
-/** Stable slider — must live outside Sidebar or drag remounts mid-gesture. */
-function StyleSlider({ p, value, onDrag, onCommit }) {
-  const int = isIntParam(p.name)
-  const [lo, hi, step] = rangeOf(p.name, p.default)
-  const [text, setText] = useState(() => fmt(p.name, value))
+/** JSON representation of batches — matches --style-json schema. */
+function batchesToJson(batches) {
+  return JSON.stringify(
+    batches.map((b) => ({
+      angle: b.angle,
+      style: Object.fromEntries(
+        Object.entries(b.style).filter(([, v]) => v != null && typeof v === 'number' && Number.isFinite(v)),
+      ),
+    })),
+    null,
+    2,
+  )
+}
+
+function jsonToBatches(json, defaults) {
+  const raw = JSON.parse(json)
+  if (!Array.isArray(raw)) throw new Error('Expected a JSON array of batches')
+  return raw.map((entry, i) => {
+    const style = { ...defaults }
+    if (entry.style && typeof entry.style === 'object') {
+      for (const [k, v] of Object.entries(entry.style)) {
+        if (k in defaults && typeof v === 'number' && Number.isFinite(v)) {
+          style[k] = quantize(k, v) ?? defaults[k]
+        }
+      }
+    }
+    return { angle: quantize('batch_angle', entry.angle ?? 0) ?? 0, style }
+  })
+}
+
+/* ---------------------------------------------------------------- */
+/*  Slider (compact — no help label, just a (?) tooltip trigger)     */
+/* ---------------------------------------------------------------- */
+
+function StyleSlider({ name, help, value, onDrag, onCommit }) {
+  const int = isIntParam(name)
+  const [lo, hi, step] = rangeOf(name, value)
+  const [text, setText] = useState(() => fmt(name, value))
   const [editing, setEditing] = useState(false)
 
   useEffect(() => {
-    if (!editing) setText(fmt(p.name, value))
-  }, [value, p.name, editing])
+    if (!editing) setText(fmt(name, value))
+  }, [value, name, editing])
 
   const commitText = () => {
     setEditing(false)
-    const q = quantize(p.name, text)
-    if (q == null) {
-      setText(fmt(p.name, value))
-      return
-    }
-    setText(fmt(p.name, q))
-    onCommit(p.name, q)
+    const q = quantize(name, text)
+    if (q == null) { setText(fmt(name, value)); return }
+    setText(fmt(name, q))
+    onCommit(name, q)
   }
 
   return (
     <div className="w-full min-w-0">
-      <div className="flex w-full min-w-0 items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-xs">{p.name}</span>
+      <div className="flex w-full min-w-0 items-center justify-between gap-1">
+        <span className="min-w-0 truncate font-mono text-[10px]">{name}</span>
         <input
           type="text"
           inputMode={int ? 'numeric' : 'decimal'}
-          className="input input-xs w-14 shrink-0 text-right font-mono"
+          className="input input-xs w-12 shrink-0 text-right font-mono text-[10px]"
           value={text}
           onFocus={() => setEditing(true)}
           onChange={(e) => setText(e.target.value)}
           onBlur={commitText}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.currentTarget.blur()
-            } else if (e.key === 'Escape') {
-              setText(fmt(p.name, value))
-              setEditing(false)
-              e.currentTarget.blur()
-            }
+            if (e.key === 'Enter') e.currentTarget.blur()
+            else if (e.key === 'Escape') { setText(fmt(name, value)); setEditing(false); e.currentTarget.blur() }
           }}
         />
+        <span className="tooltip shrink-0 text-[10px] cursor-help opacity-40 font-mono" data-tip={help}>
+          (?)
+        </span>
       </div>
       <input
         type="range"
         className="range range-xs w-full"
-        min={lo}
-        max={hi}
-        step={int ? 1 : step}
+        min={lo} max={hi} step={int ? 1 : step}
         value={value}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId)
-        }}
-        onChange={(e) => {
-          const q = quantize(p.name, e.target.value)
-          if (q != null) onDrag(p.name, q)
-        }}
-        onPointerUp={(e) => {
-          const q = quantize(p.name, e.currentTarget.value)
-          if (q != null) onCommit(p.name, q)
-        }}
+        onPointerDown={(e) => e.currentTarget.setPointerCapture(e.pointerId)}
+        onChange={(e) => { const q = quantize(name, e.target.value); if (q != null) onDrag(name, q) }}
+        onPointerUp={(e) => { const q = quantize(name, e.currentTarget.value); if (q != null) onCommit(name, q) }}
         onKeyUp={(e) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
-            const q = quantize(p.name, e.currentTarget.value)
-            if (q != null) onCommit(p.name, q)
+          if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+            const q = quantize(name, e.currentTarget.value); if (q != null) onCommit(name, q)
           }
         }}
       />
-      <p className="mt-0.5 w-full text-[10px] leading-snug wrap-break-word opacity-45">{p.help}</p>
     </div>
   )
 }
 
-/**
- * @param {{
- *   open: boolean,
- *   onClose: () => void,
- *   status: { phase: string, detail?: string },
- *   drawing: { lines: number, dashes: number, ms: number } | null,
- * }} props
- */
-export default function Sidebar({ open, onClose, status, drawing }) {
-  const [params, setParams] = useState([])
-  const [groups, setGroups] = useState([])
-  const [style, setStyle] = useAtom(styleAtom)
-  const [draft, setDraft] = useState({})
+/* ---------------------------------------------------------------- */
+/*  BatchCard — one pass: angle + collapsible grouped sliders        */
+/* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    loadBurin().then((m) => {
-      const list = m.style_params()
-      const g = typeof m.style_groups === 'function' ? m.style_groups() : []
-      setParams(list)
-      setGroups(g)
-      const defaults = {}
-      for (const p of list) defaults[p.name] = quantize(p.name, p.default) ?? p.default
-      const merged = { ...defaults }
-      for (const [k, v] of Object.entries(style)) {
-        if (k in defaults && typeof v === 'number' && Number.isFinite(v)) {
-          merged[k] = quantize(k, v) ?? defaults[k]
-        }
-      }
-      setDraft(merged)
-      setStyle(merged)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const onDrag = useCallback((name, value) => {
-    setDraft((d) => ({ ...d, [name]: value }))
-  }, [])
-
-  const onCommit = useCallback(
-    (name, value) => {
-      const q = quantize(name, value)
-      if (q == null) return
-      setDraft((d) => {
-        const next = { ...d, [name]: q }
-        setStyle(next)
-        return next
-      })
-    },
-    [setStyle],
-  )
-
-  const reset = () => {
-    const init = {}
-    for (const p of params) init[p.name] = quantize(p.name, p.default) ?? p.default
-    setDraft(init)
-    setStyle(init)
-  }
+function BatchCard({ index, batch, params, groups, onUpdate, onRemove, canRemove }) {
+  const [open, setOpen] = useState(true)
 
   const grouped = useMemo(() => {
     const blurbs = Object.fromEntries(groups.map((g) => [g.id, g.blurb]))
@@ -241,82 +212,278 @@ export default function Sidebar({ open, onClose, status, drawing }) {
       .filter((g) => g.params.length > 0)
   }, [params, groups])
 
+  const drag = useCallback((name, value) => {
+    onUpdate(index, { ...batch, style: { ...batch.style, [name]: value } })
+  }, [index, batch, onUpdate])
+
+  const commit = useCallback((name, value) => {
+    onUpdate(index, { ...batch, style: { ...batch.style, [name]: value } })
+  }, [index, batch, onUpdate])
+
+  return (
+    <div className="border border-base-content/30 rounded-lg overflow-hidden">
+      {/* Header */}
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-3 py-2 bg-base-200/50 hover:bg-base-200"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-bold">Batch {index + 1}</span>
+          <span className="text-[10px] opacity-50">{open ? '▾' : '▸'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-[10px]">
+            <span className="opacity-40">∠</span>
+            <input
+              type="number"
+              className="input input-xs w-12 font-mono text-[10px]"
+              value={batch.angle}
+              min={-180}
+              max={180}
+              step={1}
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                if (Number.isFinite(v)) onUpdate(index, { ...batch, angle: Math.round(v) })
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <span className="opacity-40">°</span>
+          </label>
+          {canRemove && (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost text-error"
+              onClick={(e) => { e.stopPropagation(); onRemove(index) }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </button>
+
+      {/* Collapsible body */}
+      {open && (
+        <div className="flex flex-col gap-2 p-3 pt-2">
+          {grouped.map((g) => (
+            <details key={g.id} className="group" open>
+              <summary className="cursor-pointer font-mono text-[10px] font-bold uppercase tracking-wide opacity-50">
+                {g.title}
+              </summary>
+              <div className="mt-1 flex flex-col gap-1">
+                {g.params.map((p) => (
+                  <StyleSlider
+                    key={p.name}
+                    name={p.name}
+                    help={p.help}
+                    value={batch.style[p.name] ?? p.default}
+                    onDrag={drag}
+                    onCommit={commit}
+                  />
+                ))}
+              </div>
+            </details>
+          ))}
+          {group.length === 0 && (
+            <p className="text-[10px] opacity-40">No groups loaded — WASM may still be initialising.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- */
+/*  Sidebar — batch list, JSON tools, Monaco toggle                  */
+/* ---------------------------------------------------------------- */
+
+export default function Sidebar({ open, onClose, status, drawing }) {
+  const [params, setParams] = useState([])
+  const [groups, setGroups] = useState([])
+  const [style, setStyle] = useAtom(styleAtom)
+  const [defaults, setDefaults] = useState({})
+  const [batches, setBatches] = useState([])
+  const [view, setView] = useState('visual')   // 'visual' | 'json'
+  const [jsonText, setJsonText] = useState('')
+  const [jsonError, setJsonError] = useState('')
+
+  // ---------- init ----------
+  useEffect(() => {
+    loadBurin().then((m) => {
+      const list = m.style_params()
+      const g = typeof m.style_groups === 'function' ? m.style_groups() : []
+      setParams(list)
+      setGroups(g)
+      const defs = defaultsFrom(list)
+      setDefaults(defs)
+      // Existing style from localStorage — migrate to batch list
+      if (style && Object.keys(style).length > 0) {
+        const restored = { ...defs }
+        for (const [k, v] of Object.entries(style)) {
+          if (k in defs && typeof v === 'number' && Number.isFinite(v)) {
+            restored[k] = quantize(k, v) ?? defs[k]
+          }
+        }
+        setBatches([{ angle: 0, style: restored }])
+      } else {
+        setBatches([{ angle: 0, style: { ...defs } }])
+      }
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------- synch JSON text when batches change ----------
+  useEffect(() => {
+    if (batches.length === 0) return
+    setJsonText(batchesToJson(batches))
+  }, [batches])
+
+  // ---------- synch to localStorage ----------
+  useEffect(() => {
+    if (batches.length === 0) return
+    const merged = {}
+    for (const b of batches) Object.assign(merged, b.style)
+    setStyle(merged)
+  }, [batches, setStyle])
+
+  // ---------- actions ----------
+  const addBatch = () => {
+    setBatches((prev) => [...prev, { angle: 0, style: { ...defaults } }])
+  }
+  const removeBatch = (i) => {
+    setBatches((prev) => prev.length > 1 ? prev.filter((_, j) => j !== i) : prev)
+  }
+  const updateBatch = (i, b) => {
+    setBatches((prev) => prev.map((orig, j) => (j === i ? b : orig)))
+  }
+  const reset = () => {
+    setBatches([{ angle: 0, style: { ...defaults } }])
+  }
+
+  // ---------- JSON import ----------
+  const importJson = () => {
+    const raw = prompt('Paste batch JSON:')
+    if (!raw) return
+    try {
+      const parsed = jsonToBatches(raw, defaults)
+      if (parsed.length === 0) throw new Error('Need at least one batch')
+      setBatches(parsed)
+      setJsonError('')
+    } catch (e) {
+      setJsonError(e.message || 'Invalid JSON')
+    }
+  }
+  const downloadJson = () => {
+    const blob = new Blob([jsonText], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'burin-style.json'; a.click()
+    URL.revokeObjectURL(url)
+  }
+  const monacoApply = () => {
+    try {
+      const parsed = jsonToBatches(jsonText, defaults)
+      if (parsed.length === 0) throw new Error('Need at least one batch')
+      setBatches(parsed)
+      setJsonError('')
+    } catch (e) {
+      setJsonError(e.message || 'Invalid JSON')
+    }
+  }
+
   return (
     <aside
       className={`fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-base-content bg-base-100 transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:max-h-none lg:w-80 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
         open ? 'translate-y-0' : 'pointer-events-none translate-y-full'
       }`}
     >
+      {/* Mobile header */}
       <div className="flex shrink-0 items-center justify-between border-b border-base-content px-4 py-2 lg:hidden">
         <span className="font-mono text-sm font-bold">BurinMap</span>
-        <button
-          type="button"
-          aria-label="Close"
-          className="btn btn-sm btn-square border border-base-content"
-          onClick={onClose}
-        >
-          ✕
-        </button>
+        <button type="button" aria-label="Close" className="btn btn-sm btn-square border border-base-content" onClick={onClose}>✕</button>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto p-4">
-        <header className="flex min-w-0 flex-col gap-3">
-          <div>
-            <h1 className="font-mono text-3xl font-bold tracking-tight">BurinMap</h1>
-            <p className="mt-1 min-w-0 text-sm leading-snug opacity-70">
-              Pen-and-ink terrain from elevation. Explore on the basemap; when you stop, the view is
-              drawn on top. Move again and the drawing fades so you can navigate.
-            </p>
-          </div>
-
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4">
+        {/* Header */}
+        <header className="flex min-w-0 flex-col gap-2">
+          <h1 className="font-mono text-3xl font-bold tracking-tight">BurinMap</h1>
+          <p className="min-w-0 text-sm leading-snug opacity-70">
+            Pen-and-ink terrain from elevation. Pan the map — it draws when you stop.
+          </p>
           <dl className="grid grid-cols-3 gap-2 font-mono">
             <div>
-              <dt className="text-[10px] tracking-wide uppercase opacity-45">lines</dt>
+              <dt className="text-[10px] uppercase opacity-45">lines</dt>
               <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.lines) : '—'}</dd>
             </div>
             <div>
-              <dt className="text-[10px] tracking-wide uppercase opacity-45">dashes</dt>
+              <dt className="text-[10px] uppercase opacity-45">dashes</dt>
               <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.dashes) : '—'}</dd>
             </div>
             <div>
-              <dt className="text-[10px] tracking-wide uppercase opacity-45">time</dt>
+              <dt className="text-[10px] uppercase opacity-45">time</dt>
               <dd className="text-sm tabular-nums">{drawing ? `${drawing.ms} ms` : '—'}</dd>
             </div>
           </dl>
           <p className="truncate font-mono text-[10px] uppercase opacity-45">
-            {status.phase}
-            {status.detail ? ` · ${status.detail}` : ''}
+            {status.phase}{status.detail ? ` · ${status.detail}` : ''}
           </p>
         </header>
 
-        <div className="flex items-center justify-between gap-2 border-t border-base-content pt-5">
+        {/* Toggle + actions */}
+        <div className="flex items-center justify-between gap-2 border-t border-base-content pt-4">
           <h2 className="font-mono text-xs font-bold tracking-wide uppercase">Style</h2>
-          <button type="button" className="btn btn-sm border border-base-content" onClick={reset}>
-            Reset
-          </button>
+          <div className="flex items-center gap-1">
+            <button type="button" className="btn btn-xs border border-base-content" onClick={reset}>Reset</button>
+            <button type="button" className="btn btn-xs border border-base-content" onClick={importJson}>Import</button>
+            <button type="button" className="btn btn-xs border border-base-content" onClick={downloadJson}>Export</button>
+          </div>
         </div>
 
-        {grouped.map((g) => (
-          <section key={g.id} className="flex min-w-0 flex-col gap-3 border-t border-base-content/40 pt-4">
-            <div>
-              <h3 className="font-mono text-xs font-bold tracking-wide uppercase">{g.title}</h3>
-              {g.blurb ? (
-                <p className="mt-1 text-[11px] leading-snug opacity-60">{g.blurb}</p>
-              ) : null}
-            </div>
-            {g.params.map((p) => (
-              <StyleSlider
-                key={p.name}
-                p={p}
-                value={draft[p.name] ?? p.default}
-                onDrag={onDrag}
-                onCommit={onCommit}
+        {/* View toggle */}
+        <div className="flex gap-1">
+          <button type="button" className={`btn btn-xs ${view === 'visual' ? 'btn-neutral' : 'btn-ghost'}`} onClick={() => setView('visual')}>Sliders</button>
+          <button type="button" className={`btn btn-xs ${view === 'json' ? 'btn-neutral' : 'btn-ghost'}`} onClick={() => setView('json')}>JSON</button>
+        </div>
+
+        {/* Visual mode: batch cards */}
+        {view === 'visual' && (
+          <div className="flex flex-col gap-3">
+            {batches.map((b, i) => (
+              <BatchCard
+                key={i}
+                index={i}
+                batch={b}
+                params={params}
+                groups={groups}
+                onUpdate={updateBatch}
+                onRemove={removeBatch}
+                canRemove={batches.length > 1}
               />
             ))}
-          </section>
-        ))}
+            <button type="button" className="btn btn-xs btn-outline self-start" onClick={addBatch}>
+              + Batch
+            </button>
+          </div>
+        )}
 
-        <p className="min-w-0 text-[10px] leading-snug wrap-break-word opacity-45">
+        {/* JSON mode: Monaco editor */}
+        {view === 'json' && (
+          <div className="flex flex-col gap-2 min-h-[300px]">
+            <Editor
+              height="40vh"
+              defaultLanguage="json"
+              theme="vs-dark"
+              value={jsonText}
+              onChange={(v) => { setJsonText(v ?? ''); setJsonError('') }}
+              options={{ minimap: { enabled: false }, fontSize: 11, lineNumbers: 'off', scrollBeyondLastLine: false }}
+            />
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn btn-xs btn-neutral" onClick={monacoApply}>Apply</button>
+              {jsonError && <span className="text-[10px] text-error font-mono">{jsonError}</span>}
+            </div>
+          </div>
+        )}
+
+        <p className="min-w-0 text-[10px] leading-snug opacity-45">
           Elevation from AWS Terrain Tiles. Basemap: Mapbox.
         </p>
       </div>
