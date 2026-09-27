@@ -79,6 +79,12 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     }
 
     const my = ++genRef.current
+    const list = Array.isArray(batchesRef.current) ? batchesRef.current : []
+    if (list.length === 0) {
+      // Nothing to draw until the sidebar has initialised its batches.
+      onDrawing(null)
+      return
+    }
     const b = map.getBounds()
     const bounds = {
       west: b.getWest(),

@@ -62,10 +62,13 @@ export function paintDrawing(canvas, drawing, style) {
  * @returns {object} drawing result
  */
 export function drawBatches(burin, elev, width, height, pxM, batches) {
-  const json = JSON.stringify(batches.map((b) => ({
-    angle: b.angle,
+  const list = Array.isArray(batches) ? batches : []
+  const json = JSON.stringify(list.map((b) => ({
+    angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
     style: Object.fromEntries(
-      Object.entries(b.style).filter(([, v]) => v != null && typeof v === 'number' && Number.isFinite(v)),
+      Object.entries(b?.style ?? {}).filter(
+        ([, v]) => v != null && typeof v === 'number' && Number.isFinite(v),
+      ),
     ),
   })))
   return burin.draw_batches(elev, width, height, pxM, json)
