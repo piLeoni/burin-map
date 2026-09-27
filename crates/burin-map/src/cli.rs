@@ -16,8 +16,8 @@ use serde_json;
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
 use crate::{
-    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Error, Frame, Progress,
-    Style, TileSource,
+    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Document, Error, Frame,
+    Progress, Style, TileSource,
 };
 
 const PLACES: &[(&str, Bounds)] = &[
@@ -67,7 +67,8 @@ pub fn command() -> Command {
             burin-map --tp bern --s 5 --dl 0.3\n  \
             burin-map --terrain-place bern --batch --space 6 --mod-breaks 0.1 \\\n  \
             \x20   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45\n  \
-            burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg")
+            burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg\n  \
+            burin-map --style-json '{\"area\":{\"place\":\"bern\"},\"batches\":[{\"angle\":90}]}'")
         .next_help_heading("Terrain — the ground to draw")
         .arg(global("terrain-place").value_name("NAME").default_value("san-francisco")
             .value_parser(PLACES.iter().map(|p| p.0).collect::<Vec<_>>()).help("named area"))
@@ -104,9 +105,9 @@ pub fn command() -> Command {
             .default_value("0").allow_negative_numbers(true).value_parser(value_parser!(f64))
             .help("degrees from the contour tangent (0 = along, 90 = downslope)"))
         .arg(global("style-file").value_name("PATH").value_parser(value_parser!(PathBuf))
-            .help("JSON file with batch passes"))
+            .help("JSON document with an optional area block and the batch passes"))
         .arg(global("style-json").value_name("JSON")
-            .help("inline JSON for batch passes"));
+            .help("inline JSON document (or a bare list of batches)"));
 
     let mut last_group = "";
     for p in Style::PARAMS {
@@ -140,40 +141,92 @@ pub fn command() -> Command {
 }
 
 /// Area to draw, frame to draw it in and a name for the area, from the
-/// terrain and frame options.
-fn area_and_frame(m: &ArgMatches) -> Result<(Bounds, Frame, String), Error> {
-    let mut frame = Frame {
-        px: *m.get_one("frame-px").unwrap(),
-        width_mm: m.get_one("frame-width").copied(),
-        height_mm: m.get_one("frame-height").copied(),
-        pen_mm: *m.get_one("frame-pen").unwrap(),
+/// `san-francisco` → `San Francisco`.
+fn place_title(name: &str) -> String {
+    name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ")
+}
+
+/// Area to draw, frame to draw it in and a name for the area.
+///
+/// Explicit command-line flags always win. Anything left unset falls back to
+/// the area block of the JSON document (`--style-json` / `--style-file`).
+fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, String), Error> {
+    let area = doc.area.clone().unwrap_or_default();
+    let given = |name: &str| {
+        matches!(m.value_source(name), Some(ValueSource::CommandLine))
     };
-    let scale = m.get_one::<String>("frame-scale").map(|s| parse_scale(s)).transpose()?;
-    let size = match m.get_many::<String>("terrain-size") {
-        Some(v) => {
-            let v: Vec<f64> = v.map(|s| parse_length_km(s)).collect::<Result<_, _>>()?;
-            Some((v[0], v.get(1).copied()))
+
+    let mut frame = Frame {
+        px: if given("frame-px") { *m.get_one("frame-px").unwrap() } else { area.px.unwrap_or(2400) },
+        width_mm: if given("frame-width") { m.get_one("frame-width").copied() } else { area.width_mm },
+        height_mm: if given("frame-height") { m.get_one("frame-height").copied() } else { area.height_mm },
+        pen_mm: if given("frame-pen") { *m.get_one("frame-pen").unwrap() } else { area.pen_mm.unwrap_or(0.3) },
+    };
+    let scale = if given("frame-scale") {
+        m.get_one::<String>("frame-scale").map(|s| parse_scale(s)).transpose()?
+    } else {
+        area.scale
+    };
+    let size = if given("terrain-size") {
+        match m.get_many::<String>("terrain-size") {
+            Some(v) => {
+                let v: Vec<f64> = v.map(|s| parse_length_km(s)).collect::<Result<_, _>>()?;
+                Some((v[0], v.get(1).copied()))
+            }
+            None => None,
         }
-        None => None,
+    } else {
+        area.size_km.as_ref().filter(|s| !s.is_empty()).map(|s| (s[0], s.get(1).copied()))
     };
     let frame_aspect = match (frame.width_mm, frame.height_mm) {
         (Some(w), Some(h)) => Some(h / w),
         _ => None,
     };
 
-    let Some(q) = m.get_one::<String>("terrain-at") else {
+    // Where: explicit bounds, a named place, or a centre to look up. CLI first,
+    // then the document's area block.
+    let at = if given("terrain-at") {
+        m.get_one::<String>("terrain-at").cloned()
+    } else {
+        area.at.clone()
+    };
+    let cli_bounds = m.get_many::<f64>("terrain-bounds").map(|b| {
+        let b: Vec<f64> = b.copied().collect();
+        [b[0], b[1], b[2], b[3]]
+    });
+    let place = if given("terrain-place") {
+        m.get_one::<String>("terrain-place").cloned()
+    } else {
+        area.place.clone().or_else(|| m.get_one::<String>("terrain-place").cloned())
+    };
+
+    // A fixed area (bounds or place) needs no size at all: the ground is known.
+    let fixed: Option<Bounds> = cli_bounds.or(area.bounds).or_else(|| {
+        // Only treat the place as fixed when the CLI default wasn't overridden
+        // by an explicit --terrain-at.
+        if at.is_none() {
+            place.as_ref().and_then(|name| PLACES.iter().find(|p| p.0 == name).map(|p| p.1))
+        } else {
+            None
+        }
+    });
+
+    let Some(q) = at else {
         if size.is_some() {
             return Err(Error::Input("--terrain-size only applies with --terrain-at".into()));
         }
-        let (bounds, label) = match m.get_many::<f64>("terrain-bounds") {
+        let (bounds, label) = match fixed {
             Some(b) => {
-                let b: Vec<f64> = b.copied().collect();
-                ([b[0], b[1], b[2], b[3]], format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])))
+                if cli_bounds.is_some() {
+                    (b, format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])))
+                } else {
+                    let name = place.as_deref().unwrap_or("san-francisco");
+                    (b, place_title(name))
+                }
             }
             None => {
-                let name = m.get_one::<String>("terrain-place").unwrap();
-                let title = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
-                (PLACES.iter().find(|p| p.0 == name).unwrap().1, title)
+                let name = place.as_deref().unwrap_or("san-francisco");
+                (PLACES.iter().find(|p| p.0 == name).map(|p| p.1).unwrap_or(PLACES[0].1), place_title(name))
             }
         };
         if let Some(n) = scale {
@@ -199,7 +252,7 @@ fn area_and_frame(m: &ArgMatches) -> Result<(Bounds, Frame, String), Error> {
         }
         (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
     };
-    let (lat, lon, label) = locate(q)?;
+    let (lat, lon, label) = locate(&q)?;
     // Degrees per km is approximate; correct against the projection so the
     // area (and any scale derived from it) comes out as asked.
     let mut bounds = bounds_around(lat, lon, w_km, h_km);
@@ -303,22 +356,20 @@ where
     let (prefix, sections) = split_batch_argv(&args)?;
     let m = command().try_get_matches_from(prefix).unwrap_or_else(|e| e.exit());
 
-    let batches: Vec<Batch> = if let Some(json) = m.get_one::<String>("style-json") {
-        let batches: Vec<Batch> = serde_json::from_str(json)
-            .map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?;
-        if batches.is_empty() {
-            return Err(Error::Input("--style-json list is empty".into()).into());
-        }
-        batches
+    // Parse the document (from --style-json / --style-file) once. A bare
+    // batch array is accepted too, so older invocations keep working.
+    let doc: Document = if let Some(json) = m.get_one::<String>("style-json") {
+        Document::parse(json).map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?
     } else if let Some(path) = m.get_one::<PathBuf>("style-file") {
         let s = std::fs::read_to_string(path)
             .map_err(|e| Error::Input(format!("reading {}: {e}", path.display())))?;
-        let batches: Vec<Batch> = serde_json::from_str(&s)
-            .map_err(|e| Error::Input(format!("invalid --style-file: {e}")))?;
-        if batches.is_empty() {
-            return Err(Error::Input("--style-file list is empty".into()).into());
-        }
-        batches
+        Document::parse(&s).map_err(|e| Error::Input(format!("invalid --style-file: {e}")))?
+    } else {
+        Document::default()
+    };
+
+    let batches: Vec<Batch> = if !doc.batches.is_empty() {
+        doc.batches.clone()
     } else if let Some(sections) = sections {
         let base = shared_style(&m);
         sections
@@ -334,10 +385,10 @@ where
     };
 
     let r = Report::new();
-    if m.get_one::<String>("terrain-at").is_some() {
+    if m.get_one::<String>("terrain-at").is_some() || doc.area.as_ref().is_some_and(|a| a.at.is_some()) {
         r.transient("where", "looking up the place");
     }
-    let (bounds, frame, label) = area_and_frame(&m)?;
+    let (bounds, frame, label) = area_and_frame(&m, &doc)?;
     let (wm, hm) = projected_size(&bounds);
     let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
     r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
@@ -489,7 +540,7 @@ mod tests {
 
     fn resolve(args: &[&str]) -> Result<(Bounds, Frame), Error> {
         let m = command().try_get_matches_from(std::iter::once("burin-map").chain(args.iter().copied())).unwrap();
-        area_and_frame(&m).map(|(b, f, _)| (b, f))
+        area_and_frame(&m, &Document::default()).map(|(b, f, _)| (b, f))
     }
 
     fn argv(args: &[&str]) -> Vec<OsString> {

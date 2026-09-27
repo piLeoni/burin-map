@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
 import { loadBurin } from '../lib/burin'
-import { styleAtom } from '../state'
+import { docFromHash, docToHash, docToJson, parseDoc } from '../lib/doc'
+import { mapViewAtom, styleAtom } from '../state'
 
 /* ---------------------------------------------------------------- */
 /*  Ranges, int params, group metadata                               */
@@ -103,23 +104,28 @@ function defaultsFrom(params) {
   return d
 }
 
-/** JSON representation of batches — matches --style-json schema. */
-function batchesToJson(batches) {
-  return JSON.stringify(
-    batches.map((b) => ({
-      angle: b.angle,
-      style: Object.fromEntries(
-        Object.entries(b.style).filter(([, v]) => v != null && typeof v === 'number' && Number.isFinite(v)),
-      ),
-    })),
-    null,
-    2,
-  )
+/** A document `area` block → mapbox camera fields, when it pins a location. */
+function areaToMapView(area) {
+  if (!area) return null
+  if (typeof area.at === 'string') {
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(area.at)
+    if (m) return { center: [Number(m[2]), Number(m[1])] }
+  }
+  if (Array.isArray(area.bounds) && area.bounds.length === 4) {
+    const [w, s, e, n] = area.bounds
+    return { center: [(w + e) / 2, (s + n) / 2] }
+  }
+  return null
+}
+
+/** JSON text for the editor: the whole document (area + batches) when known. */
+function docText(batches, area) {
+  return docToJson({ area, batches })
 }
 
 function jsonToBatches(json, defaults) {
-  const raw = JSON.parse(json)
-  if (!Array.isArray(raw)) throw new Error('Expected a JSON array of batches')
+  const { batches: raw } = parseDoc(json)
+  if (!Array.isArray(raw)) throw new Error('Expected a list of batches')
   return raw.map((entry) => {
     const style = { ...defaults }
     if (entry?.style && typeof entry.style === 'object') {
@@ -323,15 +329,22 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const [groups, setGroups] = useState([])
   const [defaults, setDefaults] = useState({})
   const [batches, setBatches] = useAtom(styleAtom)
+  const [mapView, setMapView] = useAtom(mapViewAtom)
   const [view, setView] = useState('style')   // 'style' | 'json'
   const [jsonText, setJsonText] = useState('')
   const [jsonError, setJsonError] = useState('')
+  const [shareNote, setShareNote] = useState('')
   const [ready, setReady] = useState(false)
+  const areaRef = useRef(null)
 
   const list = Array.isArray(batches) ? batches : []
 
   // ---------- init ----------
   useEffect(() => {
+    // A #doc=… fragment wins over whatever is in localStorage.
+    const fromHash = docFromHash(globalThis.location?.hash ?? '')
+    if (fromHash) areaRef.current = fromHash.area
+
     loadBurin().then((m) => {
       const p = m.style_params()
       const g = typeof m.style_groups === 'function' ? m.style_groups() : []
@@ -340,6 +353,15 @@ export default function Sidebar({ open, onClose, status, drawing }) {
       const defs = defaultsFrom(p)
       setDefaults(defs)
       setReady(true)
+
+      if (fromHash && Array.isArray(fromHash.batches) && fromHash.batches.length > 0) {
+        const restored = jsonToBatches(JSON.stringify(fromHash.batches), defs)
+        setBatches(restored)
+        const next = areaToMapView(fromHash.area)
+        if (next) setMapView((v) => ({ ...v, ...next }))
+        return
+      }
+
       // If nothing is persisted yet, start with one default batch.
       setBatches((prev) => {
         const cur = Array.isArray(prev) ? prev : []
@@ -350,12 +372,12 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         return [{ angle: 0, style: { ...defs } }]
       })
     })
-  }, [setBatches])
+  }, [setBatches, setMapView])
 
   // ---------- keep JSON text in step with batches ----------
   useEffect(() => {
     if (list.length === 0) return
-    setJsonText(batchesToJson(list))
+    setJsonText(docText(list, areaRef.current))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batches])
 
@@ -370,9 +392,14 @@ export default function Sidebar({ open, onClose, status, drawing }) {
 
   const applyJson = (raw) => {
     try {
+      const doc = parseDoc(raw)
       const parsed = jsonToBatches(raw, defaults)
       if (parsed.length === 0) throw new Error('Need at least one batch')
+      areaRef.current = doc.area
       setBatches(parsed)
+      // A document that names a place moves the map camera there.
+      const next = areaToMapView(doc.area)
+      if (next) setMapView((v) => ({ ...v, ...next }))
       setJsonError('')
     } catch (e) {
       setJsonError(e.message || 'Invalid JSON')
@@ -380,7 +407,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   }
 
   const importJson = () => {
-    const raw = prompt('Paste batch JSON:')
+    const raw = prompt('Paste document JSON (area + batches):')
     if (raw) applyJson(raw)
   }
 
@@ -388,8 +415,21 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     const blob = new Blob([jsonText], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = 'burin-batches.json'; a.click()
+    a.href = url; a.download = 'burin-doc.json'; a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const copyShareLink = async () => {
+    const hash = docToHash({ area: areaRef.current, batches: list })
+    const loc = globalThis.location
+    const url = `${loc.origin}${loc.pathname}${hash}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setShareNote('Link copied')
+    } catch {
+      setShareNote(url)
+    }
+    setTimeout(() => setShareNote(''), 4000)
   }
 
   return (
@@ -437,8 +477,12 @@ export default function Sidebar({ open, onClose, status, drawing }) {
             <button type="button" className="btn btn-xs border border-base-content" onClick={reset}>Reset</button>
             <button type="button" className="btn btn-xs border border-base-content" onClick={importJson}>Import</button>
             <button type="button" className="btn btn-xs border border-base-content" onClick={downloadJson}>Export</button>
+            <button type="button" className="btn btn-xs border border-base-content" onClick={copyShareLink}>Share</button>
           </div>
         </div>
+        {shareNote && (
+          <p className="w-full break-all font-mono text-[10px] leading-snug opacity-60">{shareNote}</p>
+        )}
 
         {/* View toggle */}
         <div className="flex gap-1">

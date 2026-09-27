@@ -18,6 +18,7 @@ globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0)
 globalThis.cancelAnimationFrame = clearTimeout
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
 globalThis.localStorage = dom.window.localStorage
+globalThis.location = dom.window.location
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const { createElement } = await import('react')
@@ -58,6 +59,21 @@ await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 const html = document.getElementById('root').innerHTML
 const checks = ['Batch 1', 'Batch 2', 'angle', 'space', 'dash-light', 'base distance between lines']
 const missing = checks.filter((c) => !html.includes(c))
+
+// Document helpers round-trip (the #doc= URL format).
+const { docToHash, docFromHash, docToJson, parseDoc } = await import('../src/lib/doc.js')
+const doc = {
+  area: { at: '37.75111,-122.44722' },
+  batches: [{ angle: 90, style: { space: 6 } }],
+}
+const hash = docToHash(doc)
+const back = docFromHash(hash)
+if (Math.abs(back.batches[0].angle - 90) !== 0) missing.push('docToHash angle')
+if (Math.abs(back.batches[0].style.space - 6) !== 0) missing.push('docToHash space')
+if (back.area?.at !== '37.75111,-122.44722') missing.push('docToHash area')
+// CLI-shaped input (object with area + batches) and bare-array input both parse.
+if (parseDoc(docToJson(doc)).batches.length !== 1) missing.push('parseDoc object')
+if (parseDoc('[{"angle":0,"style":{"space":5}}]').batches.length !== 1) missing.push('parseDoc array')
 
 console.log('rendered', html.length, 'chars')
 if (errors.length) {

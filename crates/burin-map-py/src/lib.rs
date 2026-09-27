@@ -4,7 +4,6 @@
 //! numpy at build time and one abi3 wheel serves every Python version.
 
 use burin_map::{Error, Frame, Style};
-use pyo3::types::PyString;
 use burin_map_core::Line;
 use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;

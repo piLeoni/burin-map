@@ -11,8 +11,11 @@
 //! std::fs::write("sf.svg", map.to_svg()).unwrap();
 //! ```
 
+use serde::{Deserialize, Serialize};
+
 pub mod cli;
 pub mod dem;
+pub mod document;
 pub mod geo;
 pub mod progress;
 pub mod raster;
@@ -20,6 +23,7 @@ pub mod tmerc;
 
 pub use burin_map_core::{Batch, Drawing, Line, Style};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
+pub use document::{AreaDoc, Document};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
 pub use progress::{Progress, TileSource};
 
@@ -47,7 +51,7 @@ impl std::error::Error for Error {}
 /// pen takes the place of `style.batch_stroke`, so every proportion of the
 /// style is kept and the pixel width follows from frame and pen. With
 /// `height_mm` too, the drawing shrinks to fit inside both.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
     /// Pixel width when no `width_mm` is given.
     pub px: usize,
