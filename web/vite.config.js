@@ -13,7 +13,7 @@ export default defineConfig({
       manifest: {
         name: 'BurinMap',
         short_name: 'BurinMap',
-        description: 'Pen-and-ink terrain from elevation',
+        description: 'Terrain drawn as engraved lines',
         theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',

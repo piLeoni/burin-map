@@ -428,32 +428,44 @@ deploy uses a rewrite for the same path (`web/vercel.json`).
 
 ### Documents and share links
 
-A *document* is the JSON that describes a whole drawing: where (`area`) and
-how (`batches`). The CLI takes the same shape with `--style-json` /
-`--style-file`, so a file exported from the web app can be fed straight to the
-command line, and vice versa.
+A *document* describes a whole drawing: where (`area`) and how (`batches`).
+The CLI reads it as JSON5 — plain JSON works too, and so do comments, trailing
+commas and unquoted keys — with `--style-json` / `--style-file`, so a file
+from the web app can be fed straight to the command line, and vice versa.
 
-```json
+```json5
+// Twin Peaks, two passes
 {
-  "area": { "at": "Twin Peaks, San Francisco", "size_km": [8, 8], "px": 1600 },
+  "area": { "at": "Twin Peaks, San Francisco", "size_km": [8, 8] },
   "batches": [
     { "angle": 0,  "style": { "space": 7, "mod_breaks": 0.1 } },
-    { "angle": 90, "style": { "space": 7, "mod_breaks": 0.85, "batch_floor": 0.45 } }
-  ]
+    { "angle": 90, "style": { "space": 7, "mod_breaks": 0.85, "batch_floor": 0.45 } },  // steep ground
+  ],
 }
 ```
 
 Every `area` field maps to a CLI flag (`at`↔`--terrain-at`, `size_km`↔
-`--terrain-size`, `px`↔`--frame-px`, `pen_mm`↔`--frame-pen`, …). Explicit
-command-line flags always win; the document fills in whatever was left unset.
-A bare `[ { "angle": …, "style": … } ]` array is also accepted.
+`--terrain-size`, `size_mm`↔`--frame-size`, `scale`↔`--export-scale`,
+`pen_mm`↔`--pen-width`, …). Explicit command-line flags always win; the
+document fills in whatever was left unset. A bare `[ { "angle": …, "style": … } ]`
+array is also accepted. Style parameters left out keep their defaults.
 
-**Share** builds a `#d=…` URL from the current camera and batches, using a
-compact notation of the CLI's own short names:
+The web app edits the document as text, in one of three views of the same
+state: **YAML**, **JSON5**, or **CLI** (a bash script that runs `burin-map`,
+one flag per line). Every parameter is listed: the ones you set carry their
+default in a comment, the others are commented out at their default, so
+uncommenting a line sets it. Your
+own comments — above a setting, at the end of its line, or at the top — are
+kept when you switch views. **Apply** (⌘/Ctrl + Enter) draws the edit;
+dragging the map updates `at`. **Download** saves the current view
+(`burin-map.yaml`, `.json5` or `.sh`); **Import** reads any of the three.
+
+**Link** copies a `#d=…` URL for the current camera and batches (without
+comments), using a compact notation of the CLI's own short names:
 
 ```
-#d=at37.75111,-122.44722,ts8x8,fpx1600|a0,s4.8,dl0.15;a90,s5.5,bf0.45
-   └───────────── area ─────────────┘│└──── batches (';' between passes) ────┘
+#d=at37.75111,-122.44722,fs210x297,esc25000|a0,s4.8,dl0.15;a90,s5.5,bf0.45
+   └──────────────── area ─────────────────┘│└──── batches (';' between passes) ────┘
 ```
 
 `|` separates area from batches, `,` separates parameters, `;` separates

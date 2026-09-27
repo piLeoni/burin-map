@@ -21,7 +21,7 @@ pub mod progress;
 pub mod raster;
 pub mod tmerc;
 
-pub use burin_map_core::{Batch, Drawing, Line, Style};
+pub use burin_map_core::{Batch, Drawing, GeoTransform, Line, Style};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use document::{AreaDoc, Document};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
@@ -47,22 +47,25 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// The rectangle of the drawing. With `width_mm` it has a physical size: the
+/// The rectangle of the drawing. With `size_mm` it is a sheet of paper: the
 /// pen takes the place of `style.batch_stroke`, so every proportion of the
-/// style is kept and the pixel width follows from frame and pen. With
-/// `height_mm` too, the drawing shrinks to fit inside both.
+/// style is kept and the pixel width follows from paper and the pen width.
+/// When the ground and the paper have different proportions, the drawing
+/// shrinks to fit inside the paper.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
-    /// Pixel width when no `width_mm` is given.
+    /// Grid width in px when there is no paper size. Not a user setting.
     pub px: usize,
-    pub width_mm: Option<f64>,
-    pub height_mm: Option<f64>,
-    pub pen_mm: f64,
+    /// Paper `[width, height]` in mm.
+    pub size_mm: Option<[f64; 2]>,
+    /// Pen width on paper, mm. Sets the stroke-width in exported SVGs; does
+    /// not affect line density.
+    pub pen_width: f64,
 }
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { px: 2400, width_mm: None, height_mm: None, pen_mm: 0.3 }
+        Frame { px: 2400, size_mm: None, pen_width: 0.3 }
     }
 }
 
@@ -83,6 +86,21 @@ impl Map {
     pub fn to_png(&self) -> Result<Vec<u8>, Error> {
         let d = &self.drawing;
         raster::to_png(&d.paths, d.width, d.height, self.style.batch_stroke)
+    }
+
+    /// GeoJSON with geographic coordinates (the caller must supply the bounds).
+    pub fn to_geojson(&self, bounds: &Bounds) -> String {
+        let pix_w = self.drawing.width as f64;
+        let pix_h = self.drawing.height as f64;
+        let deg_per_px_lon = (bounds[2] - bounds[0]) / pix_w;
+        let deg_per_px_lat = (bounds[3] - bounds[1]) / pix_h;
+        let tr = burin_map_core::GeoTransform {
+            nw_lon: bounds[0] + deg_per_px_lon * 0.5,
+            nw_lat: bounds[3] - deg_per_px_lat * 0.5,
+            deg_per_px_lon,
+            deg_per_px_lat,
+        };
+        burin_map_core::geojson::to_geojson(&self.drawing.paths, pix_w, pix_h, |x, y| tr.to_lonlat(x, y))
     }
 }
 
@@ -108,12 +126,9 @@ pub fn draw_batches(
     let style = &batches[0].style;
     let mut width = frame.px;
     let mut mm_per_px = None;
-    if let Some(fw) = frame.width_mm {
-        let k = frame.pen_mm / style.batch_stroke as f64;
-        let mut width_mm = fw;
-        if let Some(fh) = frame.height_mm {
-            width_mm = width_mm.min(fh / projected_aspect(bounds));
-        }
+    if let Some([fw, fh]) = frame.size_mm {
+        let k = frame.pen_width / style.batch_stroke as f64;
+        let width_mm = fw.min(fh / projected_aspect(bounds));
         width = (width_mm / k).round() as usize;
         mm_per_px = Some(k);
     }
@@ -124,7 +139,7 @@ pub fn draw_batches(
             width_mm: w as f64 * k,
             height_mm: h as f64 * k,
             scale: dem.px_m * 1000.0 / k,
-            pen_mm: frame.pen_mm,
+            pen_width: frame.pen_width,
             pitch_mm: style.space as f64 * k,
         });
     }

@@ -1,34 +1,14 @@
 /**
- * Drawing document: the JSON that describes a whole picture — where (`area`)
- * and how (`batches`). Same shape the CLI takes with --style-json, so a file
- * exported here can be fed straight to the command line.
+ * Drawing document: where (`area`) and how (`batches`) — the shape the CLI
+ * takes with --style-json. This file holds the compact URL notation; the
+ * editable views (YAML, JSON5, CLI) are in views.js.
  *
- * @typedef {{ place?: string, at?: string, bounds?: number[], size_km?: number[], px?: number, width_mm?: number, height_mm?: number, pen_mm?: number, scale?: number }} AreaDoc
- * @typedef {{ angle: number, style: Record<string, number> }} Batch
+ * @typedef {{ place?: string, at?: string, bounds?: number[], size_km?: number[], size_mm?: number[], scale?: number, pen_mm?: number }} AreaDoc
+ * @typedef {{ name?: string, angle: number, style: Record<string, number> }} Batch
  * @typedef {{ area?: AreaDoc, batches: Batch[] }} Doc
  */
 
 import { PARAM_SHORTS, SHORT_PARAMS } from './shorts.js'
-
-/** Build a document from the live camera and the batch list. */
-export function makeDoc(batches, mapView) {
-  const area = {}
-  if (mapView?.center && Number.isFinite(mapView.zoom)) {
-    area.at = `${mapView.center[1].toFixed(5)},${mapView.center[0].toFixed(5)}`
-  }
-  return { area, batches }
-}
-
-/** Pretty JSON for download / display. */
-export function docToJson(doc) {
-  const out = {}
-  if (doc.area && Object.keys(doc.area).length > 0) out.area = doc.area
-  out.batches = doc.batches.map((b) => ({
-    angle: b.angle,
-    style: numericStyle(b.style),
-  }))
-  return JSON.stringify(out, null, 2)
-}
 
 /** Keep only finite numbers, so we never emit null/NaN into JSON. */
 function numericStyle(style) {
@@ -37,15 +17,21 @@ function numericStyle(style) {
   )
 }
 
+/** Keys the area block may hold; the same set the CLI accepts. */
+const AREA_KEYS = ['place', 'at', 'bounds', 'size_km', 'size_mm', 'scale', 'pen_mm']
+
 /** Parse a document, accepting a bare batch array too. */
 export function parseDoc(text) {
   const raw = JSON.parse(text)
   if (Array.isArray(raw)) return { area: undefined, batches: raw }
-  if (!raw || typeof raw !== 'object') throw new Error('Expected a JSON object or array')
-  return {
-    area: raw.area && typeof raw.area === 'object' ? raw.area : undefined,
-    batches: raw.batches ?? [],
+  if (!raw || typeof raw !== 'object') throw new Error('Not a BurinMap document: expected a JSON object or list')
+  const area = raw.area && typeof raw.area === 'object' ? raw.area : undefined
+  for (const key of Object.keys(area ?? {})) {
+    if (!AREA_KEYS.includes(key)) {
+      throw new Error(`Unknown area setting "${key}". Allowed: ${AREA_KEYS.join(', ')}`)
+    }
   }
+  return { area, batches: raw.batches ?? [] }
 }
 
 /* ================================================================= */
@@ -54,9 +40,9 @@ export function parseDoc(text) {
 //
 // Short CLI names, no spaces, comma-separated, area and batches split by '|':
 //
-//   at37.75,-122.44,ts8x8,fpx1600|a0,s4.8,dl0.15;a90,s5.5,bf0.45
+//   at37.75,-122.44,fs210x297,fsc25000|a0,s4.8,dl0.15;a90,s5.5,bf0.45
 //
-// Where `a` is the batch angle. The comma is what makes it unambiguous:
+// Where `a` is the batch angle and `n` its name (with `%,;|` percent-escaped). The comma is what makes it unambiguous:
 // `sa0.3` alone could be `sa=0.3` (sun azimuth) or `s=` + garbage, but split
 // on commas first and each token has exactly one reading. Unknown names and
 // malformed values are hard errors, never silent misreads.
@@ -67,11 +53,9 @@ const AREA_SHORTS = {
   place: 'tp',
   bounds: 'tbo',
   size_km: 'ts',
-  px: 'fpx',
-  width_mm: 'fw',
-  height_mm: 'fh',
-  scale: 'fsc',
-  pen_mm: 'fpen',
+  size_mm: 'fs',
+  scale: 'esc',
+  pen_mm: 'pen',
 }
 
 /** Longest-first name list, so `salt` wins over `sa` and `s`. */
@@ -99,13 +83,15 @@ export function docToNote(doc) {
     const v = area[key]
     if (v == null) continue
     if (key === 'bounds') areaParts.push(`${short}${v.join(',')}`)
-    else if (key === 'size_km') areaParts.push(`${short}${v.join('x')}`)
+    else if (key === 'size_km' || key === 'size_mm') areaParts.push(`${short}${v.map(num).join('x')}`)
     else if (key === 'at') areaParts.push(`${short}${v}`)
     else areaParts.push(`${short}${num(v)}`)
   }
 
   const batchParts = doc.batches.map((b) => {
     const toks = [`a${num(b.angle ?? 0)}`]
+    // Only the notation's own separators are escaped; docToHash URL-encodes the rest.
+    if (b.name) toks.push(`n${b.name.replace(/[%,;|]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`)
     for (const [key, v] of Object.entries(numericStyle(b.style))) {
       toks.push(`${PARAM_SHORTS[key] ?? key}${num(v)}`)
     }
@@ -133,11 +119,11 @@ function groupAreaTokens(parts) {
 /** Read one `nameValue` token against a candidate list, longest name first. */
 function readToken(tok, candidates, what) {
   const m = /^([a-z]+)(.+)$/.exec(tok)
-  if (!m) throw new Error(`cannot read ${what} token: "${tok}"`)
+  if (!m) throw new Error(`Can't read "${tok}"`)
   const [, name, raw] = m
   // `candidates` are already longest-first, so `salt45` never reads as `sa`.
   const hit = candidates.find((c) => c.short === name)
-  if (!hit) throw new Error(`unknown ${what} parameter: "${name}"`)
+  if (!hit) throw new Error(`Unknown ${what} setting "${name}"`)
   return { key: hit.key, raw }
 }
 
@@ -145,14 +131,14 @@ function readToken(tok, candidates, what) {
 function readNumber(tok, candidates, what) {
   const { key, raw } = readToken(tok, candidates, what)
   const value = Number(raw)
-  if (!Number.isFinite(value)) throw new Error(`bad number in "${tok}"`)
+  if (!Number.isFinite(value)) throw new Error(`"${tok}" needs a number after its name`)
   return { key, value, raw }
 }
 
 /** Decode compact notation into a document. Throws on anything it can't read. */
 export function noteToDoc(note) {
   const text = String(note || '').trim()
-  if (!text) throw new Error('empty notation')
+  if (!text) throw new Error('The URL holds no drawing')
 
   const [areaText, batchText] = text.includes('|') ? text.split('|', 2) : ['', text]
   const area = {}
@@ -164,25 +150,26 @@ export function noteToDoc(note) {
       if (key === 'bounds') {
         const parts = raw.split(',').map(Number)
         if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
-          throw new Error(`bounds needs 4 numbers: "${tok}"`)
+          throw new Error(`Bounds need 4 numbers (west, south, east, north): "${tok}"`)
         }
         area.bounds = parts
-      } else if (key === 'size_km') {
+      } else if (key === 'size_km' || key === 'size_mm') {
         const parts = raw.split('x').map(Number)
+        const unit = key === 'size_km' ? 'km, like 8x8' : 'mm, like 210x297'
         if (parts.length < 1 || parts.length > 2 || parts.some((n) => !Number.isFinite(n) || n <= 0)) {
-          throw new Error(`size needs 1 or 2 numbers like 8x8: "${tok}"`)
+          throw new Error(`Size needs 1 or 2 numbers in ${unit}: "${tok}"`)
         }
-        area.size_km = parts
+        area[key] = parts
       } else if (key === 'at') {
         if (!/^-?[\d.]+,-?[\\d.]+$/.test(raw) && raw.length === 0) {
-          throw new Error(`centre needs "lat,lon": "${tok}"`)
+          throw new Error(`Centre needs "lat,lon": "${tok}"`)
         }
         area.at = raw
       } else if (key === 'place') {
         area.place = raw
       } else {
         const value = Number(raw)
-        if (!Number.isFinite(value)) throw new Error(`bad number in "${tok}"`)
+        if (!Number.isFinite(value)) throw new Error(`"${tok}" needs a number after its name`)
         area[key] = value
       }
     }
@@ -190,17 +177,23 @@ export function noteToDoc(note) {
 
   const batches = (batchText ? batchText.split(';') : []).filter((s) => s.trim() !== '').map((seg) => {
     let angle = 0
+    let name
     const style = {}
     for (const tok of seg.split(',')) {
       if (!tok) continue
+      // No style short starts with `n`, so an `n…` token is always the name.
+      if (tok[0] === 'n') {
+        name = decodeURIComponent(tok.slice(1))
+        continue
+      }
       const { key, value } = readNumber(tok, ANGLE_AND_STYLE, 'style')
       if (key === 'angle') angle = value
       else style[key] = value
     }
-    return { angle, style }
+    return name ? { name, angle, style } : { angle, style }
   })
 
-  if (batches.length === 0) throw new Error('no batches in notation')
+  if (batches.length === 0) throw new Error('The URL holds no batches')
   return { area: Object.keys(area).length ? area : undefined, batches }
 }
 

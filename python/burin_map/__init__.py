@@ -4,7 +4,7 @@
     >>> lat, lon, _ = burin_map.locate("Twin Peaks, San Francisco")  # or "37.75,-122.45"
     >>> sf = burin_map.bounds_around(lat, lon, 20, 20)                # km
     >>> bay = (-122.75, 37.45, -122.05, 38.05)                    # west, south, east, north
-    >>> d = burin_map.draw(bay, frame_width_mm=420, frame_pen_mm=0.3)  # plotter / print
+    >>> d = burin_map.draw(bay, frame_size_mm=(420, 594), frame_pen_mm=0.3)  # plotter / print
     >>> d.save_svg("bay.svg"); d.save_png("bay.png")
 
 The engine is written in Rust (the `burin_map._burin` extension); this module
@@ -132,19 +132,19 @@ def projected_size(bounds: Bounds) -> tuple[float, float]:
     return _burin.projected_size(tuple(bounds))
 
 
-def draw(bounds: Bounds, style: Style | None = None, *, frame_px: int = 2400,
-         frame_width_mm: float | None = None, frame_height_mm: float | None = None,
+def draw(bounds: Bounds, style: Style | None = None, *,
+         frame_size_mm: tuple[float] | tuple[float, float] | None = None,
          frame_pen_mm: float = 0.3, log: Callable[[str], None] | None = None) -> Drawing:
     """Download SRTM elevation for `bounds` (west, south, east, north in degrees) and draw it.
 
-    `frame_px` is the image width in px. With `frame_width_mm` the frame has a
-    physical size instead: the pen takes the place of `style.batch_stroke`, so
-    every proportion of the style is kept and the pixel width follows from frame
-    and pen. With `frame_height_mm` too, the drawing shrinks to fit inside both.
+    `frame_size_mm` is the paper, `(side,)` for a square or `(width, height)`.
+    The pen takes the place of `style.batch_stroke`, so every proportion of the
+    style is kept and the pixel width follows from paper and pen. When the
+    ground and the paper have different proportions, the drawing shrinks to fit.
     """
     st = style or Style()
-    native = _burin.draw(tuple(bounds), _style_dict(st), frame_px, frame_width_mm,
-                         frame_height_mm, frame_pen_mm, log)
+    size = list(frame_size_mm) if frame_size_mm is not None else None
+    native = _burin.draw(tuple(bounds), _style_dict(st), size, frame_pen_mm, log)
     return Drawing(native, st, native.mm_per_px)
 
 

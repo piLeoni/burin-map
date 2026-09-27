@@ -168,14 +168,12 @@ export async function buildDem(bounds, outW, outH, onProgress) {
     const key = `${zz}/${x}/${y}`
     return !tileCache.has(key) && !inflight.has(key)
   }).length
-  if (missing > 0) onProgress?.(`Downloading ${missing} tiles…`)
+  if (missing > 0) onProgress?.(`Downloading elevation (${missing} tile${missing === 1 ? '' : 's'})…`)
 
   const results = await Promise.all(coords.map(([zz, x, y]) => tileElev(zz, x, y)))
   const tiles = results.map((r) => r.elev)
   const cached = results.filter((r) => r.cached).length
   const fetched = results.length - cached
-  if (fetched > 0) onProgress?.(`Downloaded ${fetched} tiles…`)
-
   const elev = new Float32Array(outW * outH)
   for (let row = 0; row < outH; row++) {
     const my = yN - (row + 0.5) * (heightM / outH)

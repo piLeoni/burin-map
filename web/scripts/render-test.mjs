@@ -34,7 +34,7 @@ console.error = (...args) => { errors.push(args.join(' ')); origError(...args) }
 
 const store = createStore()
 store.set(styleAtom, [
-  { angle: 30, style: { space: 6, space_light: 1, dash_light: 0.2, batch_stroke: 1.5 } },
+  { name: 'Ridges', angle: 30, style: { space: 6, space_light: 1, dash_light: 0.2, batch_stroke: 1.5 } },
   { angle: 90, style: { space: 5, space_light: 1.2, dash_light: 1, batch_stroke: 1 } },
 ])
 
@@ -57,14 +57,16 @@ await act(async () => {
 await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 
 const html = document.getElementById('root').innerHTML
-const checks = ['Batch 1', 'Batch 2', 'angle', 'space', 'dash-light', 'base distance between lines']
+const checks = ['>YAML<', '>JSON5<', '>CLI<', 'Reset to defaults', 'Import', 'Download', 'Copy', 'Link', 'In step with the map']
 const missing = checks.filter((c) => !html.includes(c))
+if (html.includes('type="range"')) missing.push('the sliders should be gone')
+if (html.includes('Parameters')) missing.push('the Parameters tab should be gone')
 
 // Document helpers round-trip (the #doc= URL format).
-const { docToHash, docFromHash, docToJson, parseDoc, docToNote, noteToDoc } = await import('../src/lib/doc.js')
+const { docToHash, docFromHash, parseDoc, docToNote, noteToDoc } = await import('../src/lib/doc.js')
 const { PARAM_SHORTS } = await import('../src/lib/shorts.js')
 const doc = {
-  area: { at: '37.75111,-122.44722', size_km: [8, 8], px: 1600, pen_mm: 0.25 },
+  area: { at: '37.75111,-122.44722', size_mm: [210, 297], scale: 25000, pen_mm: 0.25 },
   batches: [{ angle: 90, style: { space: 6, dash_light: 0.2, batch_floor: 0.45 } }],
 }
 const hash = docToHash(doc)
@@ -73,9 +75,12 @@ if (hash.startsWith('#d=')) {
   if (back.batches[0].angle !== 90) missing.push('notation angle')
   if (back.batches[0].style.space !== 6) missing.push('notation space')
   if (back.batches[0].style.batch_floor !== 0.45) missing.push('notation batch_floor')
-  if (back.area?.px !== 1600) missing.push('notation area px')
+  if (back.area?.size_mm?.[1] !== 297) missing.push('notation area size_mm')
+  if (back.area?.scale !== 25000) missing.push('notation area scale')
   if (back.area?.at !== '37.75111,-122.44722') missing.push('notation area at (comma in value)')
-  if (back.area?.size_km?.[1] !== 8) missing.push('notation size_km')
+  if (docFromHash(docToHash({ area: { size_km: [8, 6] }, batches: doc.batches })).area?.size_km?.[1] !== 6) {
+    missing.push('notation size_km')
+  }
 } else {
   missing.push('hash should use the #d= notation')
 }
@@ -83,6 +88,18 @@ if (hash.startsWith('#d=')) {
 // The whole document must survive the notation exactly.
 const exact = docToNote(doc)
 if (JSON.stringify(noteToDoc(exact)) !== JSON.stringify(doc)) missing.push('notation exact round-trip')
+
+// Batch names survive the link, whatever characters they hold.
+const named = {
+  area: { at: '37.75,-122.44' },
+  batches: [
+    { name: 'north, ridges; 50% | "steep"', angle: 0, style: { space: 5 } },
+    { name: 'Vallées ñ', angle: 90, style: { space: 4 } },
+    { angle: 45, style: { space: 3 } },
+  ],
+}
+const namedBack = docFromHash(docToHash(named))
+if (JSON.stringify(namedBack.batches) !== JSON.stringify(named.batches)) missing.push('batch names through the link')
 
 // Ambiguous short names resolve longest-first, never silently.
 if (noteToDoc('|a0,salt45').batches[0].style.sun_altitude !== 45) missing.push('salt vs sa')
@@ -125,8 +142,169 @@ const legacyBack = docFromHash(legacy)
 if (legacyBack?.batches?.[0]?.angle !== 90) missing.push('legacy #doc= link')
 
 // Object and bare-array JSON both parse.
-if (parseDoc(docToJson(doc)).batches.length !== 1) missing.push('parseDoc object')
+if (parseDoc(JSON.stringify(doc)).batches.length !== 1) missing.push('parseDoc object')
 if (parseDoc('[{"angle":0,"style":{"space":5}}]').batches.length !== 1) missing.push('parseDoc array')
+
+// The removed frame keys are errors that name the key, in JSON and in links.
+const throwsWith = (fn, text) => { try { fn() } catch (e) { return String(e.message).includes(text) } return false }
+for (const key of ['px', 'width_mm', 'height_mm']) {
+  if (!throwsWith(() => parseDoc(`{"area":{"${key}":100},"batches":[]}`), key)) missing.push(`old key ${key} should be rejected`)
+}
+for (const note of ['fpx1600|a0,s5', 'fw200|a0,s5', 'fh300|a0,s5']) {
+  if (!throwsWith(() => noteToDoc(note), 'Unknown area setting')) missing.push(`old notation ${note} should be rejected`)
+}
+
+// Frame: the same rules as the CLI.
+const F = await import('../src/lib/frame.js')
+const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b))
+const paper = { ...F.DEFAULT_FRAME, mode: 'paper', size_mm: [297, 420], scale: 50000 }
+const g = F.groundKm(paper)
+if (!near(g[0], 14.85) || !near(g[1], 21)) missing.push(`paper ground ${g}`)
+if (F.groundKm({ ...F.DEFAULT_FRAME, size_km: null }) !== null) missing.push('land without size has no ground yet')
+if (!near(F.aspectOf(paper), 420 / 297)) missing.push('paper aspect')
+
+// Zoom and ground are two views of one value.
+for (const lat of [0, 37.75, 60]) {
+  const z = F.zoomFor(lat, 8, 600)
+  if (!near(F.groundWidthAt(lat, z, 600), 8)) missing.push(`zoom round trip at ${lat}`)
+}
+// A zoom by hand changes km in land mode, the scale in paper mode; the shape stays.
+const land = F.withGroundWidth({ ...F.DEFAULT_FRAME, size_km: [10, 5] }, 20.04)
+if (land.size_km[0] !== 20 || land.size_km[1] !== 10) missing.push(`land zoom ${land.size_km}`)
+const zoomed = F.withGroundWidth(paper, 29.7)
+if (zoomed.scale !== 100000 || zoomed.size_mm[0] !== 297) missing.push(`paper zoom ${zoomed.scale}`)
+
+// The box keeps the frame's shape and fits the screen with room around it.
+const box = F.fitBox(1000, 600, 2)
+if (!near(box.h, 600 - 2 * F.FIT_PAD) || !near(box.w * 2, box.h) || !near(box.x + box.w / 2, 500)) missing.push('fitBox')
+
+// Bounds are square in Mercator, so pixels are square and match the map.
+const bb = F.boundsAround([7.7, 46], [10, 5])
+const merc = (lng, lat) => [lng * Math.PI / 180, Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))]
+const [x0, y0] = merc(bb.west, bb.south)
+const [x1, y1] = merc(bb.east, bb.north)
+if (!near((y1 - y0) / (x1 - x0), 0.5, 1e-9)) missing.push('boundsAround proportions')
+
+// Grid: 2400 px for land (the CLI default); for paper the pen sets it, as in the CLI.
+const lg = F.drawGrid({ ...F.DEFAULT_FRAME, size_km: [10, 5] })
+if (lg.width !== 2400 || lg.height !== 1200 || lg.mmPerPx !== null) missing.push(`land grid ${lg.width}x${lg.height}`)
+const pg = F.drawGrid({ ...paper, size_mm: [210, 297], pen_mm: 0.3 }, 1.2)
+if (pg.width !== 840 || pg.height !== 1188 || !near(pg.mmPerPx, 0.25)) missing.push(`paper grid ${pg.width}x${pg.height}`)
+const big = F.drawGrid({ ...paper, size_mm: [841, 1189], pen_mm: 0.3 }, 1.2)
+if (Math.max(big.width, big.height) > F.MAX_EDGE || big.capped?.width !== 3364) missing.push('large paper is capped and says so')
+
+// Documents: any two of ground, paper and scale decide the third.
+const a1 = F.frameFromArea({ at: '46,7.7', size_mm: [297, 420], scale: 50000 })
+if (a1.frame.mode !== 'paper' || a1.center[0] !== 7.7 || a1.center[1] !== 46) missing.push('area paper + scale')
+const a2 = F.frameFromArea({ at: '46,7.7', size_km: [20, 10], scale: 100000 })
+if (a2.frame.mode !== 'paper' || a2.frame.size_mm[0] !== 200 || a2.frame.size_mm[1] !== 100) missing.push(`area ground + scale ${a2.frame.size_mm}`)
+const a3 = F.frameFromArea({ at: '46,7.7', size_km: [8] })
+if (a3.frame.mode !== 'land' || a3.frame.size_km[1] !== 8) missing.push('area one km value is a square')
+const a4 = F.frameFromArea({ place: 'bern', size_mm: [200] })
+if (a4.frame.mode !== 'paper' || !(a4.frame.scale > 0) || a4.frame.size_mm[1] !== 200) missing.push('area place + paper')
+if (!throwsWith(() => F.frameFromArea({ at: '46,7', size_km: [5], size_mm: [200], scale: 1000 }), 'drop one')) missing.push('overdetermined area')
+if (!throwsWith(() => F.frameFromArea({ at: '46,7', scale: 1000 }), 'scale needs')) missing.push('scale alone')
+if (!throwsWith(() => F.frameFromArea({ at: 'Zermatt' }), 'lat,lon')) missing.push('address centre explains itself')
+
+// And back: the area block the app exports.
+const out = F.areaFromFrame(paper, [7.7, 46])
+if (JSON.stringify(out) !== JSON.stringify({ at: '46.00000,7.70000', size_mm: [297, 420], scale: 50000 })) missing.push(`areaFromFrame ${JSON.stringify(out)}`)
+  if (JSON.stringify(F.areaFromFrame({ ...F.DEFAULT_FRAME, size_km: [8, 8] }, null)) !== '{"size_km":[8]}') missing.push('square km written once')
+
+// The editor's three views: YAML, JSON5 and the command, against the real
+// parameter table from crates/burin-map-core/src/style.rs.
+const V = await import('../src/lib/views.js')
+const { readFileSync } = await import('node:fs')
+const styleRs = readFileSync(new URL('../crates/burin-map-core/src/style.rs', `file://${process.cwd()}/`), 'utf8')
+const schema = {
+  params: [...styleRs.matchAll(/^\s+(\w+): (\w+) \("\w+"\): \w+ = ([\d.]+), "([^"]+)";/gm)]
+    .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
+  groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
+}
+if (schema.params.length !== 33) missing.push(`views: read ${schema.params.length} params from style.rs`)
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const model = {
+  area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
+  batches: [
+    { name: "Bob's ridges: #1", angle: 0, style: { space: 6, input_gain: 3.5 } },
+    { angle: -30, style: { batch_floor: 0.45 } },
+  ],
+  notes: {
+    '': { above: ['Zermatt, A4 at 1:25000', 'second line'] },
+    'area.at': { after: 'the Matterhorn is south-west' },
+    'batches.0.style.space': { above: ['wider in the valleys'], after: 'was 4.8' },
+    'batches.1': { above: ['steep ground only'] },
+  },
+}
+const kinds = Object.keys(V.VIEWS)
+for (const kind of kinds) {
+  const text = V.renderView(kind, model, schema)
+  let back
+  try { back = V.parseView(kind, text, schema) } catch (e) { missing.push(`views: ${kind} can't read itself: ${e.message}`); continue }
+  if (!same(back, model)) missing.push(`views: ${kind} round trip\n${JSON.stringify(back)}`)
+  for (const other of kinds) {
+    const again = V.parseView(other, V.renderView(other, back, schema), schema)
+    if (!same(again, model)) missing.push(`views: ${kind} -> ${other} loses something`)
+  }
+  if (!text.includes('input_broad') && !text.includes('input-broad')) missing.push(`views: ${kind} should list unset parameters`)
+}
+
+// Uncommenting a default sets it; commenting a value out unsets it.
+const one = { area: {}, batches: [{ angle: 0, style: { space: 6 } }], notes: {} }
+const edits = {
+  yaml: [['# dash_light: 0.15', 'dash_light: 0.3'], ['space: 6', '# space: 6']],
+  json5: [['// "dash_light": 0.15,', '"dash_light": 0.3,'], ['"space": 6,', '// "space": 6,']],
+  cli: [['# --dash-light 0.15', '--dash-light 0.3'], ['--space 6', '# --space 6']],
+}
+for (const kind of kinds) {
+  let text = V.renderView(kind, one, schema)
+  for (const [from, to] of edits[kind]) {
+    if (!text.includes(from)) missing.push(`views: ${kind} has no "${from}"`)
+    text = text.replace(from, to)
+  }
+  const got = V.parseView(kind, text, schema)
+  if (!same(got.batches[0].style, { dash_light: 0.3 })) missing.push(`views: ${kind} comment toggle ${JSON.stringify(got.batches[0].style)}`)
+  if (Object.keys(got.notes).length) missing.push(`views: ${kind} generated comments kept as notes ${JSON.stringify(got.notes)}`)
+}
+
+// Files saved when every line carried its help text read back without notes.
+const oldYaml = [
+  'area:',
+  '  at: 46.00000,7.70000   # centre, "lat,lon"; dragging the map changes it',
+  'batches:',
+  '  - angle: 0   # line direction: 0 follows the contour lines, 90 runs straight downhill',
+  '    style:',
+  '      # ── Space: Distance between neighbouring lines, from open on lit slopes to dense in shadow.',
+  '      space: 6   # distance between neighbouring lines, in px (default 4.8)',
+  '      # space_light: 1   # spacing multiplier on fully lit slopes; above 1 opens them up',
+].join('\n')
+const oldBack = V.parseView('yaml', oldYaml, schema)
+if (Object.keys(oldBack.notes).length || oldBack.batches[0].style.space !== 6) missing.push(`views: old help comments ${JSON.stringify(oldBack.notes)}`)
+if (V.renderView('yaml', one, schema).includes('distance between')) missing.push('views: help text should no longer be written')
+
+// Unknown parameters are errors in every view, and say which.
+const bad = {
+  yaml: 'batches:\n  - style:\n      spacing: 5\n',
+  json5: '{ batches: [{ style: { spacing: 5 } }] }',
+  cli: 'burin-map --spacing 5',
+}
+for (const kind of kinds) {
+  if (!throwsWith(() => V.parseView(kind, bad[kind], schema), 'spacing')) missing.push(`views: ${kind} should reject "spacing"`)
+}
+
+// Plain JSON (what older builds exported) and a one-line command both read.
+const oldJson = '{"area":{"at":"46,7.7"},"batches":[{"angle":90,"style":{"space":5}}]}'
+if (V.parseView('json5', oldJson, schema).batches[0].style.space !== 5) missing.push('views: plain JSON')
+const line = V.parseView('cli', "burin-map --tat 46,7.7 --ts 8km 6km --esc 1:50000 --s 6 --dl 0.3 --batch-name 'A b'", schema)
+if (!same(line.area, { at: '46,7.7', size_km: [8, 6], scale: 50000 }) || !same(line.batches, [{ name: 'A b', angle: 0, style: { space: 6, dash_light: 0.3 } }])) {
+  missing.push(`views: one-line command ${JSON.stringify(line)}`)
+}
+const shared = V.parseView('cli', 'burin-map --s 6 --batch --ba 90 --batch --dl 0.2', schema)
+if (!same(shared.batches.map((b) => b.style), [{ space: 6 }, { space: 6, dash_light: 0.2 }])) missing.push('views: flags before --batch are shared')
+
+if (V.detectView('a.yml', '') !== 'yaml' || V.detectView('a.json', '') !== 'json5' || V.detectView('x', 'burin-map --s 5') !== 'cli' || V.detectView('x', '{"a":1}') !== 'json5' || V.detectView('x', 'batches:\n  - angle: 0') !== 'yaml') {
+  missing.push('views: detectView')
+}
 
 console.log('rendered', html.length, 'chars')
 if (errors.length) {

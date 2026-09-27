@@ -156,18 +156,17 @@ pub fn draw(
     east: f64,
     north: f64,
     style: Option<Object>,
-    frame_px: Option<u32>,
-    frame_width_mm: Option<f64>,
-    frame_height_mm: Option<f64>,
+    frame_size_mm: Option<Vec<f64>>,
     frame_pen_mm: Option<f64>,
 ) -> Result<Drawing> {
     let st = style_from(style)?;
-    let frame = Frame {
-        px: frame_px.unwrap_or(2400) as usize,
-        width_mm: frame_width_mm,
-        height_mm: frame_height_mm,
-        pen_mm: frame_pen_mm.unwrap_or(0.3),
+    let size_mm = match frame_size_mm {
+        Some(v) => Some(burin_map::document::size_pair(&v).ok_or_else(|| {
+            Error::from_reason("frameSizeMm needs 1 or 2 numbers: [side] or [width, height]")
+        })?),
+        None => None,
     };
+    let frame = Frame { size_mm, pen_width: frame_pen_mm.unwrap_or(0.3), ..Frame::default() };
     let b = [west, south, east, north];
     let inner = burin_map::draw(&b, &st, &frame, |_| {}).map_err(js_err)?;
     Ok(Drawing { inner })

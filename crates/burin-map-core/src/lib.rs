@@ -10,6 +10,7 @@
 
 mod dashes;
 mod fields;
+pub mod geojson;
 mod grid;
 mod order;
 mod rng;
@@ -21,6 +22,27 @@ pub use fields::{batch_fields, build_fields, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, Line};
 pub use style::{from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS};
+
+/// Maps pixel coordinates back to geographic lon/lat. Pixel (0,0) is the
+/// north-west corner of the elevation grid; y grows southward.
+#[derive(Clone, Debug)]
+pub struct GeoTransform {
+    /// NW corner longitude.
+    pub nw_lon: f64,
+    /// NW corner latitude.
+    pub nw_lat: f64,
+    /// Ground distance per pixel in the east direction, degrees.
+    pub deg_per_px_lon: f64,
+    /// Ground distance per pixel in the south direction, degrees.
+    pub deg_per_px_lat: f64,
+}
+
+impl GeoTransform {
+    /// Pixel `(x, y)` → `(lon, lat)`.
+    pub fn to_lonlat(&self, x: f64, y: f64) -> (f64, f64) {
+        (self.nw_lon + x * self.deg_per_px_lon, self.nw_lat - y * self.deg_per_px_lat)
+    }
+}
 
 pub struct Drawing {
     pub width: usize,
@@ -185,7 +207,7 @@ mod tests {
             w,
             h,
             200.0,
-            &[Batch::along(st.clone()), Batch { angle: 90.0, style: st90 }],
+            &[Batch::along(st.clone()), Batch { name: None, angle: 90.0, style: st90 }],
         );
         assert!(d1.lines.len() > d0.lines.len(), "off={} on={}", d0.lines.len(), d1.lines.len());
     }

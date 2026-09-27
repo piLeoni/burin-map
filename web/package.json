@@ -15,7 +15,8 @@
     "jotai": "^3.0.0",
     "mapbox-gl": "^3.31.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

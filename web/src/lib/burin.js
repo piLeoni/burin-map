@@ -59,9 +59,11 @@ export function paintDrawing(canvas, drawing, style) {
  * @param {number} height
  * @param {number} pxM
  * @param {Array<{angle:number,style:Record<string,number>}>} batches
+ * @param {{ nw_lon: number, nw_lat: number, deg_per_px_lon: number, deg_per_px_lat: number }} [geo]
+ * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
  * @returns {object} drawing result
  */
-export function drawBatches(burin, elev, width, height, pxM, batches) {
+export function drawBatches(burin, elev, width, height, pxM, batches, geo, mmPerPx) {
   const list = Array.isArray(batches) ? batches : []
   const json = JSON.stringify(list.map((b) => ({
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
@@ -71,5 +73,5 @@ export function drawBatches(burin, elev, width, height, pxM, batches) {
       ),
     ),
   })))
-  return burin.draw_batches(elev, width, height, pxM, json)
+  return burin.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
 }

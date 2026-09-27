@@ -1,452 +1,248 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { useAtom } from 'jotai'
+import { useEffect, useRef, useState } from 'react'
+import { useAtom, useSetAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
 import { loadBurin } from '../lib/burin'
-import { docFromHash, docToHash, docToJson, parseDoc } from '../lib/doc'
-import { mapViewAtom, styleAtom } from '../state'
+import { docFromHash, docToHash } from '../lib/doc'
+import { areaFromFrame, frameFromArea } from '../lib/frame'
+import { VIEWS, detectView, parseView, renderView } from '../lib/views'
+import {
+  BATCHES_V1_KEY, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom,
+} from '../state'
 
-/* ---------------------------------------------------------------- */
-/*  Ranges, int params, group metadata                               */
-/* ---------------------------------------------------------------- */
-
-const RANGES = {
-  angle: [-90, 90, 1],
-  space: [1, 12, 0.1],
-  space_light: [0.5, 3, 0.05],
-  space_dark: [0.2, 1.5, 0.05],
-  space_steep: [0, 1, 0.05],
-  space_steep_gamma: [0.3, 3, 0.1],
-  dash_light: [0, 1, 0.05],
-  dash_dark: [0, 1, 0.05],
-  dash_period: [1, 8, 0.1],
-  dash_cutoff: [0, 0.2, 0.01],
-  dash_drop: [0, 1, 0.05],
-  mod_jitter: [0, 1, 0.05],
-  mod_breaks: [0, 1, 0.05],
-  mod_wobble: [0, 60, 1],
-  mod_wobble_size: [2, 40, 1],
-  mod_smooth: [1, 30, 0.5],
-  input_flat: [0, 0.6, 0.01],
-  input_gain: [0.5, 8, 0.1],
-  input_dark_gamma: [0.3, 2, 0.05],
-  input_light_gain: [0.5, 4, 0.1],
-  input_light_floor: [0, 0.3, 0.01],
-  input_blur: [0.5, 8, 0.1],
-  input_broad_blur: [2, 40, 0.5],
-  input_broad: [0, 1, 0.05],
-  sun_azimuth: [0, 360, 1],
-  sun_altitude: [5, 85, 1],
-  sun_exag: [1, 12, 0.1],
-  engine_step: [0.5, 2, 0.1],
-  engine_min: [1, 20, 1],
-  engine_stop: [0.2, 1, 0.05],
-  engine_fill: [0.5, 1, 0.05],
-  batch_floor: [0, 1, 0.05],
-  batch_stroke: [0.4, 3, 0.1],
-  batch_seed: [0, 100, 1],
-}
-
-const INT_PARAMS = new Set([
-  'batch_seed',
-  'sun_azimuth',
-  'sun_altitude',
-  'mod_wobble',
-  'mod_wobble_size',
-  'engine_min',
-  'angle',
-])
-
-const GROUP_TITLE = {
-  space: 'Space',
-  dash: 'Dash',
-  mod: 'Mod',
-  input: 'Input',
-  sun: 'Sun',
-  engine: 'Engine',
-  batch: 'Batch',
-}
-
-/* ---------------------------------------------------------------- */
-/*  Helpers                                                          */
-/* ---------------------------------------------------------------- */
-
-function isIntParam(name) { return INT_PARAMS.has(name) }
-function rangeOf(name, fallback) { return RANGES[name] || [0, Math.max(1, (fallback ?? 1) * 2), 0.1] }
-
-function clamp(name, n) {
-  const [lo, hi] = rangeOf(name, n)
-  return Math.min(hi, Math.max(lo, n))
-}
-
-function quantize(name, raw) {
-  const n = typeof raw === 'number' ? raw : Number(raw)
-  if (!Number.isFinite(n)) return null
-  const c = clamp(name, n)
-  if (isIntParam(name)) return Math.round(c)
-  const step = rangeOf(name, c)[2]
-  const decimals = step < 0.05 ? 2 : 1
-  return Math.round(c * 10 ** decimals) / 10 ** decimals
-}
-
-function fmt(name, v) {
-  if (isIntParam(name)) return String(Math.round(v))
-  const step = rangeOf(name, v)[2]
-  const decimals = step < 0.05 ? 2 : 1
-  const q = Number(Number(v).toFixed(decimals))
-  return Number.isInteger(q) ? String(q) : q.toFixed(decimals)
+const PHASE_LABEL = {
+  loading: 'Starting…',
+  working: 'Drawing…',
+  ready: 'Up to date',
+  exploring: 'Redraws when you stop',
+  error: 'Something went wrong',
 }
 
 function fmtCount(n) { return Number(n).toLocaleString() }
 
-function defaultsFrom(params) {
-  const d = {}
-  for (const p of params) d[p.name] = quantize(p.name, p.default) ?? p.default
-  return d
-}
-
-/** A document `area` block → mapbox camera fields, when it pins a location. */
-function areaToMapView(area) {
-  if (!area) return null
-  if (typeof area.at === 'string') {
-    const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(area.at)
-    if (m) return { center: [Number(m[2]), Number(m[1])] }
+/** Read a document from the URL fragment, then clear it: the state lives in the app, not the address bar. */
+function takeDocFromHash() {
+  const loc = globalThis.location
+  if (!loc?.hash) return null
+  let doc = null
+  try {
+    doc = docFromHash(loc.hash)
+  } catch (e) {
+    console.warn('Ignoring unreadable link:', e)
   }
-  if (Array.isArray(area.bounds) && area.bounds.length === 4) {
-    const [w, s, e, n] = area.bounds
-    return { center: [(w + e) / 2, (s + n) / 2] }
+  if (doc) globalThis.history?.replaceState(null, '', loc.pathname + loc.search)
+  return doc
+}
+
+/** Older builds saved every parameter of a batch; keep only those that differ from the default. */
+function onlyChanged(list, params) {
+  const defaults = Object.fromEntries(params.map((p) => [p.name, p.default]))
+  return list.map((b) => ({
+    ...(typeof b?.name === 'string' && b.name.trim() ? { name: b.name } : {}),
+    angle: Number(b?.angle) || 0,
+    style: Object.fromEntries(Object.entries(b?.style ?? {}).filter(
+      ([k, v]) => k in defaults && typeof v === 'number' && Math.abs(v - defaults[k]) > 1e-6,
+    )),
+  }))
+}
+
+function isFullDump(list, params) {
+  return list.every((b) => params.every((p) => p.name in (b?.style ?? {})))
+}
+
+function batchesFromV1(params) {
+  try {
+    const list = JSON.parse(globalThis.localStorage?.getItem(BATCHES_V1_KEY) ?? 'null')
+    return Array.isArray(list) && list.length > 0 ? onlyChanged(list, params) : null
+  } catch {
+    return null
   }
-  return null
 }
 
-/** JSON text for the editor: the whole document (area + batches) when known. */
-function docText(batches, area) {
-  return docToJson({ area, batches })
-}
-
-function jsonToBatches(json, defaults) {
-  const { batches: raw } = parseDoc(json)
-  if (!Array.isArray(raw)) throw new Error('Expected a list of batches')
-  return raw.map((entry) => {
-    const style = { ...defaults }
-    if (entry?.style && typeof entry.style === 'object') {
-      for (const [k, v] of Object.entries(entry.style)) {
-        if (k in defaults && typeof v === 'number' && Number.isFinite(v)) {
-          style[k] = quantize(k, v) ?? defaults[k]
-        }
-      }
-    }
-    return { angle: quantize('angle', entry?.angle ?? 0) ?? 0, style }
-  })
-}
+const FRESH = [{ angle: 0, style: {} }]
 
 /* ---------------------------------------------------------------- */
-/*  HelpTip — a real (?) button with a hover/focus tooltip           */
-/* ---------------------------------------------------------------- */
-
-function HelpTip({ text }) {
-  return (
-    <span className="group/help relative inline-flex shrink-0 items-center">
-      <button
-        type="button"
-        aria-label="Help"
-        className="flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-current/40 font-mono text-[9px] leading-none opacity-45 hover:opacity-100 focus:opacity-100"
-      >
-        ?
-      </button>
-      <span
-        role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 w-52 -translate-x-1/2 rounded border border-base-content bg-base-100 px-2 py-1.5 text-[10px] leading-snug shadow-lg opacity-0 transition-opacity group-hover/help:opacity-100 group-focus-within/help:opacity-100"
-      >
-        {text}
-      </span>
-    </span>
-  )
-}
-
-/* ---------------------------------------------------------------- */
-/*  ParamRow — label (?)  /  [slider]  [value]                       */
-/* ---------------------------------------------------------------- */
-
-function ParamRow({ name, label, help, value, onDrag, onCommit }) {
-  const int = isIntParam(name)
-  const [lo, hi, step] = rangeOf(name, value)
-  const [text, setText] = useState(() => fmt(name, value))
-  const [editing, setEditing] = useState(false)
-
-  useEffect(() => {
-    if (!editing) setText(fmt(name, value))
-  }, [value, name, editing])
-
-  const commitText = () => {
-    setEditing(false)
-    const q = quantize(name, text)
-    if (q == null) { setText(fmt(name, value)); return }
-    setText(fmt(name, q))
-    onCommit(name, q)
-  }
-
-  return (
-    <div className="flex w-full min-w-0 flex-col gap-0.5">
-      <div className="flex w-full min-w-0 items-center gap-1">
-        <span className="min-w-0 truncate font-mono text-[10px] leading-none">{label}</span>
-        <HelpTip text={help} />
-      </div>
-      <div className="flex w-full min-w-0 items-center gap-2">
-        <input
-          type="range"
-          className="range range-xs min-w-0 flex-1"
-          min={lo} max={hi} step={int ? 1 : step}
-          value={value}
-          onPointerDown={(e) => e.currentTarget.setPointerCapture(e.pointerId)}
-          onChange={(e) => { const q = quantize(name, e.target.value); if (q != null) onDrag(name, q) }}
-          onPointerUp={(e) => { const q = quantize(name, e.currentTarget.value); if (q != null) onCommit(name, q) }}
-          onKeyUp={(e) => {
-            if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-              const q = quantize(name, e.currentTarget.value); if (q != null) onCommit(name, q)
-            }
-          }}
-        />
-        <input
-          type="text"
-          inputMode={int ? 'numeric' : 'decimal'}
-          className="input input-xs w-11 shrink-0 text-right font-mono text-[10px] tabular-nums"
-          value={text}
-          onFocus={() => setEditing(true)}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={commitText}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur()
-            else if (e.key === 'Escape') { setText(fmt(name, value)); setEditing(false); e.currentTarget.blur() }
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-/* ---------------------------------------------------------------- */
-/*  BatchCard — one pass: angle row + collapsible grouped params     */
-/* ---------------------------------------------------------------- */
-
-function BatchCard({ index, batch, params, groups, onUpdate, onRemove, canRemove }) {
-  const [open, setOpen] = useState(true)
-
-  const grouped = useMemo(() => {
-    const blurbs = Object.fromEntries(groups.map((g) => [g.id, g.blurb]))
-    const order = groups.length ? groups.map((g) => g.id) : [...new Set(params.map((p) => p.group))]
-    return order
-      .map((id) => ({
-        id,
-        title: GROUP_TITLE[id] || id,
-        blurb: blurbs[id] || '',
-        params: params.filter((p) => p.group === id),
-      }))
-      .filter((g) => g.params.length > 0)
-  }, [params, groups])
-
-  const setParam = useCallback((name, value) => {
-    onUpdate(index, { ...batch, style: { ...batch.style, [name]: value } })
-  }, [index, batch, onUpdate])
-
-  const setAngle = useCallback((_name, value) => {
-    onUpdate(index, { ...batch, angle: Math.round(value) })
-  }, [index, batch, onUpdate])
-
-  const label = (name) => name.replace(/_/g, '-')
-
-  return (
-    <div className="overflow-hidden rounded-lg border border-base-content/30">
-      {/* Header */}
-      <div className="flex w-full items-center justify-between bg-base-200/50 px-3 py-2">
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-2 text-left hover:opacity-80"
-          onClick={() => setOpen((o) => !o)}
-        >
-          <span className="font-mono text-xs font-bold">Batch {index + 1}</span>
-          <span className="text-[10px] opacity-50">{open ? '▾' : '▸'}</span>
-        </button>
-        {canRemove && (
-          <button
-            type="button"
-            aria-label={`Delete batch ${index + 1}`}
-            className="btn btn-xs btn-ghost text-error"
-            onClick={() => onRemove(index)}
-          >
-            ×
-          </button>
-        )}
-      </div>
-
-      {/* Collapsible body */}
-      {open && (
-        <div className="flex flex-col gap-2 p-3 pt-2">
-          {/* Angle — a first-class parameter row */}
-          <ParamRow
-            name="angle"
-            label="angle"
-            help="degrees from the contour tangent: 0 = along level curves, 90 = downslope"
-            value={batch.angle}
-            onDrag={setAngle}
-            onCommit={setAngle}
-          />
-
-          {grouped.map((g) => (
-            <details key={g.id} className="group" open>
-              <summary className="cursor-pointer font-mono text-[10px] font-bold uppercase tracking-wide opacity-50">
-                {g.title}
-              </summary>
-              <div className="mt-1.5 flex flex-col gap-1.5">
-                {g.params.map((p) => (
-                  <ParamRow
-                    key={p.name}
-                    name={p.name}
-                    label={label(p.name)}
-                    help={p.help}
-                    value={batch.style[p.name] ?? p.default}
-                    onDrag={setParam}
-                    onCommit={setParam}
-                  />
-                ))}
-              </div>
-            </details>
-          ))}
-          {grouped.length === 0 && (
-            <p className="text-[10px] opacity-40">No groups loaded — WASM may still be initialising.</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ---------------------------------------------------------------- */
-/*  Sidebar — batch list, JSON tools, Monaco toggle                  */
+/*  Sidebar — the document as YAML, JSON5 or a command               */
 /* ---------------------------------------------------------------- */
 
 export default function Sidebar({ open, onClose, status, drawing }) {
-  const [params, setParams] = useState([])
-  const [groups, setGroups] = useState([])
-  const [defaults, setDefaults] = useState({})
+  const [schema, setSchema] = useState(null)   // { params, groups } from the engine
   const [batches, setBatches] = useAtom(styleAtom)
-  const [mapView, setMapView] = useAtom(mapViewAtom)
-  const [view, setView] = useState('style')   // 'style' | 'json'
-  const [jsonText, setJsonText] = useState('')
-  const [jsonError, setJsonError] = useState('')
-  const [shareNote, setShareNote] = useState('')
-  const [ready, setReady] = useState(false)
-  const areaRef = useRef(null)
+  const [notes, setNotes] = useAtom(notesAtom)
+  const [kind, setKind] = useAtom(viewKindAtom)
+  const [mapView] = useAtom(mapViewAtom)
+  const [frame, setFrame] = useAtom(frameAtom)
+  const setCameraRequest = useSetAtom(cameraRequestAtom)
+  const [draft, setDraft] = useState(null)   // text typed but not applied yet
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState(null)   // { text, error? }
+  const fileRef = useRef(null)
+  const noticeTimer = useRef(0)
+  const applyDraftRef = useRef(() => {})
 
+  const view = VIEWS[kind] ? kind : 'yaml'
   const list = Array.isArray(batches) ? batches : []
+
+  const flash = (text, isError = false) => {
+    clearTimeout(noticeTimer.current)
+    setNotice({ text, error: isError })
+    noticeTimer.current = setTimeout(() => setNotice(null), isError ? 8000 : 3000)
+  }
+
+  /** Point the map and the frame at a document's area block. Throws when it can't be drawn. */
+  const applyArea = (area) => {
+    if (!area || Object.keys(area).length === 0) return
+    const { center, frame: next } = frameFromArea(area, frame)
+    setFrame(next)
+    if (center) setCameraRequest({ center })
+  }
+
+  /** Make a parsed model the current state. Throws when its area can't be drawn. */
+  const load = (m) => {
+    applyArea(m.area)
+    setBatches(m.batches)
+    setNotes(m.notes ?? {})
+  }
 
   // ---------- init ----------
   useEffect(() => {
-    // A #doc=… fragment wins over whatever is in localStorage.
-    const fromHash = docFromHash(globalThis.location?.hash ?? '')
-    if (fromHash) areaRef.current = fromHash.area
+    // A #d=… fragment wins over whatever is in localStorage.
+    const fromHash = takeDocFromHash()
+    if (fromHash) {
+      try {
+        applyArea(fromHash.area)
+      } catch (e) {
+        flash(`Can't open this URL: ${e.message}`, true)
+      }
+    }
 
     loadBurin().then((m) => {
-      const p = m.style_params()
-      const g = typeof m.style_groups === 'function' ? m.style_groups() : []
-      setParams(p)
-      setGroups(g)
-      const defs = defaultsFrom(p)
-      setDefaults(defs)
-      setReady(true)
+      const params = m.style_params()
+      const groups = typeof m.style_groups === 'function' ? m.style_groups() : []
+      setSchema({ params, groups })
 
       if (fromHash && Array.isArray(fromHash.batches) && fromHash.batches.length > 0) {
-        const restored = jsonToBatches(JSON.stringify(fromHash.batches), defs)
-        setBatches(restored)
-        const next = areaToMapView(fromHash.area)
-        if (next) setMapView((v) => ({ ...v, ...next }))
+        setBatches(fromHash.batches)
+        setNotes({})
         return
       }
-
-      // If nothing is persisted yet, start with one default batch.
       setBatches((prev) => {
         const cur = Array.isArray(prev) ? prev : []
-        if (cur.length > 0) {
-          // Backfill any missing keys so newer params get their defaults.
-          return cur.map((b) => ({ ...b, style: { ...defs, ...b.style } }))
-        }
-        return [{ angle: 0, style: { ...defs } }]
+        if (cur.length === 0) return batchesFromV1(params) ?? FRESH
+        return isFullDump(cur, params) ? onlyChanged(cur, params) : cur
       })
     })
-  }, [setBatches, setMapView])
-
-  // ---------- keep JSON text in step with batches ----------
-  useEffect(() => {
-    if (list.length === 0) return
-    setJsonText(docText(list, areaRef.current))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batches])
+  }, [setBatches, setCameraRequest])
 
-  // ---------- actions ----------
-  const addBatch = () => setBatches([...list, { angle: 0, style: { ...defaults } }])
-  const removeBatch = (i) => {
-    if (list.length <= 1) return
-    setBatches(list.filter((_, j) => j !== i))
-  }
-  const updateBatch = (i, b) => setBatches(list.map((orig, j) => (j === i ? b : orig)))
-  const reset = () => setBatches([{ angle: 0, style: { ...defaults } }])
+  // ---------- the text ----------
+  const model = { area: areaFromFrame(frame, mapView?.center), batches: list, notes: notes ?? {} }
+  const liveText = schema && list.length > 0 ? renderView(view, model, schema) : ''
+  const shown = draft ?? liveText
+  const dirty = draft != null && draft !== liveText
 
-  const applyJson = (raw) => {
+  const applyDraft = () => {
+    if (!dirty) return
     try {
-      const doc = parseDoc(raw)
-      const parsed = jsonToBatches(raw, defaults)
-      if (parsed.length === 0) throw new Error('Need at least one batch')
-      areaRef.current = doc.area
-      setBatches(parsed)
-      // A document that names a place moves the map camera there.
-      const next = areaToMapView(doc.area)
-      if (next) setMapView((v) => ({ ...v, ...next }))
-      setJsonError('')
+      load(parseView(view, draft, schema))
+      setDraft(null)
+      setError('')
     } catch (e) {
-      setJsonError(e.message || 'Invalid JSON')
+      setError(e.message || 'Can\'t read this')
+    }
+  }
+  applyDraftRef.current = applyDraft
+
+  const revertDraft = () => {
+    setDraft(null)
+    setError('')
+  }
+
+  /** Switch view; an unapplied edit comes along, rewritten in the new view. */
+  const switchView = (next) => {
+    if (next === view) return
+    if (dirty) {
+      try {
+        setDraft(renderView(next, parseView(view, draft, schema), schema))
+      } catch (e) {
+        setError(`Fix this before switching: ${e.message}`)
+        return
+      }
+    } else {
+      setDraft(null)
+    }
+    setError('')
+    setKind(next)
+  }
+
+  const reset = () => {
+    setBatches(FRESH)
+    setNotes({})
+    setDraft(null)
+    setError('')
+  }
+
+  // ---------- files, clipboard, link ----------
+  const importFile = async (file) => {
+    if (!file || !schema) return
+    try {
+      const text = await file.text()
+      load(parseView(detectView(file.name, text), text, schema))
+      setDraft(null)
+      setError('')
+      flash(`Loaded ${file.name}`)
+    } catch (e) {
+      flash(`Can't open ${file.name}: ${e.message || 'not a BurinMap document'}`, true)
     }
   }
 
-  /** The document as it stands: stored area (if any) plus the live camera. */
-  const currentDoc = () => {
-    const area = { ...(areaRef.current || {}) }
-    if (!area.at && !area.bounds && !area.place && mapView?.center) {
-      area.at = `${mapView.center[1].toFixed(5)},${mapView.center[0].toFixed(5)}`
-    }
-    return { area, batches: list }
-  }
-
-  const importJson = () => {
-    const raw = prompt('Paste document JSON (area + batches):')
-    if (raw) applyJson(raw)
-  }
-
-  const downloadJson = () => {
-    const doc = currentDoc()
-    areaRef.current = doc.area
-    const blob = new Blob([docToJson(doc)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([shown], { type: VIEWS[view].mime }))
     const a = document.createElement('a')
-    a.href = url; a.download = 'burin-doc.json'; a.click()
+    a.href = url
+    a.download = `burin-map.${VIEWS[view].ext}`
+    a.click()
     URL.revokeObjectURL(url)
   }
 
-  const copyShareLink = async () => {
-    const doc = currentDoc()
-    areaRef.current = doc.area
-    const loc = globalThis.location
-    const url = `${loc.origin}${loc.pathname}${docToHash(doc)}`
+  const copy = async (text, what) => {
     try {
-      await navigator.clipboard.writeText(url)
-      setShareNote(`Link copied (${url.length} chars)`)
+      await navigator.clipboard.writeText(text)
+      flash(`${what} copied`)
     } catch {
-      setShareNote(url)
+      flash('The browser blocked the clipboard', true)
     }
-    setTimeout(() => setShareNote(''), 4000)
   }
+
+  const copyLink = () => {
+    const loc = globalThis.location
+    copy(`${loc.origin}${loc.pathname}${docToHash({ area: model.area, batches: list })}`, 'Link')
+  }
+
+  // A link pasted into an open tab only changes the hash, which doesn't reload.
+  useEffect(() => {
+    const win = globalThis.window
+    if (!schema || !win?.addEventListener) return
+    const onHash = () => {
+      const doc = takeDocFromHash()
+      if (!doc) return
+      try {
+        load({ area: doc.area, batches: doc.batches, notes: {} })
+        setDraft(null)
+        flash('Opened URL')
+      } catch (e) {
+        flash(`Can't open this URL: ${e.message || 'unreadable'}`, true)
+      }
+    }
+    win.addEventListener('hashchange', onHash)
+    return () => win.removeEventListener('hashchange', onHash)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema])
+
+  const tool = 'btn btn-xs border-base-content/25 whitespace-nowrap'
 
   return (
     <aside
-      className={`fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-base-content bg-base-100 transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:max-h-none lg:w-80 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
+      className={`fixed inset-x-0 bottom-0 z-40 flex h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-base-content bg-base-100 transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:w-[28rem] lg:shrink-0 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
         open ? 'translate-y-0' : 'pointer-events-none translate-y-full'
       }`}
     >
@@ -456,116 +252,126 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         <button type="button" aria-label="Close" className="btn btn-sm btn-square border border-base-content" onClick={onClose}>✕</button>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4">
-        {/* Header */}
-        <header className="flex min-w-0 flex-col gap-2">
-          <h1 className="font-mono text-3xl font-bold tracking-tight">BurinMap</h1>
-          <p className="min-w-0 text-sm leading-snug opacity-70">
-            Pen-and-ink terrain from elevation. Pan the map — it draws when you stop.
-          </p>
-          <dl className="grid grid-cols-3 gap-2 font-mono">
-            <div>
-              <dt className="text-[10px] uppercase opacity-45">lines</dt>
-              <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.lines) : '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase opacity-45">dashes</dt>
-              <dd className="text-sm tabular-nums">{drawing ? fmtCount(drawing.dashes) : '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase opacity-45">time</dt>
-              <dd className="text-sm tabular-nums">{drawing ? `${drawing.ms} ms` : '—'}</dd>
-            </div>
-          </dl>
-          <p className="truncate font-mono text-[10px] uppercase opacity-45">
-            {status.phase}{status.detail ? ` · ${status.detail}` : ''}
-          </p>
-        </header>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Fixed top: title, stats, toolbar */}
+        <div className="flex shrink-0 flex-col gap-3.5 px-5 pt-5 pb-4">
+          <header className="flex flex-col gap-2">
+            <h1 className="hidden font-mono text-2xl font-bold tracking-tight lg:block">BurinMap</h1>
+            <p className="text-[13px] leading-relaxed opacity-65">
+              Terrain drawn as engraved lines. Pan or zoom the map; the view is
+              redrawn when you stop.
+            </p>
+          </header>
 
-        {/* Section header + io buttons */}
-        <div className="flex items-center justify-between gap-2 border-t border-base-content pt-4">
-          <h2 className="font-mono text-xs font-bold uppercase tracking-wide">Style</h2>
-          <div className="flex items-center gap-1">
-            <button type="button" className="btn btn-xs border border-base-content" onClick={reset}>Reset</button>
-            <button type="button" className="btn btn-xs border border-base-content" onClick={importJson}>Import</button>
-            <button type="button" className="btn btn-xs border border-base-content" onClick={downloadJson}>Export</button>
-            <button type="button" className="btn btn-xs border border-base-content" onClick={copyShareLink}>Share</button>
+          <div className="flex items-baseline gap-3 font-mono text-[10px]">
+            <span className="shrink-0 tabular-nums opacity-60">
+              {drawing
+                ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
+                : '-'}
+            </span>
+            <span className={`ml-auto truncate tracking-wider uppercase ${status.phase === 'error' ? 'text-error' : 'opacity-40'}`}>
+              {status.detail || PHASE_LABEL[status.phase] || status.phase}
+            </span>
           </div>
-        </div>
-        {shareNote && (
-          <p className="w-full break-all font-mono text-[10px] leading-snug opacity-60">{shareNote}</p>
-        )}
 
-        {/* View toggle */}
-        <div className="flex gap-1">
-          <button
-            type="button"
-            className={`btn btn-xs ${view === 'style' ? 'btn-neutral' : 'btn-ghost'}`}
-            onClick={() => setView('style')}
-          >
-            Parameters
-          </button>
-          <button
-            type="button"
-            className={`btn btn-xs ${view === 'json' ? 'btn-neutral' : 'btn-ghost'}`}
-            onClick={() => setView('json')}
-          >
-            JSON
-          </button>
-        </div>
-
-        {/* Parameters view */}
-        {view === 'style' && (
-          <div className="flex flex-col gap-3">
-            {!ready && <p className="text-[10px] opacity-40">Loading parameters…</p>}
-            {ready && list.map((b, i) => (
-              <BatchCard
-                key={i}
-                index={i}
-                batch={b}
-                params={params}
-                groups={groups}
-                onUpdate={updateBatch}
-                onRemove={removeBatch}
-                canRemove={list.length > 1}
-              />
-            ))}
-            {ready && (
-              <button type="button" className="btn btn-xs btn-outline self-start" onClick={addBatch}>
-                + Batch
+          <div className="flex flex-col gap-2 border-t border-base-content/15 pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <div role="tablist" className="join">
+                {Object.entries(VIEWS).map(([id, v]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === id}
+                    className={`btn btn-xs join-item px-3 whitespace-nowrap ${view === id ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25 bg-base-100'}`}
+                    onClick={() => switchView(id)}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="btn btn-ghost btn-xs whitespace-nowrap opacity-60 hover:opacity-100" onClick={reset}>
+                Reset to defaults
               </button>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              <button type="button" className={tool} title="Open a YAML, JSON, JSON5 or .sh file" disabled={!schema} onClick={() => fileRef.current?.click()}>
+                Import
+              </button>
+              <button type="button" className={tool} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
+                Download
+              </button>
+              <button type="button" className={tool} title="Copy the text in the editor" disabled={!shown} onClick={() => copy(shown, VIEWS[view].label)}>
+                Copy
+              </button>
+              <button type="button" className={tool} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
+                Link
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".yaml,.yml,.json,.json5,.sh,.txt"
+                className="hidden"
+                onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = '' }}
+              />
+            </div>
+            {notice && (
+              <p className={`font-mono text-[10px] leading-snug break-words ${notice.error ? 'text-error' : 'opacity-60'}`}>
+                {notice.text}
+              </p>
             )}
           </div>
-        )}
+        </div>
 
-        {/* JSON view */}
-        {view === 'json' && (
-          <div className="flex min-h-[300px] flex-col gap-2">
-            <div className="overflow-hidden rounded border border-base-content/30">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 border-t border-base-content/15 px-5 py-4">
+          <div className="flex shrink-0 flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className={`mr-auto truncate font-mono text-[11px] ${dirty ? 'font-bold' : 'opacity-50'}`}>
+                {dirty ? '● Edited, not applied' : 'In step with the map'}
+              </span>
+              <button type="button" className="btn btn-xs border-base-content/25" disabled={!dirty} onClick={revertDraft}>
+                Revert
+              </button>
+              <button type="button" className={`btn btn-xs ${dirty ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25'}`} disabled={!dirty} title="⌘/Ctrl + Enter" onClick={applyDraft}>
+                Apply
+              </button>
+            </div>
+            {error && <p className="font-mono text-[10px] leading-snug break-words text-error">{error}</p>}
+          </div>
+          <div className={`min-h-0 flex-1 overflow-hidden rounded-lg border ${dirty ? 'border-base-content' : 'border-base-content/25'}`}>
+            {schema ? (
               <Editor
-                height="40vh"
-                defaultLanguage="json"
+                height="100%"
+                language={VIEWS[view].language}
                 theme="vs"
-                value={jsonText}
-                onChange={(v) => { setJsonText(v ?? ''); setJsonError('') }}
+                value={shown}
+                onChange={(v) => { setDraft(v ?? ''); setError('') }}
+                beforeMount={(monaco) => {
+                  monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({ validate: false })
+                }}
+                onMount={(editor, monaco) => {
+                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => applyDraftRef.current())
+                }}
                 options={{
                   minimap: { enabled: false },
                   fontSize: 11,
-                  lineNumbers: 'off',
+                  lineNumbersMinChars: 3,
                   scrollBeyondLastLine: false,
                   wordWrap: 'on',
+                  wrappingIndent: 'deepIndent',
+                  tabSize: 2,
+                  insertSpaces: true,
+                  detectIndentation: false,
                 }}
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <button type="button" className="btn btn-xs btn-neutral" onClick={() => applyJson(jsonText)}>Apply</button>
-              {jsonError && <span className="font-mono text-[10px] text-error">{jsonError}</span>}
-            </div>
+            ) : (
+              <p className="p-3 text-[11px] opacity-40">Loading parameters…</p>
+            )}
           </div>
-        )}
+        </div>
 
-        <p className="min-w-0 text-[10px] leading-snug opacity-45">
-          Elevation from AWS Terrain Tiles. Basemap: Mapbox.
+        <p className="shrink-0 border-t border-base-content/15 px-5 py-2 text-[10px] opacity-40">
+          Elevation: AWS Terrain Tiles. Basemap: Mapbox.
         </p>
       </div>
     </aside>

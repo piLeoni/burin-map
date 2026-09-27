@@ -24,13 +24,13 @@ pub struct Param {
 
 /// Group id → short blurb for the UI.
 pub const GROUPS: &[(&str, &str)] = &[
-    ("space", "Distance between neighbouring lines. Light and dark set the range from open to dense."),
-    ("dash", "How solid each line is along its length. Light and dark set the ink fraction at the extremes."),
-    ("mod", "Hand-drawn character: irregularity, extra breaks, wander on flat ground, curve smoothness."),
-    ("input", "The 0…1 field built from the terrain and the sun. Space and dash read from this."),
+    ("space", "Distance between neighbouring lines, from open on lit slopes to dense in shadow."),
+    ("dash", "How much of each line is inked, from broken dashes in light to solid in shadow."),
+    ("mod", "Hand-drawn character: uneven dashes, small breaks, wandering on flat ground, smooth curves."),
+    ("input", "The shading input, 0 to 1, computed from the terrain and the sun. Spacing and dashes follow it."),
     ("sun", "Where the light comes from."),
-    ("engine", "How streamlines are traced — usually leave alone."),
-    ("batch", "Per-pass settings: stroke width, seed, and the input floor for this pass."),
+    ("engine", "How lines are traced. Usually best left alone."),
+    ("batch", "Settings for this batch only: line width, random seed, and where it draws."),
 ];
 
 macro_rules! style {
@@ -87,45 +87,45 @@ impl Style {
 }
 
 style! {
-    space: space ("s"): f32 = 4.8, "base distance between neighbouring lines, px";
-    space: space_light ("sl"): f32 = 1.0, "space multiplier in full light (>1 = more open)";
-    space: space_dark ("sd"): f32 = 0.7, "space multiplier in full dark (<1 = denser)";
-    space: space_steep ("ss"): f32 = 0.4, "influence of steep ground on spacing (0 = off, 1 = full)";
-    space: space_steep_gamma ("ssg"): f32 = 1.0, "curve of how fast steepness tightens space";
+    space: space ("s"): f32 = 4.8, "distance between neighbouring lines, in px";
+    space: space_light ("sl"): f32 = 1.0, "spacing multiplier on fully lit slopes; above 1 opens them up";
+    space: space_dark ("sd"): f32 = 0.7, "spacing multiplier in full shadow; below 1 packs lines closer";
+    space: space_steep ("ss"): f32 = 0.4, "how much steep ground tightens the spacing: 0 off, 1 full";
+    space: space_steep_gamma ("ssg"): f32 = 1.0, "shape of that tightening; higher values keep it for the steepest ground";
 
-    dash: dash_light ("dl"): f32 = 0.15, "ink fraction of the period in full light (0…1)";
-    dash: dash_dark ("dd"): f32 = 1.0, "ink fraction of the period in full dark (0…1)";
-    dash: dash_period ("dp"): f32 = 2.2, "dash + gap length, in multiples of space";
-    dash: dash_cutoff ("dc"): f32 = 0.03, "below this input draw nothing";
-    dash: dash_drop ("ddrop"): f32 = 1.0, "drop random dashes on flat/light ground (0 = off, 1 = full)";
+    dash: dash_light ("dl"): f32 = 0.15, "inked share of each dash period on fully lit slopes, 0 to 1";
+    dash: dash_dark ("dd"): f32 = 1.0, "inked share of each dash period in full shadow, 0 to 1";
+    dash: dash_period ("dp"): f32 = 2.2, "length of one dash plus its gap, as a multiple of the spacing";
+    dash: dash_cutoff ("dc"): f32 = 0.03, "draw nothing where the shading input is below this";
+    dash: dash_drop ("ddrop"): f32 = 1.0, "randomly leave out dashes on flat and lit ground: 0 off, 1 full";
 
-    mod: mod_jitter ("mj"): f32 = 0.45, "irregularity of dash length (0 = mechanical); fades in solid dark";
-    mod: mod_breaks ("mb"): f32 = 0.15, "chance of a small break in an otherwise solid run";
-    mod: mod_wobble ("mw"): f32 = 20.0, "random swing of line direction on flat ground, degrees";
-    mod: mod_wobble_size ("mws"): f32 = 12.0, "size of those wobble bends, px";
-    mod: mod_smooth ("ms"): f32 = 6.0, "smooth the surface lines follow: higher = broader curves";
+    mod: mod_jitter ("mj"): f32 = 0.45, "random variation in dash length (0 is mechanical); fades out where lines go solid";
+    mod: mod_breaks ("mb"): f32 = 0.15, "chance of a small break in an otherwise solid line";
+    mod: mod_wobble ("mw"): f32 = 20.0, "how far lines wander off course on flat ground, in degrees";
+    mod: mod_wobble_size ("mws"): f32 = 12.0, "length of each wander, in px";
+    mod: mod_smooth ("ms"): f32 = 6.0, "smoothing of the terrain the lines follow; higher gives broader curves";
 
-    input: input_flat ("if"): f32 = 0.25, "input value of flat ground";
-    input: input_gain ("ig"): f32 = 3.0, "contrast: how fast slopes go solid (dark) or empty (light)";
-    input: input_dark_gamma ("idg"): f32 = 0.7, "<1 pushes dark areas toward solid sooner";
-    input: input_light_gain ("ilg"): f32 = 1.5, ">1 makes lit slopes bleach sooner";
-    input: input_light_floor ("ilf"): f32 = 0.06, "input kept in full light (floor under bleaching)";
-    input: input_blur ("ib"): f32 = 1.8, "smooth the detail shading";
-    input: input_broad_blur ("ibb"): f32 = 11.5, "smooth the massif-scale shading";
-    input: input_broad ("ibr"): f32 = 0.5, "mix of massif shading (0 = detail only, 1 = massif only)";
+    input: input_flat ("if"): f32 = 0.25, "shading input given to flat ground, 0 to 1";
+    input: input_gain ("ig"): f32 = 3.0, "contrast: how quickly slopes turn solid in shadow and empty in light";
+    input: input_dark_gamma ("idg"): f32 = 0.7, "below 1, shadowed ground turns solid sooner";
+    input: input_light_gain ("ilg"): f32 = 1.5, "above 1, lit slopes fade to white sooner";
+    input: input_light_floor ("ilf"): f32 = 0.06, "shading kept on fully lit slopes, so they never fade out completely";
+    input: input_blur ("ib"): f32 = 1.8, "smoothing of the fine-detail shading";
+    input: input_broad_blur ("ibb"): f32 = 11.5, "smoothing of the large-scale shading (whole ridges and massifs)";
+    input: input_broad ("ibr"): f32 = 0.5, "blend of fine and large-scale shading: 0 fine only, 1 large-scale only";
 
-    sun: sun_azimuth ("sa"): f32 = 315.0, "sun direction, degrees clockwise from north";
-    sun: sun_altitude ("salt"): f32 = 45.0, "sun elevation above the horizon, degrees";
-    sun: sun_exag ("sx"): f32 = 4.0, "vertical exaggeration for shading";
+    sun: sun_azimuth ("sa"): f32 = 315.0, "direction the light comes from, in degrees clockwise from north";
+    sun: sun_altitude ("salt"): f32 = 45.0, "height of the sun above the horizon, in degrees";
+    sun: sun_exag ("sx"): f32 = 4.0, "vertical exaggeration of the terrain when computing the shading";
 
-    engine: engine_step ("es"): f32 = 1.0, "integration step when tracing lines, px";
-    engine: engine_min ("em"): f32 = 4.0, "drop streamlines shorter than this, px";
-    engine: engine_stop ("esp"): f32 = 0.5, "stop a line when closer than space × this to another";
-    engine: engine_fill ("ef"): f32 = 0.8, "seed a mid-gap line when a gap exceeds 2 × this × space (1 = off)";
+    engine: engine_step ("es"): f32 = 1.0, "step length when tracing a line, in px";
+    engine: engine_min ("em"): f32 = 4.0, "leave out lines shorter than this, in px";
+    engine: engine_stop ("esp"): f32 = 0.5, "end a line when it comes closer to another than this fraction of the spacing";
+    engine: engine_fill ("ef"): f32 = 0.8, "start a new line in any gap wider than 2 × this × the spacing (1 turns it off)";
 
-    batch: batch_floor ("bf"): f32 = 0.0, "minimum input for this pass (0 = draw on all walkable land)";
-    batch: batch_stroke ("bs"): f32 = 1.2, "stroke width, px";
-    batch: batch_seed ("bseed"): u64 = 1, "random seed for this pass (line order, dash jitter)";
+    batch: batch_floor ("bf"): f32 = 0.0, "this batch draws only where the shading input is at least this; 0 draws on all land";
+    batch: batch_stroke ("bs"): f32 = 1.2, "line width, in px";
+    batch: batch_seed ("bseed"): u64 = 1, "random seed; change it for another variation of the same style";
 }
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
@@ -133,6 +133,9 @@ style! {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Batch {
+    /// Optional label; only used for display (logs, the web app's cards).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default)]
     pub angle: f32,
     pub style: Style,
@@ -140,7 +143,7 @@ pub struct Batch {
 
 impl Batch {
     pub fn along(style: Style) -> Self {
-        Batch { angle: 0.0, style }
+        Batch { name: None, angle: 0.0, style }
     }
 }
 
@@ -202,11 +205,17 @@ mod json_tests {
     fn round_trip_batches() {
         let batches = vec![
             Batch::along(Style::default()),
-            Batch { angle: 90.0, style: Style { space: 6.0, batch_floor: 0.4, ..Style::default() } },
+            Batch {
+                name: Some("Valleys".into()),
+                angle: 90.0,
+                style: Style { space: 6.0, batch_floor: 0.4, ..Style::default() },
+            },
         ];
         let json = to_json_batches(&batches);
         let back = from_json_batches(&json).expect("should parse");
         assert_eq!(back.len(), 2);
+        assert_eq!(back[0].name, None);
+        assert_eq!(back[1].name.as_deref(), Some("Valleys"));
         assert_eq!(back[1].angle, 90.0);
         assert_eq!(back[1].style.space, 6.0);
         assert_eq!(back[1].style.batch_floor, 0.4);

@@ -148,20 +148,23 @@ fn projected_size(bounds: (f64, f64, f64, f64)) -> (f64, f64) {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bounds, style=None, frame_px=2400, frame_width_mm=None, frame_height_mm=None, frame_pen_mm=0.3, log=None))]
-#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (bounds, style=None, frame_size_mm=None, frame_pen_mm=0.3, log=None))]
 fn draw(
     py: Python<'_>,
     bounds: (f64, f64, f64, f64),
     style: Option<&Bound<'_, PyDict>>,
-    frame_px: usize,
-    frame_width_mm: Option<f64>,
-    frame_height_mm: Option<f64>,
+    frame_size_mm: Option<Vec<f64>>,
     frame_pen_mm: f64,
     log: Option<Py<PyAny>>,
 ) -> PyResult<Map> {
     let st = style_from(style)?;
-    let frame = Frame { px: frame_px, width_mm: frame_width_mm, height_mm: frame_height_mm, pen_mm: frame_pen_mm };
+    let size_mm = match frame_size_mm {
+        Some(v) => Some(burin_map::document::size_pair(&v).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("frame_size_mm needs 1 or 2 numbers: (side,) or (width, height)")
+        })?),
+        None => None,
+    };
+    let frame = Frame { size_mm, pen_width: frame_pen_mm, ..Frame::default() };
     let b = [bounds.0, bounds.1, bounds.2, bounds.3];
     let log = logger(log);
     let inner = py.detach(|| burin_map::draw(&b, &st, &frame, log)).map_err(py_err)?;

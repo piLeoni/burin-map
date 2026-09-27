@@ -2,13 +2,18 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_drawing_free: (a: number, b: number) => void;
-export const draw: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];
-export const draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+export const draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
+export const draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => [number, number, number];
 export const drawing_dashes: (a: number) => number;
+export const drawing_deg_per_px_lat: (a: number) => number;
+export const drawing_deg_per_px_lon: (a: number) => number;
 export const drawing_ends: (a: number) => any;
+export const drawing_geojson: (a: number) => [number, number];
 export const drawing_height: (a: number) => number;
 export const drawing_lines: (a: number) => number;
 export const drawing_ms: (a: number) => number;
+export const drawing_nw_lat: (a: number) => number;
+export const drawing_nw_lon: (a: number) => number;
 export const drawing_paths: (a: number) => any;
 export const drawing_svg: (a: number) => [number, number];
 export const drawing_width: (a: number) => number;

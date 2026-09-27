@@ -38,7 +38,7 @@ export default function PasswordGate({ children }) {
           type="password"
           autoFocus
           className="input input-bordered w-full"
-          placeholder="password"
+          placeholder="Password"
           value={value}
           onChange={(e) => {
             setValue(e.target.value)
@@ -47,7 +47,7 @@ export default function PasswordGate({ children }) {
         />
         {error ? <p className="text-xs text-error">Wrong password.</p> : null}
         <button type="submit" className="btn border border-base-content">
-          Enter
+          Unlock
         </button>
       </form>
     </div>

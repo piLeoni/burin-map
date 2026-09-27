@@ -11,10 +11,10 @@ use std::time::Instant;
 
 use clap::parser::ValueSource;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
-use serde_json;
 
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
+use crate::document::size_pair;
 use crate::{
     bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Document, Error, Frame,
     Progress, Style, TileSource,
@@ -41,13 +41,12 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("terrain-at", "tat", Takes::One),
     ("terrain-bounds", "tbo", Takes::Four),
     ("terrain-size", "ts", Takes::OneOrTwo),
-    ("frame-px", "fpx", Takes::One),
-    ("frame-width", "fw", Takes::One),
-    ("frame-height", "fh", Takes::One),
-    ("frame-scale", "fsc", Takes::One),
-    ("frame-pen", "fpen", Takes::One),
+    ("frame-size", "fs", Takes::OneOrTwo),
+    ("export-scale", "esc", Takes::One),
+    ("pen-width", "pen", Takes::One),
     ("out-file", "of", Takes::One),
     ("out-format", "fmt", Takes::One),
+    ("out-geojson", "", Takes::One),
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
 ];
@@ -67,7 +66,7 @@ pub fn command() -> Command {
             burin-map --tp bern --s 5 --dl 0.3\n  \
             burin-map --terrain-place bern --batch --space 6 --mod-breaks 0.1 \\\n  \
             \x20   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45\n  \
-            burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg\n  \
+            burin-map --tat Zermatt --fs 297 420 --esc 1:50000 --fmt svg\n  \
             burin-map --style-json '{\"area\":{\"place\":\"bern\"},\"batches\":[{\"angle\":90}]}'")
         .next_help_heading("Terrain — the ground to draw")
         .arg(global("terrain-place").value_name("NAME").default_value("san-francisco")
@@ -80,34 +79,36 @@ pub fn command() -> Command {
         .group(ArgGroup::new("terrain").args(["terrain-place", "terrain-at", "terrain-bounds"]))
         .arg(global("terrain-size").num_args(1..=2).value_names(["WIDTH", "HEIGHT"])
             .help("with --terrain-at: ground width [and height], e.g. 20km, 800m, 5mi; a bare number is km. \
-                   Height defaults to the frame's proportions, else square. Default 30km"))
-        .next_help_heading("Frame — the rectangle it is drawn in")
-        .arg(global("frame-px").value_name("PX").default_value("2400").value_parser(value_parser!(usize))
-            .help("width in px, when no --frame-width in mm is given"))
-        .arg(global("frame-width").value_name("MM").value_parser(value_parser!(f64))
-            .help("width, mm"))
-        .arg(global("frame-height").value_name("MM").value_parser(value_parser!(f64))
-            .help("max height, mm; the drawing shrinks to fit"))
-        .arg(global("frame-scale").value_name("1:N")
-            .help("map scale; with --frame-width sets the ground size, otherwise the frame width"))
-        .arg(global("frame-pen").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
-            .help("stroke width in the frame, mm (sets how many pixels --frame-width becomes)"))
+                   One value is a square, or takes the paper's proportions. Default 30km"))
+        .next_help_heading("Frame — the paper it is drawn on (optional)")
+        .arg(global("frame-size").num_args(1..=2).value_names(["WIDTH", "HEIGHT"])
+            .value_parser(value_parser!(f64))
+            .help("paper width [and height] in mm; one value is a square. \
+                   Give the ground size or the scale with it, not both"))
+        .arg(global("export-scale").value_name("1:N")
+            .help("map scale, e.g. 1:25000; with --terrain-size it sets the paper, with --frame-size the ground"))
+        .arg(global("pen-width").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
+            .help("pen width on paper, mm (stroke-width in SVG, does not affect line density)"))
         .next_help_heading("Out — what gets written")
         .arg(global("out-file").value_name("PATH").default_value("burin-map.png")
             .help("output path"))
-        .arg(global("out-format").value_name("FMT").value_parser(["png", "svg", "both"])
-            .help("png, svg or both; default from the --out-file extension"))
+        .arg(global("out-format").value_name("FMT").value_parser(["png", "svg", "both", "geojson"])
+            .help("png, svg, both, or geojson; default from the --out-file extension"))
+        .arg(global("out-geojson").value_name("PATH").value_parser(value_parser!(PathBuf))
+            .help("write a GeoJSON FeatureCollection with geographic coordinates"))
         .next_help_heading("Batch — parallel drawing passes")
         .arg(Arg::new("batch").long("batch").short('b').action(ArgAction::Append).num_args(0)
             .help("start a pass (may repeat). Flags after each --batch apply to that pass until the \
                    next one; flags before the first --batch are shared. Without --batch there is one pass"))
         .arg(Arg::new("batch-angle").long("batch-angle").visible_alias("ba").value_name("DEG")
             .default_value("0").allow_negative_numbers(true).value_parser(value_parser!(f64))
-            .help("degrees from the contour tangent (0 = along, 90 = downslope)"))
+            .help("line direction: 0 follows the contour lines, 90 runs straight downhill"))
+        .arg(Arg::new("batch-name").long("batch-name").visible_alias("bn").value_name("NAME")
+            .help("label for this batch, shown in the log"))
         .arg(global("style-file").value_name("PATH").value_parser(value_parser!(PathBuf))
-            .help("JSON document with an optional area block and the batch passes"))
+            .help("JSON or JSON5 document (comments allowed) with an optional area block and the batch passes"))
         .arg(global("style-json").value_name("JSON")
-            .help("inline JSON document (or a bare list of batches)"));
+            .help("inline JSON or JSON5 document (or a bare list of batches)"));
 
     let mut last_group = "";
     for p in Style::PARAMS {
@@ -156,14 +157,24 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
         matches!(m.value_source(name), Some(ValueSource::CommandLine))
     };
 
-    let mut frame = Frame {
-        px: if given("frame-px") { *m.get_one("frame-px").unwrap() } else { area.px.unwrap_or(2400) },
-        width_mm: if given("frame-width") { m.get_one("frame-width").copied() } else { area.width_mm },
-        height_mm: if given("frame-height") { m.get_one("frame-height").copied() } else { area.height_mm },
-        pen_mm: if given("frame-pen") { *m.get_one("frame-pen").unwrap() } else { area.pen_mm.unwrap_or(0.3) },
+    let paper = if given("frame-size") {
+        m.get_many::<f64>("frame-size").map(|v| v.copied().collect::<Vec<_>>())
+    } else {
+        area.size_mm.clone()
     };
-    let scale = if given("frame-scale") {
-        m.get_one::<String>("frame-scale").map(|s| parse_scale(s)).transpose()?
+    let paper = match paper {
+        Some(v) => Some(size_pair(&v).filter(|p| p.iter().all(|x| *x > 0.0)).ok_or_else(|| {
+            Error::Input("the paper size needs 1 or 2 positive numbers in mm".into())
+        })?),
+        None => None,
+    };
+    let mut frame = Frame {
+        size_mm: paper,
+        pen_width: if given("pen-width") { *m.get_one("pen-width").unwrap() } else { area.pen_mm.unwrap_or(0.3) },
+        ..Frame::default()
+    };
+    let scale = if given("export-scale") {
+        m.get_one::<String>("export-scale").map(|s| parse_scale(s)).transpose()?
     } else {
         area.scale
     };
@@ -178,9 +189,11 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
     } else {
         area.size_km.as_ref().filter(|s| !s.is_empty()).map(|s| (s[0], s.get(1).copied()))
     };
-    let frame_aspect = match (frame.width_mm, frame.height_mm) {
-        (Some(w), Some(h)) => Some(h / w),
-        _ => None,
+    let frame_aspect = frame.size_mm.map(|[w, h]| h / w);
+    // Paper for a ground of the given projected size at 1:n.
+    let paper_for = |b: &Bounds, n: f64| {
+        let (pw, ph) = projected_size(b);
+        [pw * 1000.0 / n, ph * 1000.0 / n]
     };
 
     // Where: explicit bounds, a named place, or a centre to look up. CLI first,
@@ -230,25 +243,25 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
             }
         };
         if let Some(n) = scale {
-            if frame.width_mm.is_some() {
+            if frame.size_mm.is_some() {
                 return Err(Error::Input(
-                    "the area, --frame-width and --frame-scale can't all be fixed: drop one".into()));
+                    "the area, --frame-size and --export-scale can't all be fixed: drop one".into()));
             }
-            frame.width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
+            frame.size_mm = Some(paper_for(&bounds, n));
         }
         return Ok((bounds, frame, label));
     };
 
-    let (w_km, h_km) = match (size, scale, frame.width_mm) {
+    let (w_km, h_km) = match (size, scale, frame.size_mm) {
         (Some(_), Some(_), Some(_)) => {
             return Err(Error::Input(
-                "--terrain-size, --frame-width and --frame-scale can't all be given: drop one".into()));
+                "--terrain-size, --frame-size and --export-scale can't all be given: drop one".into()));
         }
         (Some((w, h)), _, _) => (w, h.unwrap_or(w * frame_aspect.unwrap_or(1.0))),
-        (None, Some(n), Some(fw)) => (fw * n / 1e6, frame.height_mm.unwrap_or(fw) * n / 1e6),
+        (None, Some(n), Some([fw, fh])) => (fw * n / 1e6, fh * n / 1e6),
         (None, Some(_), None) => {
             return Err(Error::Input(
-                "with --terrain-at, --frame-scale needs --terrain-size or --frame-width".into()));
+                "with --terrain-at, --export-scale needs --terrain-size or --frame-size".into()));
         }
         (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
     };
@@ -263,8 +276,8 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
         let (cx, cy, hx, hy) = ((w0 + e0) / 2.0, (s0 + n0) / 2.0, (e0 - w0) / 2.0 * fx, (n0 - s0) / 2.0 * fy);
         bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
     }
-    if let (Some(n), None) = (scale, frame.width_mm) {
-        frame.width_mm = Some(projected_size(&bounds).0 * 1000.0 / n);
+    if let (Some(n), None) = (scale, frame.size_mm) {
+        frame.size_mm = Some(paper_for(&bounds, n));
     }
     Ok((bounds, frame, label))
 }
@@ -330,10 +343,10 @@ impl Report {
                 self.detail(&format!("projected onto {width} × {height} px, {px_m:.0} m per pixel, \
                                       highest point {highest_m:.0} m"));
             }
-            Progress::Frame { width_mm, height_mm, scale, pen_mm, pitch_mm } => {
+            Progress::Frame { width_mm, height_mm, scale, pen_width, pitch_mm } => {
                 self.step("frame", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
                                             crate::progress::scale(scale)), None);
-                self.detail(&format!("stroke {pen_mm} mm, lines {pitch_mm:.2} mm apart"));
+                self.detail(&format!("stroke {pen_width} mm, lines {pitch_mm:.2} mm apart"));
             }
             Progress::Relief { secs } => self.step("relief", "light and shadow, slope, line directions", Some(secs)),
             Progress::Lines { count, secs } => {
@@ -381,7 +394,11 @@ where
         for p in Style::PARAMS {
             st.set(p.name, *m.get_one::<f64>(p.name).unwrap());
         }
-        vec![Batch { angle: *m.get_one::<f64>("batch-angle").unwrap() as f32, style: st }]
+        vec![Batch {
+            name: m.get_one::<String>("batch-name").cloned(),
+            angle: *m.get_one::<f64>("batch-angle").unwrap() as f32,
+            style: st,
+        }]
     };
 
     let r = Report::new();
@@ -393,8 +410,14 @@ where
     let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
     r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
     r.detail(&format!("{:.1} × {:.1} km around {centre}", wm / 1000.0, hm / 1000.0));
-    if batches.len() > 1 || batches[0].angle != 0.0 {
-        let desc: Vec<String> = batches.iter().map(|b| format!("{:.0}°", b.angle)).collect();
+    if batches.len() > 1 || batches[0].angle != 0.0 || batches[0].name.is_some() {
+        let desc: Vec<String> = batches
+            .iter()
+            .map(|b| match &b.name {
+                Some(n) => format!("{n} {:.0}°", b.angle),
+                None => format!("{:.0}°", b.angle),
+            })
+            .collect();
         r.detail(&format!("{} batch passes ({})", batches.len(), desc.join(", ")));
     }
 
@@ -406,6 +429,7 @@ where
     let (want_png, want_svg) = match m.get_one::<String>("out-format").map(|s| s.as_str()) {
         Some("png") => (true, false),
         Some("svg") => (false, true),
+        Some("geojson") => (false, false),
         Some(_) => (true, true),
         None => (!is_svg, is_svg),
     };
@@ -423,6 +447,14 @@ where
             None => format!("{} × {} px", d.width, d.height),
         };
         files.push((svg, size));
+    }
+    if want_png || want_svg {
+        // already handled above
+    }
+    if let Some(geojson_path) = m.get_one::<PathBuf>("out-geojson") {
+        let text = map.to_geojson(&bounds);
+        std::fs::write(geojson_path, text)?;
+        r.detail(&format!("GeoJSON written to {}", geojson_path.display()));
     }
     let mut out = anstream::stdout();
     for (i, (path, size)) in files.iter().enumerate() {
@@ -514,6 +546,7 @@ fn global_value_count(flag: &str, rest: &[OsString]) -> Option<usize> {
 fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> {
     let mut st = base.clone();
     let mut angle = 0.0f64;
+    let mut label = None;
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].to_string_lossy();
@@ -523,15 +556,19 @@ fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> 
         let name = name.replace('-', "_");
         let raw = args.get(i + 1).ok_or_else(|| Error::Input(format!("missing value for {flag}")))?;
         let raw = raw.to_string_lossy();
-        let v: f64 = raw.parse().map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
         i += 2;
+        if name == "batch_name" || name == "bn" {
+            label = Some(raw.into_owned());
+            continue;
+        }
+        let v: f64 = raw.parse().map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
         if name == "batch_angle" || name == "ba" {
             angle = v;
         } else if !st.set(&name, v) {
             return Err(Error::Input(format!("unknown batch parameter {flag}")));
         }
     }
-    Ok(Batch { angle: angle as f32, style: st })
+    Ok(Batch { name: label, angle: angle as f32, style: st })
 }
 
 #[cfg(test)]
@@ -554,18 +591,37 @@ mod tests {
 
     #[test]
     fn scale_sets_the_missing_side() {
-        let (b, f) = resolve(&["--terrain-place", "bern", "--frame-scale", "1:100000"]).unwrap();
-        let w_mm = f.width_mm.unwrap();
-        assert!((w_mm - projected_size(&b).0 / 100.0).abs() < 1e-6);
-        let (b, _) = resolve(&["--tat", "46,7.7", "--fw", "297", "--fsc", "1:50000"]).unwrap();
-        assert!((projected_size(&b).0 / 1000.0 - 14.85).abs() < 0.1);
+        let (b, f) = resolve(&["--terrain-place", "bern", "--export-scale", "1:100000"]).unwrap();
+        let [w_mm, h_mm] = f.size_mm.unwrap();
+        let (pw, ph) = projected_size(&b);
+        assert!((w_mm - pw / 100.0).abs() < 1e-6 && (h_mm - ph / 100.0).abs() < 1e-6);
+        let (b, _) = resolve(&["--tat", "46,7.7", "--frame-size", "297", "420", "--export-scale", "1:50000"]).unwrap();
+        let (pw, ph) = projected_size(&b);
+        assert!((pw / 1000.0 - 14.85).abs() < 0.1 && (ph / 1000.0 - 21.0).abs() < 0.1, "{pw} {ph}");
+    }
+
+    #[test]
+    fn one_paper_value_is_a_square() {
+        let (b, f) = resolve(&["--tat", "46,7.7", "--frame-size", "200", "--export-scale", "1:10000"]).unwrap();
+        assert_eq!(f.size_mm, Some([200.0, 200.0]));
+        let (pw, ph) = projected_size(&b);
+        assert!((pw - 2000.0).abs() < 10.0 && (ph - 2000.0).abs() < 10.0, "{pw} {ph}");
     }
 
     #[test]
     fn overdetermined_is_an_error() {
-        assert!(resolve(&["--tp", "bern", "--fsc", "1:1000", "--fw", "200"]).is_err());
-        assert!(resolve(&["--tat", "46,7", "--ts", "5km", "--fw", "200", "--fsc", "1:1000"]).is_err());
+        assert!(resolve(&["--tp", "bern", "--export-scale", "1:1000", "--frame-size", "200"]).is_err());
+        assert!(resolve(&["--tat", "46,7", "--ts", "5km", "--frame-size", "200", "--export-scale", "1:1000"]).is_err());
         assert!(resolve(&["--tp", "bern", "--ts", "5km"]).is_err());
+        assert!(resolve(&["--tat", "46,7", "--export-scale", "1:1000"]).is_err());
+    }
+
+    #[test]
+    fn old_frame_flags_are_gone() {
+        for old in ["--frame-px", "--frame-width", "--frame-height", "--fpx", "--fw", "--fh",
+                    "--frame-scale", "--fsc", "--frame-pen", "--fpen"] {
+            assert!(command().try_get_matches_from(argv(&[old, "100"])).is_err(), "{old}");
+        }
     }
 
     #[test]
@@ -595,7 +651,7 @@ mod tests {
         let args = argv(&[
             "--tp", "bern", "--space", "6",
             "--batch", "--mod-breaks", "0.1", "--of", "x.png",
-            "-b", "--ba", "90", "--mb", "0.9", "--batch-floor", "0.4",
+            "-b", "--batch-name", "Steep valleys", "--ba", "90", "--mb", "0.9", "--batch-floor", "0.4",
         ]);
         let (prefix, secs) = split_batch_argv(&args).unwrap();
         let secs = secs.unwrap();
@@ -607,6 +663,8 @@ mod tests {
         let b0 = parse_batch_section(&base, &secs[0]).unwrap();
         let b1 = parse_batch_section(&base, &secs[1]).unwrap();
         assert_eq!(b0.angle, 0.0);
+        assert_eq!(b0.name, None);
+        assert_eq!(b1.name.as_deref(), Some("Steep valleys"));
         assert!((b0.style.mod_breaks - 0.1).abs() < 1e-6);
         assert!((b0.style.space - 6.0).abs() < 1e-6);
         assert_eq!(b1.angle, 90.0);

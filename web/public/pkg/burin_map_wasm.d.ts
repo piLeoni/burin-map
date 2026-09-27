@@ -9,10 +9,30 @@ export class Drawing {
     free(): void;
     [Symbol.dispose](): void;
     readonly dashes: number;
+    /**
+     * Degrees of latitude per pixel (southward).
+     */
+    readonly deg_per_px_lat: number;
+    /**
+     * Degrees of longitude per pixel (eastward).
+     */
+    readonly deg_per_px_lon: number;
     readonly ends: Uint32Array;
+    /**
+     * GeoJSON MultiLineString FeatureCollection of the dashes.
+     */
+    readonly geojson: string;
     readonly height: number;
     readonly lines: number;
     readonly ms: number;
+    /**
+     * NW corner latitude.
+     */
+    readonly nw_lat: number;
+    /**
+     * NW corner longitude.
+     */
+    readonly nw_lon: number;
     readonly paths: Float32Array;
     readonly svg: string;
     readonly width: number;
@@ -23,13 +43,17 @@ export class Drawing {
  * metres. `elev` is a Float32Array (or any TypedArray view) of length
  * `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
  * parameter overrides (missing keys keep the defaults).
+ * `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }` —
+ * when present, `.geojson` will contain geographic coordinates.
  */
-export function draw(elev: Float32Array, width: number, height: number, px_m: number, style: any): Drawing;
+export function draw(elev: Float32Array, width: number, height: number, px_m: number, style: any, geo: any): Drawing;
 
 /**
  * Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
+ * `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }`.
+ * With `mm_per_px` the SVG is sized in millimetres, for paper.
  */
-export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string): Drawing;
+export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px?: number | null): Drawing;
 
 /**
  * (id, blurb) for each style group — section headers in the web UI.
@@ -46,13 +70,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_drawing_free: (a: number, b: number) => void;
-    readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];
-    readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+    readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
+    readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => [number, number, number];
     readonly drawing_dashes: (a: number) => number;
+    readonly drawing_deg_per_px_lat: (a: number) => number;
+    readonly drawing_deg_per_px_lon: (a: number) => number;
     readonly drawing_ends: (a: number) => any;
+    readonly drawing_geojson: (a: number) => [number, number];
     readonly drawing_height: (a: number) => number;
     readonly drawing_lines: (a: number) => number;
     readonly drawing_ms: (a: number) => number;
+    readonly drawing_nw_lat: (a: number) => number;
+    readonly drawing_nw_lon: (a: number) => number;
     readonly drawing_paths: (a: number) => any;
     readonly drawing_svg: (a: number) => [number, number];
     readonly drawing_width: (a: number) => number;

@@ -28,11 +28,43 @@ export class Drawing {
         return ret >>> 0;
     }
     /**
+     * Degrees of latitude per pixel (southward).
+     * @returns {number}
+     */
+    get deg_per_px_lat() {
+        const ret = wasm.drawing_deg_per_px_lat(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Degrees of longitude per pixel (eastward).
+     * @returns {number}
+     */
+    get deg_per_px_lon() {
+        const ret = wasm.drawing_deg_per_px_lon(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @returns {Uint32Array}
      */
     get ends() {
         const ret = wasm.drawing_ends(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * GeoJSON MultiLineString FeatureCollection of the dashes.
+     * @returns {string}
+     */
+    get geojson() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.drawing_geojson(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @returns {number}
@@ -53,6 +85,22 @@ export class Drawing {
      */
     get ms() {
         const ret = wasm.drawing_ms(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * NW corner latitude.
+     * @returns {number}
+     */
+    get nw_lat() {
+        const ret = wasm.drawing_nw_lat(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * NW corner longitude.
+     * @returns {number}
+     */
+    get nw_lon() {
+        const ret = wasm.drawing_nw_lon(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -92,17 +140,20 @@ if (Symbol.dispose) Drawing.prototype[Symbol.dispose] = Drawing.prototype.free;
  * metres. `elev` is a Float32Array (or any TypedArray view) of length
  * `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
  * parameter overrides (missing keys keep the defaults).
+ * `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }` —
+ * when present, `.geojson` will contain geographic coordinates.
  * @param {Float32Array} elev
  * @param {number} width
  * @param {number} height
  * @param {number} px_m
  * @param {any} style
+ * @param {any} geo
  * @returns {Drawing}
  */
-export function draw(elev, width, height, px_m, style) {
+export function draw(elev, width, height, px_m, style, geo) {
     const ptr0 = passArrayF32ToWasm0(elev, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.draw(ptr0, len0, width, height, px_m, style);
+    const ret = wasm.draw(ptr0, len0, width, height, px_m, style, geo);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -111,19 +162,23 @@ export function draw(elev, width, height, px_m, style) {
 
 /**
  * Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
+ * `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }`.
+ * With `mm_per_px` the SVG is sized in millimetres, for paper.
  * @param {Float32Array} elev
  * @param {number} width
  * @param {number} height
  * @param {number} px_m
  * @param {string} json
+ * @param {any} geo
+ * @param {number | null} [mm_per_px]
  * @returns {Drawing}
  */
-export function draw_batches(elev, width, height, px_m, json) {
+export function draw_batches(elev, width, height, px_m, json, geo, mm_per_px) {
     const ptr0 = passArrayF32ToWasm0(elev, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.draw_batches(ptr0, len0, width, height, px_m, ptr1, len1);
+    const ret = wasm.draw_batches(ptr0, len0, width, height, px_m, ptr1, len1, geo, isLikeNone(mm_per_px) ? Number.MAX_SAFE_INTEGER : Math.fround(mm_per_px));
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -177,6 +232,14 @@ function __wbg_get_imports() {
             const ret = Reflect.get(arg0, arg1);
             return ret;
         }, arguments); },
+        __wbg_length_2ea75db9a3294a06: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
+        __wbg_length_8768c6f6941913e3: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_new_bebc3f4757acf305: function() {
             const ret = new Object();
             return ret;
@@ -196,6 +259,12 @@ function __wbg_get_imports() {
         __wbg_now_d1fb6650485d7f3e: function() {
             const ret = Date.now();
             return ret;
+        },
+        __wbg_prototypesetcall_1629b854cfbe3b87: function(arg0, arg1, arg2) {
+            Uint32Array.prototype.set.call(getArrayU32FromWasm0(arg0, arg1), arg2);
+        },
+        __wbg_prototypesetcall_804a1eb1b047ccb9: function(arg0, arg1, arg2) {
+            Float32Array.prototype.set.call(getArrayF32FromWasm0(arg0, arg1), arg2);
         },
         __wbg_push_bfdf956ba476f65b: function(arg0, arg1) {
             const ret = arg0.push(arg1);

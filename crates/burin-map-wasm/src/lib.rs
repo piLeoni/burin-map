@@ -4,7 +4,7 @@
 //! flat `f32` height grid. Paths come back packed for canvas stroking; [`svg`]
 //! builds an SVG document for download.
 
-use burin_map_core::{Batch, Line, Style};
+use burin_map_core::{Batch, GeoTransform, Line, Style};
 use js_sys::{Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::prelude::*;
 
@@ -81,6 +81,11 @@ pub struct Drawing {
     n_dashes: u32,
     ms: f64,
     svg: String,
+    /// Pixel → lon/lat, when geography was provided.
+    nw_lon: f64,
+    nw_lat: f64,
+    deg_per_px_lon: f64,
+    deg_per_px_lat: f64,
 }
 
 #[wasm_bindgen]
@@ -117,12 +122,47 @@ impl Drawing {
     pub fn svg(&self) -> String {
         self.svg.clone()
     }
+    /// GeoJSON MultiLineString FeatureCollection of the dashes.
+    #[wasm_bindgen(getter)]
+    pub fn geojson(&self) -> String {
+        let tr = GeoTransform { nw_lon: self.nw_lon, nw_lat: self.nw_lat, deg_per_px_lon: self.deg_per_px_lon, deg_per_px_lat: self.deg_per_px_lat };
+        let paths: Vec<Line> = {
+            let pts: Vec<f32> = self.paths.to_vec();
+            let ends: Vec<u32> = self.ends.to_vec();
+            let mut out = Vec::with_capacity(ends.len());
+            let mut start = 0u32;
+            for &e in &ends {
+                if e > start {
+                    let slice = &pts[start as usize * 2..e as usize * 2];
+                    let line: Line = slice.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+                    out.push(line);
+                }
+                start = e;
+            }
+            out
+        };
+        burin_map_core::geojson::to_geojson(&paths, self.width as f64, self.height as f64, |x, y| tr.to_lonlat(x, y))
+    }
+    /// NW corner longitude.
+    #[wasm_bindgen(getter)]
+    pub fn nw_lon(&self) -> f64 { self.nw_lon }
+    /// NW corner latitude.
+    #[wasm_bindgen(getter)]
+    pub fn nw_lat(&self) -> f64 { self.nw_lat }
+    /// Degrees of longitude per pixel (eastward).
+    #[wasm_bindgen(getter)]
+    pub fn deg_per_px_lon(&self) -> f64 { self.deg_per_px_lon }
+    /// Degrees of latitude per pixel (southward).
+    #[wasm_bindgen(getter)]
+    pub fn deg_per_px_lat(&self) -> f64 { self.deg_per_px_lat }
 }
 
 /// Draw an elevation grid: metres, row 0 = north, square pixels of `px_m`
 /// metres. `elev` is a Float32Array (or any TypedArray view) of length
 /// `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
 /// parameter overrides (missing keys keep the defaults).
+/// `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }` —
+/// when present, `.geojson` will contain geographic coordinates.
 #[wasm_bindgen]
 pub fn draw(
     elev: &[f32],
@@ -130,6 +170,7 @@ pub fn draw(
     height: u32,
     px_m: f32,
     style: &JsValue,
+    geo: &JsValue,
 ) -> Result<Drawing, JsValue> {
     let (w, h) = (width as usize, height as usize);
     if elev.len() != w * h {
@@ -146,6 +187,7 @@ pub fn draw(
     let ms = now_ms() - t0;
     let (pts, ends) = pack(&d.paths);
     let svg = d.to_svg(st.batch_stroke, None);
+    let geo = read_geo(geo);
     Ok(Drawing {
         width,
         height,
@@ -155,6 +197,10 @@ pub fn draw(
         n_dashes: d.paths.len() as u32,
         ms,
         svg,
+        nw_lon: geo.nw_lon,
+        nw_lat: geo.nw_lat,
+        deg_per_px_lon: geo.deg_per_px_lon,
+        deg_per_px_lat: geo.deg_per_px_lat,
     })
 }
 
@@ -162,7 +208,24 @@ fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
+fn read_double(o: &JsValue, key: &str, default: f64) -> f64 {
+    if o.is_undefined() || o.is_null() { return default; }
+    Reflect::get(&o, &key.into()).ok().and_then(|v| v.as_f64()).unwrap_or(default)
+}
+
+fn read_geo(o: &JsValue) -> GeoTransform {
+    if o.is_undefined() || o.is_null() { return GeoTransform { nw_lon: 0.0, nw_lat: 0.0, deg_per_px_lon: 0.0, deg_per_px_lat: 0.0 }; }
+    GeoTransform {
+        nw_lon: read_double(o, "nw_lon", 0.0),
+        nw_lat: read_double(o, "nw_lat", 0.0),
+        deg_per_px_lon: read_double(o, "deg_per_px_lon", 0.0),
+        deg_per_px_lat: read_double(o, "deg_per_px_lat", 0.0),
+    }
+}
+
 /// Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
+/// `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }`.
+/// With `mm_per_px` the SVG is sized in millimetres, for paper.
 #[wasm_bindgen]
 pub fn draw_batches(
     elev: &[f32],
@@ -170,6 +233,8 @@ pub fn draw_batches(
     height: u32,
     px_m: f32,
     json: &str,
+    geo: &JsValue,
+    mm_per_px: Option<f32>,
 ) -> Result<Drawing, JsValue> {
     let (w, h) = (width as usize, height as usize);
     if elev.len() != w * h {
@@ -190,7 +255,8 @@ pub fn draw_batches(
     let ms = now_ms() - t0;
     let (pts, ends) = pack(&d.paths);
     let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);
-    let svg = d.to_svg(stroke, None);
+    let svg = d.to_svg(stroke, mm_per_px);
+    let geo = read_geo(geo);
     Ok(Drawing {
         width,
         height,
@@ -200,5 +266,9 @@ pub fn draw_batches(
         n_dashes: d.paths.len() as u32,
         ms,
         svg,
+        nw_lon: geo.nw_lon,
+        nw_lat: geo.nw_lat,
+        deg_per_px_lon: geo.deg_per_px_lon,
+        deg_per_px_lat: geo.deg_per_px_lat,
     })
 }
