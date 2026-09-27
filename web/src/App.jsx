@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import PasswordGate from './components/PasswordGate'
-import { drawingAtom, firstStyle, statusAtom, styleAtom } from './state'
+import { drawingAtom, statusAtom, styleAtom } from './state'
 
 export default function App() {
   const batches = useAtomValue(styleAtom)

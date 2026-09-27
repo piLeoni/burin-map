@@ -193,3 +193,45 @@ pub fn from_json_batches(s: &str) -> Result<Vec<Batch>, serde_json::Error> {
 pub fn to_json_batches(batches: &[Batch]) -> String {
     serde_json::to_string(batches).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_batches() {
+        let batches = vec![
+            Batch::along(Style::default()),
+            Batch { angle: 90.0, style: Style { space: 6.0, batch_floor: 0.4, ..Style::default() } },
+        ];
+        let json = to_json_batches(&batches);
+        let back = from_json_batches(&json).expect("should parse");
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[1].angle, 90.0);
+        assert_eq!(back[1].style.space, 6.0);
+        assert_eq!(back[1].style.batch_floor, 0.4);
+    }
+
+    #[test]
+    fn partial_style_uses_defaults() {
+        let json = r#"[{"angle": 45, "style": {"space": 7.5}}]"#;
+        let back = from_json_batches(json).expect("should parse");
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].angle, 45.0);
+        assert_eq!(back[0].style.space, 7.5);
+        // untouched field keeps its default
+        assert_eq!(back[0].style.batch_stroke, Style::default().batch_stroke);
+    }
+
+    #[test]
+    fn empty_array_parses_but_is_empty() {
+        assert!(from_json_batches("[]").unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_fields_ignored() {
+        let json = r#"[{"angle": 0, "style": {"space": 5, "nonsense": 99}}]"#;
+        let back = from_json_batches(json).expect("should parse");
+        assert_eq!(back[0].style.space, 5.0);
+    }
+}

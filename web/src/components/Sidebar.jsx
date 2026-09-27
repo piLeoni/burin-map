@@ -284,7 +284,7 @@ function BatchCard({ index, batch, params, groups, onUpdate, onRemove, canRemove
               </div>
             </details>
           ))}
-          {group.length === 0 && (
+          {grouped.length === 0 && (
             <p className="text-[10px] opacity-40">No groups loaded — WASM may still be initialising.</p>
           )}
         </div>

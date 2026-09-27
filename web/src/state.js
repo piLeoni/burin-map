@@ -8,15 +8,7 @@ export const mapViewAtom = atomWithStorage('burin-map.map', {
 })
 
 /** Batch passes — persisted in localStorage as JSON. */
-export const styleAtom = atomWithStorage('burin-map.style.v3', /** @type {Array<{ angle: number, style: Record<string, number> }>} */ ([]))
-
-/**
- * Flat style from the first batch, for the WASM draw() API.
- */
-export function firstStyle(batches) {
-  if (!batches || batches.length === 0) return {}
-  return batches[0].style || {}
-}
+export const styleAtom = atomWithStorage('burin-map.batches.v1', /** @type {Array<{ angle: number, style: Record<string, number> }>} */ ([]))
 
 /** How long a successful unlock stays valid (30 days). */
 export const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000
