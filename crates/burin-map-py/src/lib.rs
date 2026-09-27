@@ -4,6 +4,7 @@
 //! numpy at build time and one abi3 wheel serves every Python version.
 
 use burin_map::{Error, Frame, Style};
+use pyo3::types::PyString;
 use burin_map_core::Line;
 use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -116,6 +117,15 @@ fn style_params() -> Vec<(&'static str, f64, &'static str, &'static str)> {
         .collect()
 }
 
+/// Parse a JSON string into a list of batch dicts.
+#[pyfunction]
+fn style_from_json(_py: Python<'_>, json: &str) -> PyResult<String> {
+    let batches: Vec<burin_map::Batch> = serde_json::from_str(json)
+        .map_err(|e| PyValueError::new_err(format!("invalid --style-json: {e}")))?;
+    // Return pretty-printed for Python consumption
+    Ok(serde_json::to_string_pretty(&batches).unwrap_or_default())
+}
+
 /// (id, blurb) for each style group.
 #[pyfunction]
 fn style_groups() -> Vec<(&'static str, &'static str)> {
@@ -213,6 +223,7 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Map>()?;
     m.add_function(wrap_pyfunction!(style_params, m)?)?;
     m.add_function(wrap_pyfunction!(style_groups, m)?)?;
+    m.add_function(wrap_pyfunction!(style_from_json, m)?)?;
     m.add_function(wrap_pyfunction!(locate, m)?)?;
     m.add_function(wrap_pyfunction!(bounds_around, m)?)?;
     m.add_function(wrap_pyfunction!(projected_size, m)?)?;

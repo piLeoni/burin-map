@@ -11,6 +11,8 @@
 //!   engine_*  streamline tracer
 //!   batch_*   per-pass (floor, stroke, seed)
 
+use serde::{Deserialize, Serialize};
+
 /// One style parameter as exposed to CLI / Python / WASM / the web UI.
 #[derive(Clone, Copy, Debug)]
 pub struct Param {
@@ -35,7 +37,8 @@ macro_rules! style {
     ($(
         $group:ident : $name:ident ($short:literal) : $ty:ty = $default:expr, $help:expr;
     )*) => {
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(default)]
         pub struct Style {
             $( pub $name: $ty, )*
         }
@@ -127,8 +130,10 @@ style! {
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
 /// tangent (0 = along level curves, 90 = along the slope).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Batch {
+    #[serde(default)]
     pub angle: f32,
     pub style: Style,
 }
@@ -165,4 +170,26 @@ mod tests {
         all.dedup();
         assert_eq!(all.len(), n);
     }
+}
+
+/// Parse a JSON string into a single `Style`. Missing fields get their
+/// default, extraneous ones are ignored (`#[serde(default)]`).
+pub fn from_json_style(s: &str) -> Result<Style, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+/// Serialise a `Style` to a compact JSON string (no whitespace).
+pub fn to_json_style(st: &Style) -> String {
+    serde_json::to_string(st).unwrap_or_default()
+}
+
+/// Parse a JSON string into a `Vec<Batch>`. Equivalent to
+/// `serde_json::from_str(s)`.
+pub fn from_json_batches(s: &str) -> Result<Vec<Batch>, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+/// Serialise a slice of `Batch` into a compact JSON string.
+pub fn to_json_batches(batches: &[Batch]) -> String {
+    serde_json::to_string(batches).unwrap_or_default()
 }

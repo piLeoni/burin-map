@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Same scene, two shading grammars.
+# Homogeneous map: identical light and dark — no variation anywhere.
 
 PLACE=(--terrain-at "Twin Peaks, San Francisco" --terrain-size 8km)
 
-# Even dashes, no drop, no breaks
+# Space flat, dash full, zero character
 burin-map "${PLACE[@]}" --out-file tp-dash.png \
-  --dash-light 0.5 --dash-dark 0.5 --dash-period 5 --dash-drop 0 \
-  --mod-jitter 0.8 --mod-breaks 0
+  --batch-angle 90 \
+  --space-light 1 --space-dark 1 --space-steep 0 \
+  --dash-light 1 --dash-dark 1 --dash-period 3 --dash-drop 0 \
+  --mod-jitter 0 --mod-breaks 0 --mod-wobble 0

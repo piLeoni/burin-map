@@ -14,6 +14,7 @@ anstream = "0.6"
 anstyle = "1"
 burin-map-core = { path = "../burin-map-core" }
 clap = { version = "4", features = ["string"] }
+serde = { version = "1", features = ["derive"] }
 flate2 = "1"
 png = "0.17"
 serde_json = "1"

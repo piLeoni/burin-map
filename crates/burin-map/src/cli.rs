@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use clap::parser::ValueSource;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use serde_json;
 
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
@@ -47,6 +48,8 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("frame-pen", "fpen", Takes::One),
     ("out-file", "of", Takes::One),
     ("out-format", "fmt", Takes::One),
+    ("style-file", "sf", Takes::One),
+    ("style-json", "sj", Takes::One),
 ];
 
 fn short_of(long: &str) -> &'static str {
@@ -99,7 +102,11 @@ pub fn command() -> Command {
                    next one; flags before the first --batch are shared. Without --batch there is one pass"))
         .arg(Arg::new("batch-angle").long("batch-angle").visible_alias("ba").value_name("DEG")
             .default_value("0").allow_negative_numbers(true).value_parser(value_parser!(f64))
-            .help("degrees from the contour tangent (0 = along, 90 = downslope)"));
+            .help("degrees from the contour tangent (0 = along, 90 = downslope)"))
+        .arg(global("style-file").value_name("PATH").value_parser(value_parser!(PathBuf))
+            .help("JSON file with batch passes"))
+        .arg(global("style-json").value_name("JSON")
+            .help("inline JSON for batch passes"));
 
     let mut last_group = "";
     for p in Style::PARAMS {
@@ -296,21 +303,34 @@ where
     let (prefix, sections) = split_batch_argv(&args)?;
     let m = command().try_get_matches_from(prefix).unwrap_or_else(|e| e.exit());
 
-    let batches = match sections {
-        None => {
-            let mut st = Style::default();
-            for p in Style::PARAMS {
-                st.set(p.name, *m.get_one::<f64>(p.name).unwrap());
-            }
-            vec![Batch { angle: *m.get_one::<f64>("batch-angle").unwrap() as f32, style: st }]
+    let batches: Vec<Batch> = if let Some(json) = m.get_one::<String>("style-json") {
+        let batches: Vec<Batch> = serde_json::from_str(json)
+            .map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?;
+        if batches.is_empty() {
+            return Err(Error::Input("--style-json list is empty".into()).into());
         }
-        Some(sections) => {
-            let base = shared_style(&m);
-            sections
-                .iter()
-                .map(|sec| parse_batch_section(&base, sec))
-                .collect::<Result<Vec<_>, _>>()?
+        batches
+    } else if let Some(path) = m.get_one::<PathBuf>("style-file") {
+        let s = std::fs::read_to_string(path)
+            .map_err(|e| Error::Input(format!("reading {}: {e}", path.display())))?;
+        let batches: Vec<Batch> = serde_json::from_str(&s)
+            .map_err(|e| Error::Input(format!("invalid --style-file: {e}")))?;
+        if batches.is_empty() {
+            return Err(Error::Input("--style-file list is empty".into()).into());
         }
+        batches
+    } else if let Some(sections) = sections {
+        let base = shared_style(&m);
+        sections
+            .iter()
+            .map(|sec| parse_batch_section(&base, sec))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        let mut st = Style::default();
+        for p in Style::PARAMS {
+            st.set(p.name, *m.get_one::<f64>(p.name).unwrap());
+        }
+        vec![Batch { angle: *m.get_one::<f64>("batch-angle").unwrap() as f32, style: st }]
     };
 
     let r = Report::new();

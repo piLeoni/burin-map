@@ -140,6 +140,14 @@ pub fn projected_size(west: f64, south: f64, east: f64, north: f64) -> (f64, f64
     burin_map::projected_size(&[west, south, east, north])
 }
 
+/// Deserialise batches from a JSON string with the same schema as --style-json.
+#[napi]
+pub fn style_from_json(json: String) -> Result<String> {
+    let batches: Vec<burin_map_core::Batch> = serde_json::from_str(&json)
+        .map_err(|e| Error::from_reason(format!("invalid JSON: {e}")))?;
+    Ok(serde_json::to_string(&batches).unwrap_or_default())
+}
+
 /// Download SRTM for the lon/lat box and draw it.
 #[napi]
 pub fn draw(

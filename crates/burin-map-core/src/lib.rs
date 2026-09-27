@@ -20,7 +20,7 @@ pub use dashes::dash_lines;
 pub use fields::{batch_fields, build_fields, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, Line};
-pub use style::{Batch, Param, Style, GROUPS};
+pub use style::{from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS};
 
 pub struct Drawing {
     pub width: usize,

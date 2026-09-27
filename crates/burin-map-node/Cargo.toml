@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 burin-map = { path = "../burin-map" }
+serde_json = "1"
 burin-map-core = { path = "../burin-map-core" }
 napi = { version = "3", default-features = false, features = ["napi4"] }
 napi-derive = "3"
