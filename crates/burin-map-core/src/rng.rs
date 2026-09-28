@@ -1,5 +1,8 @@
 //! Small deterministic PRNG (PCG32), identical on every platform including WASM.
 
+const MULT: u64 = 6_364_136_223_846_793_005;
+
+#[derive(Clone)]
 pub struct Rng {
     state: u64,
     inc: u64,
@@ -16,7 +19,7 @@ impl Rng {
 
     pub fn next_u32(&mut self) -> u32 {
         let old = self.state;
-        self.state = old.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(self.inc);
+        self.state = old.wrapping_mul(MULT).wrapping_add(self.inc);
         let xorshifted = (((old >> 18) ^ old) >> 27) as u32;
         xorshifted.rotate_right((old >> 59) as u32)
     }
@@ -25,6 +28,38 @@ impl Rng {
     pub fn f64(&mut self) -> f64 {
         let v = ((self.next_u32() as u64) << 32) | self.next_u32() as u64;
         (v >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+    }
+
+    /// Skip `delta` outputs of `next_u32` in O(log delta) (Brown, 1994).
+    pub fn advance(&mut self, mut delta: u64) {
+        let (mut mult, mut plus) = (MULT, self.inc);
+        let (mut acc_mult, mut acc_plus) = (1u64, 0u64);
+        while delta > 0 {
+            if delta & 1 == 1 {
+                acc_mult = acc_mult.wrapping_mul(mult);
+                acc_plus = acc_plus.wrapping_mul(mult).wrapping_add(plus);
+            }
+            plus = mult.wrapping_add(1).wrapping_mul(plus);
+            mult = mult.wrapping_mul(mult);
+            delta >>= 1;
+        }
+        self.state = acc_mult.wrapping_mul(self.state).wrapping_add(acc_plus);
+    }
+
+    /// Fill `out` with standard normals, in parallel chunks but exactly as
+    /// successive `normal()` calls would (each consumes 4 × `next_u32`).
+    pub fn fill_normal(&mut self, out: &mut [f32]) {
+        use rayon::prelude::*;
+        const CHUNK: usize = 1 << 16;
+        let start = self.clone();
+        out.par_chunks_mut(CHUNK).enumerate().for_each(|(c, part)| {
+            let mut r = start.clone();
+            r.advance(4 * (c * CHUNK) as u64);
+            for v in part {
+                *v = r.normal() as f32;
+            }
+        });
+        self.advance(4 * out.len() as u64);
     }
 
     pub fn uniform(&mut self, a: f64, b: f64) -> f64 {
@@ -65,5 +100,33 @@ impl Rng {
             let j = (self.f64() * (i + 1) as f64) as usize;
             v.swap(i, j.min(i));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advance_matches_stepping() {
+        let mut a = Rng::new(7);
+        let mut b = a.clone();
+        for _ in 0..12_345 {
+            a.next_u32();
+        }
+        b.advance(12_345);
+        assert_eq!(a.next_u32(), b.next_u32());
+    }
+
+    #[test]
+    fn fill_normal_matches_sequential() {
+        let n = 200_003;
+        let mut a = Rng::new(3);
+        let seq: Vec<f32> = (0..n).map(|_| a.normal() as f32).collect();
+        let mut b = Rng::new(3);
+        let mut par = vec![0.0f32; n];
+        b.fill_normal(&mut par);
+        assert!(seq.iter().zip(&par).all(|(x, y)| x.to_bits() == y.to_bits()));
+        assert_eq!(a.next_u32(), b.next_u32());
     }
 }

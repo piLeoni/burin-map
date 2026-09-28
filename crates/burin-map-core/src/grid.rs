@@ -1,5 +1,9 @@
 //! Raster helpers: the few numpy/scipy operations the pipeline needs.
 //! Grids are row-major `Vec<f32>` of `w × h`, row 0 at the top (north).
+//! Work is split over rows or column bands so every pixel is computed in
+//! the same order as a sequential pass: results don't depend on threads.
+
+use rayon::prelude::*;
 
 /// scipy.ndimage "reflect" boundary: d c b a | a b c d | d c b a
 #[inline]
@@ -13,22 +17,18 @@ fn reflect(i: isize, n: isize) -> usize {
 /// (truncated at 4σ like scipy); larger ones three box passes, whose cost
 /// doesn't grow with sigma and whose result is visually the same.
 pub fn blur(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
-    if sigma <= 0.0 {
+    if sigma <= 0.0 || src.is_empty() {
         return src.to_vec();
     }
     let mut a = src.to_vec();
     let mut b = vec![0.0f32; src.len()];
     if sigma < 3.0 {
         let k = gaussian_kernel(sigma);
-        for y in 0..h {
-            convolve(&a[y * w..(y + 1) * w], &mut b[y * w..(y + 1) * w], &k);
-        }
+        b.par_chunks_mut(w).zip(a.par_chunks(w)).for_each(|(o, row)| convolve(row, o, &k));
         convolve_rows(&b, &mut a, w, h, &k);
     } else {
         for r in box_radii(sigma, 3) {
-            for y in 0..h {
-                box_line(&a[y * w..(y + 1) * w], &mut b[y * w..(y + 1) * w], r);
-            }
+            b.par_chunks_mut(w).zip(a.par_chunks(w)).for_each(|(o, row)| box_line(row, o, r));
             box_rows(&b, &mut a, w, h, r);
         }
     }
@@ -38,8 +38,7 @@ pub fn blur(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
 /// Vertical convolution, row by row so memory is read in order.
 fn convolve_rows(src: &[f32], dst: &mut [f32], w: usize, h: usize, k: &[f32]) {
     let r = (k.len() / 2) as isize;
-    for y in 0..h {
-        let out = &mut dst[y * w..(y + 1) * w];
+    dst.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
         out.iter_mut().for_each(|v| *v = 0.0);
         for (j, &kv) in k.iter().enumerate() {
             let sy = reflect(y as isize + j as isize - r, h as isize);
@@ -47,22 +46,51 @@ fn convolve_rows(src: &[f32], dst: &mut [f32], w: usize, h: usize, k: &[f32]) {
                 *o += kv * s;
             }
         }
-    }
+    });
 }
 
-/// Vertical box filter with a running row sum.
+/// Vertical box filter with a running row sum. The sum runs down the whole
+/// height, so work is split into bands of columns rather than rows; one band
+/// per thread, since narrow bands stride across memory.
 fn box_rows(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
-    let (n, r) = (h as isize, r as isize);
+    let band = w.div_ceil(rayon::current_num_threads()).max(64);
+    if band >= w {
+        box_band(src, dst, w, h, 0, w, r);
+        return;
+    }
+    let bands: Vec<Vec<f32>> = (0..w.div_ceil(band))
+        .into_par_iter()
+        .map(|b| {
+            let (c0, c1) = (b * band, ((b + 1) * band).min(w));
+            let mut out = vec![0.0f32; (c1 - c0) * h];
+            box_band(src, &mut out, w, h, c0, c1, r);
+            out
+        })
+        .collect();
+    dst.par_chunks_mut(w).enumerate().for_each(|(y, d)| {
+        for (b, out) in bands.iter().enumerate() {
+            let bw = out.len() / h;
+            d[b * band..b * band + bw].copy_from_slice(&out[y * bw..(y + 1) * bw]);
+        }
+    });
+}
+
+/// `box_rows` for columns `c0..c1`, written to `out` with row stride `c1 - c0`.
+fn box_band(src: &[f32], out: &mut [f32], w: usize, h: usize, c0: usize, c1: usize, r: usize) {
+    let (n, r, bw) = (h as isize, r as isize, c1 - c0);
     let norm = 1.0 / (2 * r + 1) as f64;
-    let row = |y: isize| &src[reflect(y, n) * w..(reflect(y, n) + 1) * w];
-    let mut acc = vec![0.0f64; w];
+    let row = |y: isize| {
+        let s = reflect(y, n) * w;
+        &src[s + c0..s + c1]
+    };
+    let mut acc = vec![0.0f64; bw];
     for y in -r..=r {
         for (a, &s) in acc.iter_mut().zip(row(y)) {
             *a += s as f64;
         }
     }
     for y in 0..n {
-        for (o, &a) in dst[y as usize * w..(y as usize + 1) * w].iter_mut().zip(&acc) {
+        for (o, &a) in out[y as usize * bw..(y as usize + 1) * bw].iter_mut().zip(&acc) {
             *o = (a * norm) as f32;
         }
         let (add, sub) = (row(y + r + 1), row(y - r));
@@ -126,10 +154,13 @@ fn box_line(line: &[f32], out: &mut [f32], r: usize) {
 pub fn gradient(f: &[f32], w: usize, h: usize, spacing: f32) -> (Vec<f32>, Vec<f32>) {
     let mut gy = vec![0.0f32; f.len()];
     let mut gx = vec![0.0f32; f.len()];
-    for y in 0..h {
+    if f.is_empty() {
+        return (gy, gx);
+    }
+    gy.par_chunks_mut(w).zip(gx.par_chunks_mut(w)).enumerate().for_each(|(y, (gy, gx))| {
         for x in 0..w {
             let i = y * w + x;
-            gx[i] = if w < 2 {
+            gx[x] = if w < 2 {
                 0.0
             } else if x == 0 {
                 f[i + 1] - f[i]
@@ -138,7 +169,7 @@ pub fn gradient(f: &[f32], w: usize, h: usize, spacing: f32) -> (Vec<f32>, Vec<f
             } else {
                 (f[i + 1] - f[i - 1]) * 0.5
             } / spacing;
-            gy[i] = if h < 2 {
+            gy[x] = if h < 2 {
                 0.0
             } else if y == 0 {
                 f[i + w] - f[i]
@@ -148,7 +179,7 @@ pub fn gradient(f: &[f32], w: usize, h: usize, spacing: f32) -> (Vec<f32>, Vec<f
                 (f[i + w] - f[i - w]) * 0.5
             } / spacing;
         }
-    }
+    });
     (gy, gx)
 }
 
@@ -157,27 +188,45 @@ pub fn gradient(f: &[f32], w: usize, h: usize, spacing: f32) -> (Vec<f32>, Vec<f
 /// (< 1/65536 of the value range) is far below anything visible.
 pub fn percentile_rank(v: &[f32], mask: &[bool]) -> Vec<f32> {
     const BINS: usize = 65536;
-    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-    let mut count = 0usize;
-    for (&x, &m) in v.iter().zip(mask) {
-        if m {
-            lo = lo.min(x);
-            hi = hi.max(x);
-            count += 1;
-        }
-    }
+    let (lo, hi, count) = v
+        .par_iter()
+        .zip(mask)
+        .filter(|(_, &m)| m)
+        .fold(
+            || (f32::INFINITY, f32::NEG_INFINITY, 0usize),
+            |(lo, hi, c), (&x, _)| (lo.min(x), hi.max(x), c + 1),
+        )
+        .reduce(
+            || (f32::INFINITY, f32::NEG_INFINITY, 0usize),
+            |a, b| (a.0.min(b.0), a.1.max(b.1), a.2 + b.2),
+        );
     let mut out = vec![0.0f32; v.len()];
     if count < 2 || hi <= lo {
         return out;
     }
     let scale = (BINS - 1) as f32 / (hi - lo);
     let bin = |x: f32| (((x - lo) * scale) as usize).min(BINS - 1);
-    let mut hist = vec![0u32; BINS];
-    for (&x, &m) in v.iter().zip(mask) {
-        if m {
-            hist[bin(x)] += 1;
-        }
-    }
+    let hist = v
+        .par_chunks(1 << 16)
+        .zip(mask.par_chunks(1 << 16))
+        .fold(
+            || vec![0u32; BINS],
+            |mut hist, (v, mask)| {
+                for (&x, &m) in v.iter().zip(mask) {
+                    if m {
+                        hist[bin(x)] += 1;
+                    }
+                }
+                hist
+            },
+        )
+        .reduce(
+            || vec![0u32; BINS],
+            |mut a, b| {
+                a.iter_mut().zip(&b).for_each(|(x, y)| *x += y);
+                a
+            },
+        );
     // Rank of a value = values in lower bins + half of its own bin.
     let mut below = vec![0.0f32; BINS];
     let mut acc = 0u64;
@@ -186,11 +235,11 @@ pub fn percentile_rank(v: &[f32], mask: &[bool]) -> Vec<f32> {
         acc += hist[b] as u64;
     }
     let denom = (count - 1) as f32;
-    for ((o, &x), &m) in out.iter_mut().zip(v).zip(mask) {
+    out.par_iter_mut().zip(v).zip(mask).for_each(|((o, &x), &m)| {
         if m {
             *o = below[bin(x)] / denom;
         }
-    }
+    });
     out
 }
 
