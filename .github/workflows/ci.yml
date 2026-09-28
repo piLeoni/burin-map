@@ -187,16 +187,16 @@ jobs:
 
           # The glue and the types: path-free, so this is a real comparison and
           # a mismatch means the committed package is stale — rerun
-          # web/build-wasm.sh.
+          # web/build-wasm.sh. (Two levels up: this runs inside crates/burin-map-wasm.)
           for f in burin_map_wasm.js burin_map_wasm.d.ts; do
-            diff /tmp/pkg/$f ../web/public/pkg/$f \
+            diff /tmp/pkg/$f ../../web/public/pkg/$f \
               || { echo "web/public/pkg/$f is stale: rerun web/build-wasm.sh"; exit 1; }
           done
 
           # A size change *is* meaningful: it means code was added, removed, or
           # the committed binary is from a different source revision.
           a=$(wc -c < /tmp/pkg/burin_map_wasm_bg.wasm)
-          b=$(wc -c < ../web/public/pkg/burin_map_wasm_bg.wasm)
+          b=$(wc -c < ../../web/public/pkg/burin_map_wasm_bg.wasm)
           echo "rebuilt: $a bytes, committed: $b bytes"
           if [ "$a" != "$b" ]; then
             # Not a hard failure on its own — a few bytes can shift between
