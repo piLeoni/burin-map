@@ -258,13 +258,27 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
   const firstEngine = useRef(true)
   useEffect(() => {
     if (firstEngine.current) {
+      // The atom now reads localStorage on init (getOnInit), so the engine is
+      // already correct on the first draw: nothing to do at mount.
       firstEngine.current = false
       return
     }
-    if (!readyRef.current || !mapRef.current || movingRef.current) return
+    if (!readyRef.current || !mapRef.current) return
+    // A move in progress only postpones the redraw; never drop the switch.
     onDrawing(null)
-    scheduleConvert(0)
+    scheduleConvert(movingRef.current ? 200 : 0)
   }, [engine, scheduleConvert, onDrawing])
+
+  // The engine buttons ask for a redraw when you click the one already active.
+  useEffect(() => {
+    const onRedraw = () => {
+      if (!readyRef.current || !mapRef.current) return
+      onDrawing(null)
+      scheduleConvert(movingRef.current ? 200 : 0)
+    }
+    window.addEventListener('burin:redraw', onRedraw)
+    return () => window.removeEventListener('burin:redraw', onRedraw)
+  }, [scheduleConvert, onDrawing])
 
   useEffect(() => {
     if (!cameraRequest || !readyRef.current) return

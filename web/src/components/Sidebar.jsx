@@ -278,7 +278,14 @@ export default function Sidebar({ open, onClose, status, drawing }) {
                   key={id}
                   type="button"
                   className={`btn btn-xs join-item h-5 min-h-0 px-1.5 font-mono text-[10px] uppercase ${engine === id ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25 bg-base-100'}`}
-                  onClick={() => setEngine(id)}
+                  onClick={() => {
+                    if (engine === id) {
+                      // Already selected: force a redraw with the current engine.
+                      window.dispatchEvent(new CustomEvent('burin:redraw'))
+                      return
+                    }
+                    setEngine(id)
+                  }}
                 >
                   {id}
                 </button>
