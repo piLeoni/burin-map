@@ -65,6 +65,9 @@ export const styleAtom = atom(
 /** The user's comments in the editor, by path (see lib/views.js). */
 export const notesAtom = atomWithStorage('burin-map.notes.v1', {})
 
+/** Where terrain fields are built: 'cpu', or 'gpu' (WebGPU; lines differ slightly). */
+export const engineAtom = atomWithStorage('burin-map.engine', 'cpu')
+
 /** Which way the editor writes the document: 'yaml', 'json5' or 'cli'. */
 export const viewKindAtom = atomWithStorage('burin-map.view', 'yaml')
 

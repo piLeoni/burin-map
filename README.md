@@ -526,3 +526,29 @@ extension, `cd node && npm run build` for the Node addon, and re-run
 ## Licence
 
 None chosen yet: all rights reserved for now.
+
+### GPU fields (experimental)
+
+Build the terrain fields (blurs, direction, shading, spacing) on the GPU
+instead of the CPU: wgpu on the desktop (Metal, Vulkan, DX12), WebGPU in the
+browser. Tracing stays on the CPU, since it is inherently sequential; on a
+big grid the fields are about 2.5× faster, which is 15–20% of the whole draw.
+
+```bash
+burin-map --tp san-francisco --gpu --out-file sf.svg
+```
+
+The math is the same, but the GPU works in f32 while the CPU path uses f64
+for the blurs, and no two float implementations round the same way. Those
+last-bit differences are what the tracer amplifies: the GPU drawing has the
+same terrain, the same lines per area and the same ink coverage, but every
+dash lands in a slightly different place. It is also not reproducible across
+GPU vendors. Anything that has to be reproducible — share links, the CLI
+default, the Python and Node packages — therefore stays on the CPU; the
+browser app has a CPU/GPU switch next to the counters, and the Node bindings
+expose `useGpu()`.
+
+Building it for the web needs WebGPU in the browser (Chrome and Safari 26 on
+recent releases, Firefox behind a flag). The WASM packages are built with it
+(`web/build-wasm.sh`), so `burin_map_wasm` also exports `initGpu()` and
+`draw_batches_gpu(...)`; when WebGPU is missing the app just draws on the CPU.

@@ -104,6 +104,16 @@ impl Map {
     }
 }
 
+#[cfg(feature = "gpu")]
+static GPU: std::sync::OnceLock<Option<burin_map_core::gpu::Gpu>> = std::sync::OnceLock::new();
+
+/// Build terrain fields on the GPU from now on (see `burin_map_core::gpu`).
+/// Returns the adapter name, or `None` when there is no usable GPU.
+#[cfg(feature = "gpu")]
+pub fn use_gpu() -> Option<&'static str> {
+    GPU.get_or_init(burin_map_core::gpu::Gpu::new_blocking).as_ref().map(|g| g.name.as_str())
+}
+
 /// Download SRTM elevation for `bounds` and draw it with a single batch.
 pub fn draw(
     bounds: &Bounds,
@@ -145,6 +155,15 @@ pub fn draw_batches(
     }
 
     let t = Instant::now();
+    #[cfg(feature = "gpu")]
+    let drawing = match GPU.get().and_then(Option::as_ref) {
+        Some(g) => {
+            let f = g.build_fields_blocking(&dem.elev, w, h, dem.px_m as f32, style);
+            burin_map_core::draw_fields(&f, batches)
+        }
+        None => burin_map_core::draw_batches(&dem.elev, w, h, dem.px_m as f32, batches),
+    };
+    #[cfg(not(feature = "gpu"))]
     let drawing = burin_map_core::draw_batches(&dem.elev, w, h, dem.px_m as f32, batches);
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });

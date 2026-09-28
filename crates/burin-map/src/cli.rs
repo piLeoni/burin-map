@@ -29,6 +29,7 @@ const PLACES: &[(&str, Bounds)] = &[
 /// Values taken by a terrain / frame / out flag.
 #[derive(Clone, Copy)]
 enum Takes {
+    Zero,
     One,
     Four,
     OneOrTwo,
@@ -49,6 +50,7 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("out-geojson", "", Takes::One),
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
+    ("gpu", "", Takes::Zero),
 ];
 
 fn short_of(long: &str) -> &'static str {
@@ -57,7 +59,13 @@ fn short_of(long: &str) -> &'static str {
 
 pub fn command() -> Command {
     let defaults = Style::default();
-    let global = |long: &'static str| Arg::new(long).long(long).visible_alias(short_of(long));
+    let global = |long: &'static str| {
+        let arg = Arg::new(long).long(long);
+        match short_of(long) {
+            "" => arg,
+            short => arg.visible_alias(short),
+        }
+    };
     let mut cmd = Command::new("burin-map")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Pen-and-ink terrain map from SRTM elevation data.")
@@ -96,6 +104,9 @@ pub fn command() -> Command {
             .help("png, svg, both, or geojson; default from the --out-file extension"))
         .arg(global("out-geojson").value_name("PATH").value_parser(value_parser!(PathBuf))
             .help("write a GeoJSON FeatureCollection with geographic coordinates"))
+        .arg(global("gpu").action(ArgAction::SetTrue)
+            .help("build the terrain fields on the GPU (experimental: faster, but lines come out \
+                   slightly different from the CPU path and between GPUs)"))
         .next_help_heading("Batch — parallel drawing passes")
         .arg(Arg::new("batch").long("batch").short('b').action(ArgAction::Append).num_args(0)
             .help("start a pass (may repeat). Flags after each --batch apply to that pass until the \
@@ -402,6 +413,15 @@ where
     };
 
     let r = Report::new();
+    if m.get_flag("gpu") {
+        #[cfg(feature = "gpu")]
+        match crate::use_gpu() {
+            Some(name) => r.detail(&format!("terrain fields on the GPU: {name}")),
+            None => r.detail("no usable GPU, terrain fields on the CPU"),
+        }
+        #[cfg(not(feature = "gpu"))]
+        r.detail("built without the gpu feature, terrain fields on the CPU");
+    }
     if m.get_one::<String>("terrain-at").is_some() || doc.area.as_ref().is_some_and(|a| a.at.is_some()) {
         r.transient("where", "looking up the place");
     }
@@ -534,6 +554,7 @@ fn global_value_count(flag: &str, rest: &[OsString]) -> Option<usize> {
     let name = flag.strip_prefix("--")?;
     let takes = GLOBAL.iter().find(|g| g.0 == name || g.1 == name)?.2;
     Some(match takes {
+        Takes::Zero => 0,
         Takes::One => 1,
         Takes::Four => 4,
         Takes::OneOrTwo => {

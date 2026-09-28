@@ -11,6 +11,8 @@
 mod dashes;
 mod fields;
 pub mod geojson;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 mod grid;
 mod order;
 mod rng;
@@ -66,9 +68,16 @@ pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batche
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
 
-    let base = &batches[0].style;
-    let f = build_fields(elev, width, height, px_m, base);
-    let base_space = base.space;
+    let f = build_fields(elev, width, height, px_m, &batches[0].style);
+    draw_fields(&f, batches)
+}
+
+/// `draw_batches` from fields already built (e.g. by `gpu::Gpu`) with the
+/// first batch's style.
+pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
+    assert!(!batches.is_empty(), "need at least one batch");
+    let (width, height) = (f.w, f.h);
+    let base_space = batches[0].style.space;
 
     let parts: Vec<(Vec<Line>, Vec<Line>)> = {
         use rayon::prelude::*;
@@ -78,7 +87,7 @@ pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batche
             .map(|(i, b)| {
                 let mut st = b.style.clone();
                 st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
-                let bf = batch_fields(&f, b, base_space);
+                let bf = batch_fields(f, b, base_space);
                 let lines = plot_order(trace_streamlines(&bf, &st));
                 let paths = dash_lines(&lines, &f.input, width, height, &st);
                 (lines, paths)
@@ -181,6 +190,43 @@ mod tests {
             .collect();
         mid.sort_by(|a, b| a.total_cmp(b));
         assert!((mid[mid.len() / 2] - Style::default().input_flat).abs() < 0.02);
+    }
+
+    /// The GPU path lands on the same terrain: every field within a small
+    /// tolerance, and a drawing of the same shape (the tracer turns last-bit
+    /// differences into different dashes, so only statistics can be compared).
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn gpu_matches_cpu_terrain() {
+        let g = match gpu::Gpu::new_blocking() {
+            Some(g) => g,
+            None => return,
+        };
+        let (w, h) = (400, 300);
+        let e = island(w, h);
+        let st = Style::default();
+        let cpu = build_fields(&e, w, h, 200.0, &st);
+        let gpu = g.build_fields_blocking(&e, w, h, 200.0, &st);
+        for (name, a, b, tol) in [
+            ("tx", &cpu.tx, &gpu.tx, 5e-3),
+            ("ty", &cpu.ty, &gpu.ty, 5e-3),
+            ("input", &cpu.input, &gpu.input, 1e-3),
+            ("space", &cpu.space, &gpu.space, 1e-3),
+        ] {
+            // Direction is only defined on walkable ground; on sea both paths
+            // may leave any unit vector behind.
+            let worst = (0..a.len())
+                .filter(|&i| name == "input" || name == "space" || cpu.walkable[i])
+                .map(|i| (a[i] - b[i]).abs())
+                .fold(0.0, f32::max);
+            assert!(worst < tol, "{name}: worst difference {worst}");
+        }
+        assert_eq!(cpu.walkable, gpu.walkable, "walkable");
+
+        let dc = draw_fields(&cpu, &[Batch::along(st.clone())]);
+        let dg = draw_fields(&gpu, &[Batch::along(st)]);
+        let ratio = dg.lines.len() as f32 / dc.lines.len() as f32;
+        assert!((0.8..1.25).contains(&ratio), "lines {} vs {}", dc.lines.len(), dg.lines.len());
     }
 
     #[test]

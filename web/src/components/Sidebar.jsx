@@ -6,7 +6,7 @@ import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import { VIEWS, detectView, parseView, renderView } from '../lib/views'
 import {
-  BATCHES_V1_KEY, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom,
+  BATCHES_V1_KEY, cameraRequestAtom, engineAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom,
 } from '../state'
 
 const PHASE_LABEL = {
@@ -71,6 +71,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const [kind, setKind] = useAtom(viewKindAtom)
   const [mapView] = useAtom(mapViewAtom)
   const [frame, setFrame] = useAtom(frameAtom)
+  const [engine, setEngine] = useAtom(engineAtom)
   const setCameraRequest = useSetAtom(cameraRequestAtom)
   const [draft, setDraft] = useState(null)   // text typed but not applied yet
   const [error, setError] = useState('')
@@ -268,8 +269,21 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               {drawing
                 ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
                   + (drawing.threads > 1 ? ` · ${drawing.threads} threads` : '')
+                  + (drawing.gpu === false ? ' · no WebGPU' : '')
                 : '-'}
             </span>
+            <div className="join shrink-0" title="Build the terrain fields on the CPU or on the GPU (WebGPU). The GPU is faster; its lines come out slightly different.">
+              {['cpu', 'gpu'].map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`btn btn-xs join-item h-5 min-h-0 px-1.5 font-mono text-[10px] uppercase ${engine === id ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25 bg-base-100'}`}
+                  onClick={() => setEngine(id)}
+                >
+                  {id}
+                </button>
+              ))}
+            </div>
             <span className={`ml-auto truncate tracking-wider uppercase ${status.phase === 'error' ? 'text-error' : 'opacity-40'}`}>
               {status.detail || PHASE_LABEL[status.phase] || status.phase}
             </span>

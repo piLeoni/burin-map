@@ -2,12 +2,14 @@
  * Draws off the main thread. On a cross-origin isolated page it loads the
  * threaded engine (public/pkg-mt) and starts a rayon pool of Web Workers;
  * anywhere else, or if that fails, the single-threaded one (public/pkg).
+ * With `gpu` set, terrain fields are built on WebGPU when the browser has it.
  */
 
 // Function so Vite does not rewrite imports of files in /public (as in burin.js).
 const importPkg = new Function('url', 'return import(url)')
 
 let engine = null
+let gpu = null
 
 function load() {
   engine ??= (async () => {
@@ -29,12 +31,32 @@ function load() {
   return engine
 }
 
+/** Adapter description, or null without WebGPU. */
+function loadGpu(m) {
+  gpu ??= (async () => {
+    if (!navigator.gpu || !m.initGpu) return null
+    try {
+      return (await m.initGpu()) ?? null
+    } catch (e) {
+      console.warn('burin-map: WebGPU unavailable, drawing on the CPU', e)
+      return null
+    }
+  })()
+  return gpu
+}
+
 self.onmessage = async ({ data }) => {
   const { id, elev, width, height, pxM, json, geo, mmPerPx } = data
   try {
     const { m, threads } = await load()
-    const d = m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
-    const result = { svg: d.svg, geojson: d.geojson, lines: d.lines, dashes: d.dashes, ms: d.ms, threads }
+    const adapter = data.gpu ? await loadGpu(m) : null
+    const d = adapter != null
+      ? await m.draw_batches_gpu(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
+      : m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
+    const result = {
+      svg: d.svg, geojson: d.geojson, lines: d.lines, dashes: d.dashes, ms: d.ms, threads,
+      gpu: data.gpu ? (adapter ?? false) : null,
+    }
     d.free()
     self.postMessage({ id, ok: true, result })
   } catch (e) {

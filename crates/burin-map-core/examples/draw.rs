@@ -22,7 +22,24 @@ fn main() {
     let elev: Vec<f32> = raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     let st = Style::default();
 
+    #[cfg(feature = "gpu")]
+    let gpu = std::env::var("BURIN_GPU").is_ok().then(|| {
+        let t = Instant::now();
+        let g = burin_map_core::gpu::Gpu::new_blocking().expect("no GPU adapter");
+        println!("gpu init    {:7.0} ms  ({})", t.elapsed().as_secs_f64() * 1000.0, g.name);
+        let t = Instant::now();
+        g.build_fields_blocking(&elev, w, h, px_m, &st);
+        println!("gpu warm-up {:7.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        g
+    });
+
     let t0 = Instant::now();
+    #[cfg(feature = "gpu")]
+    let f = match &gpu {
+        Some(g) => g.build_fields_blocking(&elev, w, h, px_m, &st),
+        None => build_fields(&elev, w, h, px_m, &st),
+    };
+    #[cfg(not(feature = "gpu"))]
     let f = build_fields(&elev, w, h, px_m, &st);
     let t1 = Instant::now();
     if let Ok(dir) = std::env::var("BURIN_DUMP") {

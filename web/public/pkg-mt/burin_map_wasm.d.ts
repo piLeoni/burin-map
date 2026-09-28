@@ -55,6 +55,18 @@ export function draw(elev: Float32Array, width: number, height: number, px_m: nu
  */
 export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px?: number | null): Drawing;
 
+/**
+ * [`draw_batches`] with the terrain fields built on the GPU (call
+ * [`init_gpu`] first). Lines come out slightly different from the CPU path.
+ */
+export function draw_batches_gpu(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px?: number | null): Promise<Drawing>;
+
+/**
+ * `initGpu()`: set up WebGPU for [`draw_batches_gpu`]. Resolves to the
+ * adapter description, or `undefined` when WebGPU isn't available.
+ */
+export function initGpu(): Promise<string | undefined>;
+
 export function initThreadPool(num_threads: number): Promise<any>;
 
 /**
@@ -86,6 +98,7 @@ export interface InitOutput {
     readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
     readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
     readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => [number, number, number];
+    readonly draw_batches_gpu: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => any;
     readonly drawing_dashes: (a: number) => number;
     readonly drawing_deg_per_px_lat: (a: number) => number;
     readonly drawing_deg_per_px_lon: (a: number) => number;
@@ -99,6 +112,7 @@ export interface InitOutput {
     readonly drawing_paths: (a: number) => any;
     readonly drawing_svg: (a: number) => [number, number];
     readonly drawing_width: (a: number) => number;
+    readonly initGpu: () => any;
     readonly initThreadPool: (a: number) => any;
     readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
@@ -107,13 +121,21 @@ export interface InitOutput {
     readonly wbg_rayon_poolbuilder_numThreads: (a: number) => number;
     readonly wbg_rayon_poolbuilder_receiver: (a: number) => number;
     readonly wbg_rayon_start_worker: (a: number) => void;
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue__core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__30: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__31: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___futures__task__wait_async_polyfill__MessageEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue______true_: (a: number, b: number, c: any) => void;
     readonly memory: WebAssembly.Memory;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
     readonly __wbindgen_start: (a: number) => void;

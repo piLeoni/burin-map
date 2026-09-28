@@ -40,10 +40,19 @@ export declare function projectedSize(west: number, south: number, east: number,
 /** Run the `burin-map` CLI (`argv[0]` is the program name). */
 export declare function runCli(argv: Array<string>): void
 
+/** Deserialise batches from a JSON string with the same schema as --style-json. */
+export declare function styleFromJson(json: string): string
+
 /** `(id, blurb)` for each style group. */
 export declare function styleGroups(): Array<[string, string]>
 
 /** `(name, default, help, group)` for every style parameter. */
 export declare function styleParams(): Array<[string, number, string, string]>
+
+/**
+ * Build terrain fields on the GPU from now on (see `burin_map::use_gpu`).
+ * Returns the adapter name, or null when there is no usable GPU.
+ */
+export declare function useGpu(): string | null
 
 export declare function version(): string

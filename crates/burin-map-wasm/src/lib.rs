@@ -250,19 +250,72 @@ pub fn draw_batches(
             h
         )));
     }
+    let batches = parse_batches(json)?;
+    let t0 = now_ms();
+    let d = burin_map_core::draw_batches(elev, w, h, px_m, &batches);
+    Ok(finish(d, &batches, now_ms() - t0, geo, mm_per_px))
+}
+
+fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
     let batches: Vec<Batch> = serde_json::from_str(json)
         .map_err(|e| JsValue::from_str(&format!("invalid batch JSON: {e}")))?;
     if batches.is_empty() {
         return Err(JsValue::from_str("batch list is empty"));
     }
+    Ok(batches)
+}
+
+#[cfg(feature = "gpu")]
+thread_local! {
+    static GPU: std::cell::RefCell<Option<std::rc::Rc<burin_map_core::gpu::Gpu>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `initGpu()`: set up WebGPU for [`draw_batches_gpu`]. Resolves to the
+/// adapter description, or `undefined` when WebGPU isn't available.
+#[cfg(feature = "gpu")]
+#[wasm_bindgen(js_name = initGpu)]
+pub async fn init_gpu() -> Option<String> {
+    if let Some(g) = GPU.with(|g| g.borrow().clone()) {
+        return Some(g.name.clone());
+    }
+    let g = burin_map_core::gpu::Gpu::new().await?;
+    let name = g.name.clone();
+    GPU.with(|slot| *slot.borrow_mut() = Some(std::rc::Rc::new(g)));
+    Some(name)
+}
+
+/// [`draw_batches`] with the terrain fields built on the GPU (call
+/// [`init_gpu`] first). Lines come out slightly different from the CPU path.
+#[cfg(feature = "gpu")]
+#[wasm_bindgen]
+pub async fn draw_batches_gpu(
+    elev: Vec<f32>,
+    width: u32,
+    height: u32,
+    px_m: f32,
+    json: String,
+    geo: JsValue,
+    mm_per_px: Option<f32>,
+) -> Result<Drawing, JsValue> {
+    let (w, h) = (width as usize, height as usize);
+    if elev.len() != w * h {
+        return Err(JsValue::from_str(&format!("elevation length {} ≠ {}×{}", elev.len(), w, h)));
+    }
+    let batches = parse_batches(&json)?;
+    let gpu = GPU.with(|g| g.borrow().clone()).ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
     let t0 = now_ms();
-    let d = burin_map_core::draw_batches(elev, w, h, px_m, &batches);
-    let ms = now_ms() - t0;
+    let f = gpu.build_fields(&elev, w, h, px_m, &batches[0].style).await;
+    let d = burin_map_core::draw_fields(&f, &batches);
+    Ok(finish(d, &batches, now_ms() - t0, &geo, mm_per_px))
+}
+
+fn finish(d: burin_map_core::Drawing, batches: &[Batch], ms: f64, geo: &JsValue, mm_per_px: Option<f32>) -> Drawing {
+    let (width, height) = (d.width as u32, d.height as u32);
     let (pts, ends) = pack(&d.paths);
     let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);
     let svg = d.to_svg(stroke, mm_per_px);
     let geo = read_geo(geo);
-    Ok(Drawing {
+    Drawing {
         width,
         height,
         paths: Float32Array::from(pts.as_slice()),
@@ -275,5 +328,5 @@ pub fn draw_batches(
         nw_lat: geo.nw_lat,
         deg_per_px_lon: geo.deg_per_px_lon,
         deg_per_px_lat: geo.deg_per_px_lat,
-    })
+    }
 }

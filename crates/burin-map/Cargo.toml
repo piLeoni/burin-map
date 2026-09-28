@@ -9,6 +9,11 @@ publish = false
 name = "burin-map"
 path = "src/main.rs"
 
+[features]
+default = ["gpu"]
+# --gpu: terrain fields on the GPU (wgpu).
+gpu = ["burin-map-core/gpu"]
+
 [dependencies]
 anstream = "0.6"
 anstyle = "1"

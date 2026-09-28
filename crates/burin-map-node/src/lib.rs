@@ -197,6 +197,14 @@ pub fn draw_elevation(
     })
 }
 
+/// Build terrain fields on the GPU from now on (see `burin_map::use_gpu`).
+/// Returns the adapter name, or null when there is no usable GPU.
+#[cfg(feature = "gpu")]
+#[napi]
+pub fn use_gpu() -> Option<String> {
+    burin_map::use_gpu().map(str::to_string)
+}
+
 /// Run the `burin-map` CLI (`argv[0]` is the program name).
 #[napi]
 pub fn run_cli(argv: Vec<String>) -> Result<()> {

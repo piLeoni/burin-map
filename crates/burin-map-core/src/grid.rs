@@ -100,7 +100,7 @@ fn box_band(src: &[f32], out: &mut [f32], w: usize, h: usize, c0: usize, c1: usi
     }
 }
 
-fn gaussian_kernel(sigma: f32) -> Vec<f32> {
+pub(crate) fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     let r = (4.0 * sigma + 0.5) as isize;
     let mut k: Vec<f32> = (-r..=r)
         .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
@@ -111,7 +111,7 @@ fn gaussian_kernel(sigma: f32) -> Vec<f32> {
 }
 
 /// Radii of `n` box filters whose succession approximates a gaussian of `sigma`.
-fn box_radii(sigma: f32, n: usize) -> Vec<usize> {
+pub(crate) fn box_radii(sigma: f32, n: usize) -> Vec<usize> {
     let s2 = (sigma * sigma) as f64;
     let nf = n as f64;
     let w_ideal = (12.0 * s2 / nf + 1.0).sqrt();

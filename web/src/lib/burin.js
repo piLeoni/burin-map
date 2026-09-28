@@ -87,9 +87,11 @@ function drawWorker() {
  * @param {Array<{angle:number,style:Record<string,number>}>} batches
  * @param {{ nw_lon: number, nw_lat: number, deg_per_px_lon: number, deg_per_px_lat: number }} [geo]
  * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
- * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number }>}
+ * @param {{ gpu?: boolean }} [opts] gpu: terrain fields on WebGPU, when available
+ * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number,
+ *   gpu: string | false | null }>} gpu: adapter used, false if asked for but unavailable, null if not asked
  */
-export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx) {
+export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opts) {
   const list = Array.isArray(batches) ? batches : []
   const json = JSON.stringify(list.map((b) => ({
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
@@ -102,6 +104,7 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx) {
   const id = ++nextId
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
-    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx }, [elev.buffer])
+    const gpu = !!opts?.gpu
+    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu }, [elev.buffer])
   })
 }

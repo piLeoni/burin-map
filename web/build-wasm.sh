@@ -3,12 +3,13 @@
 #   pkg/     single-threaded, stable Rust; works on any page
 #   pkg-mt/  rayon threads (wasm-bindgen-rayon); needs a cross-origin isolated
 #            page (COOP/COEP headers) and a nightly toolchain for build-std
+# Both include draw_batches_gpu (terrain fields on WebGPU).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NIGHTLY="${BURIN_NIGHTLY:-nightly-2026-04-14}"
 cd "$ROOT/crates/burin-map-wasm"
 
-wasm-pack build --target web --release --out-dir ../../web/pkg
+wasm-pack build --target web --release --out-dir ../../web/pkg -- --features gpu
 rm -rf ../../web/public/pkg
 cp -R ../../web/pkg ../../web/public/pkg
 printf '' > ../../web/public/pkg/.gitignore
@@ -25,5 +26,5 @@ RUSTFLAGS="-C target-feature=+atomics,+bulk-memory \
   -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size \
   -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base" \
   rustup run "$NIGHTLY" wasm-pack build --target web --release --out-dir ../../web/public/pkg-mt \
-  -- --features threads -Z build-std=panic_abort,std
+  -- --features threads,gpu -Z build-std=panic_abort,std
 printf '' > ../../web/public/pkg-mt/.gitignore
