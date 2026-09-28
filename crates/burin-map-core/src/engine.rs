@@ -23,13 +23,33 @@ use std::sync::OnceLock;
 
 use crate::gpu::Gpu;
 
+/// Set only by [`force_cpu`], and only meaningful before [`device`] first runs.
 static FORCE_CPU: OnceLock<bool> = OnceLock::new();
 /// Resolved adapter, or `None` when the machine has none. Cached either way.
 static DEVICE: OnceLock<Option<Gpu>> = OnceLock::new();
 
-/// Never build fields on the GPU. Call before the first draw; ignored
-/// afterwards, since the choice is cached on first use.
+/// Never build fields on the GPU.
+///
+/// Must be called before the first draw; once [`device`] has resolved, the
+/// choice is cached and this cannot take it back. Calling it that late is a
+/// bug, so it says so rather than quietly doing nothing — silently ignoring
+/// "use the CPU" would hand back a drawing that is not the reproducible one
+/// the caller asked for.
+///
+/// Asking for the CPU when it is already the CPU is not a contradiction, only
+/// a repetition, so `BURIN_ENGINE=cpu` followed by this call is fine.
+///
+/// # Panics
+/// If the device has already resolved to a GPU.
 pub fn force_cpu() {
+    if let Some(Some(_)) = DEVICE.get() {
+        panic!(
+            "force_cpu() was called after the first draw, when a GPU is already \
+             resolved and cached. Call it first — at the top of main(), before any \
+             draw — or use `BURIN_ENGINE=cpu`, which is read before the first draw \
+             and cannot arrive too late."
+        );
+    }
     let _ = FORCE_CPU.set(true);
 }
 

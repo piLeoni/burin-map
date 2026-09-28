@@ -32,6 +32,15 @@ export declare function draw(west: number, south: number, east: number, north: n
 /** Draw any elevation grid (metres, row 0 = north). Values ≤ 0.5 m are sea. */
 export declare function drawElevation(elev: Float32Array, width: number, height: number, pxM: number, style?: object | undefined | null): Drawing
 
+/** Where the fields are built: "GPU: Apple M4 (Metal)", "CPU (forced)", … */
+export declare function engine(): string
+
+/**
+ * Never build the fields on the GPU: reproducible output, for tests and
+ * golden files.
+ */
+export declare function forceCpu(): void
+
 /** `(lat, lon, label)` for coordinates or a place name (Nominatim). */
 export declare function locate(query: string): [number, number, string]
 
@@ -48,11 +57,5 @@ export declare function styleGroups(): Array<[string, string]>
 
 /** `(name, default, help, group)` for every style parameter. */
 export declare function styleParams(): Array<[string, number, string, string]>
-
-/** Never build the fields on the GPU: reproducible output, for tests. */
-export declare function forceCpu(): void
-
-/** Where the fields are built: "GPU: Apple M4 (Metal)", "CPU (forced)", … */
-export declare function engine(): string
 
 export declare function version(): string
