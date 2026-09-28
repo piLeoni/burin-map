@@ -82,7 +82,10 @@ macro_rules! style {
 impl Style {
     /// Full name for a full or short parameter name.
     pub fn full_name(name: &str) -> Option<&'static str> {
-        Self::PARAMS.iter().find(|p| p.name == name || p.short == name).map(|p| p.name)
+        Self::PARAMS
+            .iter()
+            .find(|p| p.name == name || p.short == name)
+            .map(|p| p.name)
     }
 }
 
@@ -143,7 +146,11 @@ pub struct Batch {
 
 impl Batch {
     pub fn along(style: Style) -> Self {
-        Batch { name: None, angle: 0.0, style }
+        Batch {
+            name: None,
+            angle: 0.0,
+            style,
+        }
     }
 }
 
@@ -167,7 +174,10 @@ mod tests {
 
     #[test]
     fn short_names_are_unique() {
-        let mut all: Vec<&str> = Style::PARAMS.iter().flat_map(|p| [p.name, p.short]).collect();
+        let mut all: Vec<&str> = Style::PARAMS
+            .iter()
+            .flat_map(|p| [p.name, p.short])
+            .collect();
         let n = all.len();
         all.sort();
         all.dedup();
@@ -208,7 +218,11 @@ mod json_tests {
             Batch {
                 name: Some("Valleys".into()),
                 angle: 90.0,
-                style: Style { space: 6.0, batch_floor: 0.4, ..Style::default() },
+                style: Style {
+                    space: 6.0,
+                    batch_floor: 0.4,
+                    ..Style::default()
+                },
             },
         ];
         let json = to_json_batches(&batches);

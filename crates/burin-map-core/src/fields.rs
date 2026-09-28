@@ -23,7 +23,14 @@ pub struct Fields {
 /// Lambert shading relative to flat ground: 0 flat, +1 deep shadow, -1 fully
 /// lit. Scaled by the 98th percentile over land so it doesn't depend on how
 /// rugged the area is. `elev_px` is height in pixel units, so slopes are true.
-fn relative_shade(elev_px: &[f32], w: usize, h: usize, sigma: f32, land: &[bool], st: &Style) -> Vec<f32> {
+fn relative_shade(
+    elev_px: &[f32],
+    w: usize,
+    h: usize,
+    sigma: f32,
+    land: &[bool],
+    st: &Style,
+) -> Vec<f32> {
     let surf = blur(elev_px, w, h, sigma);
     let (sy, sx) = gradient(&surf, w, h, 1.0);
     let (alt, az) = (st.sun_altitude.to_radians(), st.sun_azimuth.to_radians());
@@ -37,9 +44,16 @@ fn relative_shade(elev_px: &[f32], w: usize, h: usize, sigma: f32, land: &[bool]
             lz - (nx * lx + ny * ly + lz) / (nx * nx + ny * ny + 1.0).sqrt()
         })
         .collect();
-    let on_land: Vec<f32> = rel.iter().zip(land).filter(|(_, &l)| l).map(|(r, _)| r.abs()).collect();
+    let on_land: Vec<f32> = rel
+        .iter()
+        .zip(land)
+        .filter(|(_, &l)| l)
+        .map(|(r, _)| r.abs())
+        .collect();
     let scale = percentile(on_land, 98.0).max(1e-9);
-    rel.par_iter().map(|r| (r / scale).clamp(-1.0, 1.0)).collect()
+    rel.par_iter()
+        .map(|r| (r / scale).clamp(-1.0, 1.0))
+        .collect()
 }
 
 pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> Fields {
@@ -52,12 +66,15 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
     let mag: Vec<f32> = gx.par_iter().zip(&gy).map(|(a, b)| a.hypot(*b)).collect();
     let mut tx = vec![0.0f32; n];
     let mut ty = vec![0.0f32; n];
-    tx.par_iter_mut().zip(&mut ty).enumerate().for_each(|(i, (tx, ty))| {
-        if mag[i] > 1e-9 {
-            *tx = -gy[i] / mag[i];
-            *ty = gx[i] / mag[i];
-        }
-    });
+    tx.par_iter_mut()
+        .zip(&mut ty)
+        .enumerate()
+        .for_each(|(i, (tx, ty))| {
+            if mag[i] > 1e-9 {
+                *tx = -gy[i] / mag[i];
+                *ty = gx[i] / mag[i];
+            }
+        });
     let steep = percentile_rank(&mag, &land);
 
     // On near-flat ground a smooth random rotation, fading to none on slopes,
@@ -67,16 +84,23 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
         Rng::new(st.batch_seed).fill_normal(&mut noise);
         let noise = blur(&noise, w, h, st.mod_wobble_size);
         let mean = noise.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
-        let var = noise.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n as f64;
+        let var = noise
+            .iter()
+            .map(|&v| (v as f64 - mean).powi(2))
+            .sum::<f64>()
+            / n as f64;
         let inv_std = 1.0 / (var.sqrt() as f32).max(1e-12);
         let amp = st.mod_wobble.to_radians();
-        tx.par_iter_mut().zip(&mut ty).enumerate().for_each(|(i, (tx, ty))| {
-            let a = amp * noise[i] * inv_std * (1.0 - steep[i]).powi(2);
-            let (sa, ca) = a.sin_cos();
-            let (u, v) = (*tx, *ty);
-            *tx = u * ca - v * sa;
-            *ty = u * sa + v * ca;
-        });
+        tx.par_iter_mut()
+            .zip(&mut ty)
+            .enumerate()
+            .for_each(|(i, (tx, ty))| {
+                let a = amp * noise[i] * inv_std * (1.0 - steep[i]).powi(2);
+                let (sa, ca) = a.sin_cos();
+                let (u, v) = (*tx, *ty);
+                *tx = u * ca - v * sa;
+                *ty = u * sa + v * ca;
+            });
     }
 
     // Shading at two scales: detail keeps ridges readable up close, the
@@ -92,32 +116,53 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
 
     // Flat ground at input_flat; dark raises it towards solid, light lowers
     // it towards input_light_floor. Space lerps space_light → space_dark by input.
-    let coast = blur(&land.par_iter().map(|&l| l as u8 as f32).collect::<Vec<_>>(), w, h, 2.0);
+    let coast = blur(
+        &land.par_iter().map(|&l| l as u8 as f32).collect::<Vec<_>>(),
+        w,
+        h,
+        2.0,
+    );
     let mut input = vec![0.0f32; n];
     let mut loosen = vec![0.0f32; n];
-    input.par_iter_mut().zip(&mut loosen).enumerate().for_each(|(i, (input, loosen))| {
-        let si = (s[i] * st.input_gain).clamp(-1.0, 1.0);
-        let shadow = si.clamp(0.0, 1.0).powf(st.input_dark_gamma);
-        let light = (-si * st.input_light_gain).clamp(0.0, 1.0);
-        let t = if si >= 0.0 {
-            st.input_flat + (1.0 - st.input_flat) * shadow
-        } else {
-            st.input_light_floor + (st.input_flat - st.input_light_floor) * (1.0 - light)
-        };
-        let t = t * (coast[i] * 1.4 - 0.2).clamp(0.0, 1.0);
-        *input = t;
-        // space_steep: 0 = off, 1 = max densification on steep ground
-        let steep_k = 1.0 - st.space_steep.clamp(0.0, 1.0) * steep[i].powf(st.space_steep_gamma);
-        let shade_k = st.space_light + (st.space_dark - st.space_light) * t;
-        *loosen = (steep_k * shade_k).clamp(0.05, 4.0);
-    });
+    input
+        .par_iter_mut()
+        .zip(&mut loosen)
+        .enumerate()
+        .for_each(|(i, (input, loosen))| {
+            let si = (s[i] * st.input_gain).clamp(-1.0, 1.0);
+            let shadow = si.clamp(0.0, 1.0).powf(st.input_dark_gamma);
+            let light = (-si * st.input_light_gain).clamp(0.0, 1.0);
+            let t = if si >= 0.0 {
+                st.input_flat + (1.0 - st.input_flat) * shadow
+            } else {
+                st.input_light_floor + (st.input_flat - st.input_light_floor) * (1.0 - light)
+            };
+            let t = t * (coast[i] * 1.4 - 0.2).clamp(0.0, 1.0);
+            *input = t;
+            // space_steep: 0 = off, 1 = max densification on steep ground
+            let steep_k =
+                1.0 - st.space_steep.clamp(0.0, 1.0) * steep[i].powf(st.space_steep_gamma);
+            let shade_k = st.space_light + (st.space_dark - st.space_light) * t;
+            *loosen = (steep_k * shade_k).clamp(0.05, 4.0);
+        });
     let space: Vec<f32> = blur(&loosen, w, h, 3.0)
         .par_iter()
         .map(|k| st.space * k.clamp(0.05, 4.0))
         .collect();
-    let walkable: Vec<bool> = (0..n).into_par_iter().map(|i| land[i] && mag[i] > 1e-7).collect();
+    let walkable: Vec<bool> = (0..n)
+        .into_par_iter()
+        .map(|i| land[i] && mag[i] > 1e-7)
+        .collect();
 
-    Fields { w, h, tx, ty, input, walkable, space }
+    Fields {
+        w,
+        h,
+        tx,
+        ty,
+        input,
+        walkable,
+        space,
+    }
 }
 
 /// Fields for one batch: rotate the contour direction by `batch.angle` degrees,

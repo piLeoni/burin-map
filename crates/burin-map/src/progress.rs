@@ -15,7 +15,12 @@ pub enum TileSource {
 #[derive(Clone, Debug)]
 pub enum Progress<'a> {
     /// One elevation tile ready; `done` of `total`.
-    Tile { name: &'a str, source: TileSource, done: usize, total: usize },
+    Tile {
+        name: &'a str,
+        source: TileSource,
+        done: usize,
+        total: usize,
+    },
     /// Elevation mosaicked and reprojected onto the output grid.
     Elevation {
         tiles: usize,
@@ -29,11 +34,25 @@ pub enum Progress<'a> {
         secs: f64,
     },
     /// Frame with a physical size.
-    Frame { width_mm: f64, height_mm: f64, scale: f64, pen_width: f64, pitch_mm: f64 },
+    Frame {
+        width_mm: f64,
+        height_mm: f64,
+        scale: f64,
+        pen_width: f64,
+        pitch_mm: f64,
+    },
     /// Shading, slope and line directions computed.
-    Relief { secs: f64 },
-    Lines { count: usize, secs: f64 },
-    Dashes { count: usize, secs: f64 },
+    Relief {
+        secs: f64,
+    },
+    Lines {
+        count: usize,
+        secs: f64,
+    },
+    Dashes {
+        count: usize,
+        secs: f64,
+    },
 }
 
 /// "1,234,567".
@@ -41,7 +60,7 @@ pub fn thousands(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -62,8 +81,13 @@ pub fn megabytes(bytes: u64) -> String {
 
 /// "46.95°N 7.45°E".
 pub fn latlon(lat: f64, lon: f64) -> String {
-    format!("{:.2}°{} {:.2}°{}", lat.abs(), if lat >= 0.0 { 'N' } else { 'S' },
-            lon.abs(), if lon >= 0.0 { 'E' } else { 'W' })
+    format!(
+        "{:.2}°{} {:.2}°{}",
+        lat.abs(),
+        if lat >= 0.0 { 'N' } else { 'S' },
+        lon.abs(),
+        if lon >= 0.0 { 'E' } else { 'W' }
+    )
 }
 
 impl fmt::Display for Progress<'_> {

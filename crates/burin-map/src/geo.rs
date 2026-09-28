@@ -7,7 +7,9 @@ const NOMINATIM: &str = "https://nominatim.openstreetmap.org/search";
 
 /// Parse "lat,lon" or "lat lon".
 fn parse_latlon(q: &str) -> Option<(f64, f64)> {
-    let mut it = q.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty());
+    let mut it = q
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty());
     let (a, b) = (it.next()?, it.next()?);
     if it.next().is_some() {
         return None;
@@ -31,10 +33,16 @@ pub fn locate(query: &str) -> Result<(f64, f64, String), Error> {
         .map_err(|e| Error::Net(format!("geocoding: {e}")))?
         .into_json()
         .map_err(|e| Error::Net(format!("geocoding: {e}")))?;
-    let hit = hits.get(0).ok_or_else(|| Error::Input(format!("nothing found for {query:?}")))?;
+    let hit = hits
+        .get(0)
+        .ok_or_else(|| Error::Input(format!("nothing found for {query:?}")))?;
     let num = |k: &str| hit[k].as_str().and_then(|s| s.parse::<f64>().ok());
     match (num("lat"), num("lon")) {
-        (Some(lat), Some(lon)) => Ok((lat, lon, hit["display_name"].as_str().unwrap_or(query).to_string())),
+        (Some(lat), Some(lon)) => Ok((
+            lat,
+            lon,
+            hit["display_name"].as_str().unwrap_or(query).to_string(),
+        )),
         _ => Err(Error::Data("geocoding: malformed reply".into())),
     }
 }
@@ -44,19 +52,33 @@ pub fn parse_length_km(s: &str) -> Result<f64, Error> {
     let s = s.trim().to_ascii_lowercase();
     let split = s.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(s.len());
     let (num, unit) = (s[..split].trim(), s[split..].trim());
-    let v: f64 = num.parse().map_err(|_| Error::Input(format!("bad length {s:?} (try 20km or 800m)")))?;
+    let v: f64 = num
+        .parse()
+        .map_err(|_| Error::Input(format!("bad length {s:?} (try 20km or 800m)")))?;
     let km = match unit {
         "" | "km" => v,
         "m" => v / 1000.0,
         "mi" => v * 1.609_344,
-        _ => return Err(Error::Input(format!("unknown unit {unit:?} in {s:?} (km, m or mi)"))),
+        _ => {
+            return Err(Error::Input(format!(
+                "unknown unit {unit:?} in {s:?} (km, m or mi)"
+            )))
+        }
     };
-    if km > 0.0 { Ok(km) } else { Err(Error::Input(format!("length must be positive: {s:?}"))) }
+    if km > 0.0 {
+        Ok(km)
+    } else {
+        Err(Error::Input(format!("length must be positive: {s:?}")))
+    }
 }
 
 /// Scale denominator from "1:25000", "1:25,000" or "25000".
 pub fn parse_scale(s: &str) -> Result<f64, Error> {
-    let t: String = s.trim().chars().filter(|c| *c != ',' && *c != '_' && *c != ' ').collect();
+    let t: String = s
+        .trim()
+        .chars()
+        .filter(|c| *c != ',' && *c != '_' && *c != ' ')
+        .collect();
     let t = t.strip_prefix("1:").unwrap_or(&t);
     match t.parse::<f64>() {
         Ok(n) if n > 0.0 => Ok(n),

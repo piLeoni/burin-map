@@ -15,8 +15,24 @@ use crate::rng::Rng;
 use crate::style::Style;
 
 const ENTRIES: &[&str] = &[
-    "conv_h", "conv_v", "box_h", "box_v", "map1", "gradient", "direction", "minmax", "histogram", "hist_scan", "rank",
-    "sum_partial", "sum_final", "wobble", "shade", "shade_norm", "input_space", "finish",
+    "conv_h",
+    "conv_v",
+    "box_h",
+    "box_v",
+    "map1",
+    "gradient",
+    "direction",
+    "minmax",
+    "histogram",
+    "hist_scan",
+    "rank",
+    "sum_partial",
+    "sum_final",
+    "wobble",
+    "shade",
+    "shade_norm",
+    "input_space",
+    "finish",
 ];
 const BINS: usize = 65536;
 
@@ -77,7 +93,14 @@ impl Gpu {
                 (e, pipe)
             })
             .collect();
-        Some(Gpu { device, queue, pipes, pool: Default::default(), staging: Default::default(), name: format!("{} ({:?})", info.name, info.backend) })
+        Some(Gpu {
+            device,
+            queue,
+            pipes,
+            pool: Default::default(),
+            staging: Default::default(),
+            name: format!("{} ({:?})", info.name, info.backend),
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -86,11 +109,25 @@ impl Gpu {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn build_fields_blocking(&self, elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> Fields {
+    pub fn build_fields_blocking(
+        &self,
+        elev: &[f32],
+        w: usize,
+        h: usize,
+        px_m: f32,
+        st: &Style,
+    ) -> Fields {
         pollster::block_on(self.build_fields(elev, w, h, px_m, st))
     }
 
-    pub async fn build_fields(&self, elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> Fields {
+    pub async fn build_fields(
+        &self,
+        elev: &[f32],
+        w: usize,
+        h: usize,
+        px_m: f32,
+        st: &Style,
+    ) -> Fields {
         let n = w * h;
         let mut r = Rec::new(self, w, h);
 
@@ -104,21 +141,50 @@ impl Gpu {
         let (gy, gx) = (r.grid_buf(), r.grid_buf());
         r.grid("gradient", r.p(0, &[px_m]), &[(1, &a), (2, &gy), (3, &gx)]);
         let (mag, tx, ty) = (r.grid_buf(), r.grid_buf(), r.grid_buf());
-        r.grid("direction", r.p(0, &[]), &[(1, &gx), (2, &gy), (3, &mag), (4, &tx), (5, &ty)]);
+        r.grid(
+            "direction",
+            r.p(0, &[]),
+            &[(1, &gx), (2, &gy), (3, &mag), (4, &tx), (5, &ty)],
+        );
 
         let (stats, hist) = r.histogram(&mag, &land, false);
         let table = r.buf(BINS);
-        r.run("hist_scan", r.p(0, &[]), &[(3, &table), (6, &stats), (7, &hist)], (1, 1));
+        r.run(
+            "hist_scan",
+            r.p(0, &[]),
+            &[(3, &table), (6, &stats), (7, &hist)],
+            (1, 1),
+        );
         let steep = r.grid_buf();
-        r.grid("rank", r.p(0, &[]), &[(1, &mag), (2, &land), (3, &table), (4, &steep), (6, &stats)]);
+        r.grid(
+            "rank",
+            r.p(0, &[]),
+            &[(1, &mag), (2, &land), (3, &table), (4, &steep), (6, &stats)],
+        );
 
         let elev_px = r.grid_buf();
         r.grid("map1", r.p(0, &[px_m]), &[(1, &elev_b), (2, &elev_px)]);
         let s = r.grid_buf();
-        r.relative_shade(&elev_px, &s, None, st.input_blur, &land, st, [&a, &t, &gy, &gx]);
+        r.relative_shade(
+            &elev_px,
+            &s,
+            None,
+            st.input_blur,
+            &land,
+            st,
+            [&a, &t, &gy, &gx],
+        );
         if st.input_broad > 0.0 {
             let b = r.grid_buf();
-            r.relative_shade(&elev_px, &b, Some((&s, st.input_broad)), st.input_broad_blur, &land, st, [&a, &t, &gy, &gx]);
+            r.relative_shade(
+                &elev_px,
+                &b,
+                Some((&s, st.input_broad)),
+                st.input_broad_blur,
+                &land,
+                st,
+                [&a, &t, &gy, &gx],
+            );
         }
 
         r.blur(&land, &a, &t, 2.0);
@@ -134,10 +200,18 @@ impl Gpu {
             st.space_light,
             st.space_dark,
         ];
-        r.grid("input_space", r.p(0, &f), &[(1, &s), (2, &a), (3, &steep), (4, &input), (5, &gx)]);
+        r.grid(
+            "input_space",
+            r.p(0, &f),
+            &[(1, &s), (2, &a), (3, &steep), (4, &input), (5, &gx)],
+        );
         r.blur(&gx, &a, &t, 3.0);
         let (space, walk) = (gy, elev_px);
-        r.grid("finish", r.p(0, &[st.space]), &[(1, &a), (2, &space), (3, &land), (4, &mag), (5, &walk)]);
+        r.grid(
+            "finish",
+            r.p(0, &[st.space]),
+            &[(1, &a), (2, &space), (3, &land), (4, &mag), (5, &walk)],
+        );
 
         // On near-flat ground a smooth random rotation, fading to none on
         // slopes. Last, so the GPU runs the rest while the CPU makes noise.
@@ -150,14 +224,26 @@ impl Gpu {
             let moments = r.buf(2);
             r.mean_std(&a, &t, &moments);
             let amp = st.mod_wobble.to_radians();
-            r.grid("wobble", r.p(0, &[amp]), &[(1, &tx), (2, &ty), (3, &a), (4, &steep), (5, &moments)]);
+            r.grid(
+                "wobble",
+                r.p(0, &[amp]),
+                &[(1, &tx), (2, &ty), (3, &a), (4, &steep), (5, &moments)],
+            );
         }
 
         let mut out = r.read(&[&tx, &ty, &input, &space, &walk]).await.into_iter();
         let mut next = || out.next().unwrap();
         let (tx, ty, input, space) = (next(), next(), next(), next());
         let walkable = next().into_iter().map(|v| v > 0.5).collect();
-        Fields { w, h, tx, ty, input, walkable, space }
+        Fields {
+            w,
+            h,
+            tx,
+            ty,
+            input,
+            walkable,
+            space,
+        }
     }
 }
 
@@ -174,17 +260,31 @@ struct Rec<'a> {
 impl<'a> Rec<'a> {
     fn new(g: &'a Gpu, w: usize, h: usize) -> Self {
         let enc = g.device.create_command_encoder(&Default::default());
-        Rec { g, enc, w: w as u32, h: h as u32, taken: Default::default() }
+        Rec {
+            g,
+            enc,
+            w: w as u32,
+            h: h as u32,
+            taken: Default::default(),
+        }
     }
 
     /// Start executing what is recorded so far.
     fn flush(&mut self) {
-        let enc = std::mem::replace(&mut self.enc, self.g.device.create_command_encoder(&Default::default()));
+        let enc = std::mem::replace(
+            &mut self.enc,
+            self.g.device.create_command_encoder(&Default::default()),
+        );
         self.g.queue.submit([enc.finish()]);
     }
 
     fn p(&self, mode: u32, f: &[f32]) -> P {
-        let mut p = P { w: self.w, h: self.h, mode, ..Default::default() };
+        let mut p = P {
+            w: self.w,
+            h: self.h,
+            mode,
+            ..Default::default()
+        };
         p.f[..f.len()].copy_from_slice(f);
         p
     }
@@ -193,7 +293,9 @@ impl<'a> Rec<'a> {
         self.g.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (len.max(1) * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
     }
@@ -218,11 +320,15 @@ impl<'a> Rec<'a> {
     }
 
     fn upload<T: bytemuck::Pod>(&self, data: &[T]) -> wgpu::Buffer {
-        self.g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(data),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        })
+        self.g
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(data),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            })
     }
 
     fn run(&mut self, entry: &str, p: P, binds: &[(u32, &wgpu::Buffer)], groups: (u32, u32)) {
@@ -233,8 +339,14 @@ impl<'a> Rec<'a> {
             contents: bytemuck::bytes_of(&p),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() }];
-        entries.extend(binds.iter().map(|&(binding, b)| wgpu::BindGroupEntry { binding, resource: b.as_entire_binding() }));
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: ub.as_entire_binding(),
+        }];
+        entries.extend(binds.iter().map(|&(binding, b)| wgpu::BindGroupEntry {
+            binding,
+            resource: b.as_entire_binding(),
+        }));
         let bg = dev.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &pipe.get_bind_group_layout(0),
@@ -263,8 +375,18 @@ impl<'a> Rec<'a> {
             let k = gaussian_kernel(sigma);
             let kb = self.upload(&k);
             p.r = (k.len() / 2) as u32;
-            self.run("conv_h", p, &[(1, src), (2, tmp), (3, &kb)], (self.w.div_ceil(256), self.h));
-            self.run("conv_v", p, &[(1, tmp), (2, dst), (3, &kb)], (self.w.div_ceil(64), self.h.div_ceil(4)));
+            self.run(
+                "conv_h",
+                p,
+                &[(1, src), (2, tmp), (3, &kb)],
+                (self.w.div_ceil(256), self.h),
+            );
+            self.run(
+                "conv_v",
+                p,
+                &[(1, tmp), (2, dst), (3, &kb)],
+                (self.w.div_ceil(64), self.h.div_ceil(4)),
+            );
             return;
         }
         const RUN: u32 = 16;
@@ -279,12 +401,21 @@ impl<'a> Rec<'a> {
     }
 
     /// Min / max / count and a histogram of `v` (or |v|) over `mask`.
-    fn histogram(&mut self, v: &wgpu::Buffer, mask: &wgpu::Buffer, abs: bool) -> (wgpu::Buffer, wgpu::Buffer) {
+    fn histogram(
+        &mut self,
+        v: &wgpu::Buffer,
+        mask: &wgpu::Buffer,
+        abs: bool,
+    ) -> (wgpu::Buffer, wgpu::Buffer) {
         let stats = self.upload(&[u32::MAX, 0, 0, 0]);
         let hist = self.buf(BINS);
         let p = self.p(abs as u32, &[]);
         self.grid("minmax", p, &[(1, v), (2, mask), (6, &stats)]);
-        self.grid("histogram", p, &[(1, v), (2, mask), (6, &stats), (7, &hist)]);
+        self.grid(
+            "histogram",
+            p,
+            &[(1, v), (2, mask), (6, &stats), (7, &hist)],
+        );
         (stats, hist)
     }
 
@@ -294,7 +425,12 @@ impl<'a> Rec<'a> {
         let gx = groups.min(65535);
         let gy = groups.div_ceil(gx);
         for mode in 0..2 {
-            self.run("sum_partial", self.p(mode, &[]), &[(1, v), (2, partial), (3, out)], (gx, gy));
+            self.run(
+                "sum_partial",
+                self.p(mode, &[]),
+                &[(1, v), (2, partial), (3, out)],
+                (gx, gy),
+            );
             let mut p = self.p(mode, &[]);
             p.r = gx * gy;
             self.run("sum_final", p, &[(2, partial), (3, out)], (1, 1));
@@ -316,18 +452,38 @@ impl<'a> Rec<'a> {
         self.blur(elev_px, a, t, sigma);
         self.grid("gradient", self.p(0, &[1.0]), &[(1, a), (2, gy), (3, gx)]);
         let (alt, az) = (st.sun_altitude.to_radians(), st.sun_azimuth.to_radians());
-        let light = [alt.cos() * az.sin(), -alt.cos() * az.cos(), alt.sin(), st.sun_exag];
+        let light = [
+            alt.cos() * az.sin(),
+            -alt.cos() * az.cos(),
+            alt.sin(),
+            st.sun_exag,
+        ];
         self.grid("shade", self.p(0, &light), &[(1, gy), (2, gx), (3, dst)]);
         let (stats, hist) = self.histogram(dst, land, true);
-        self.run("hist_scan", self.p(1, &[98.0]), &[(3, t), (6, &stats), (7, &hist)], (1, 1));
+        self.run(
+            "hist_scan",
+            self.p(1, &[98.0]),
+            &[(3, t), (6, &stats), (7, &hist)],
+            (1, 1),
+        );
         match mix {
-            None => self.grid("shade_norm", self.p(0, &[]), &[(1, dst), (2, a), (6, &stats)]),
-            Some((into, k)) => self.grid("shade_norm", self.p(1, &[k]), &[(1, dst), (2, into), (6, &stats)]),
+            None => self.grid(
+                "shade_norm",
+                self.p(0, &[]),
+                &[(1, dst), (2, a), (6, &stats)],
+            ),
+            Some((into, k)) => self.grid(
+                "shade_norm",
+                self.p(1, &[k]),
+                &[(1, dst), (2, into), (6, &stats)],
+            ),
         }
     }
 
     async fn read(self, bufs: &[&wgpu::Buffer]) -> Vec<Vec<f32>> {
-        let Rec { g, mut enc, taken, .. } = self;
+        let Rec {
+            g, mut enc, taken, ..
+        } = self;
         let staging: Vec<wgpu::Buffer> = bufs
             .iter()
             .map(|b| {
@@ -357,7 +513,9 @@ impl<'a> Rec<'a> {
             })
             .collect();
         #[cfg(not(target_arch = "wasm32"))]
-        g.device.poll(wgpu::PollType::wait_indefinitely()).expect("gpu poll");
+        g.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("gpu poll");
         let mut out = Vec::with_capacity(bufs.len());
         for (s, rx) in staging.iter().zip(waits) {
             rx.await.expect("map callback").expect("map buffer");

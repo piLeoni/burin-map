@@ -24,11 +24,15 @@ pub fn blur(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
     let mut b = vec![0.0f32; src.len()];
     if sigma < 3.0 {
         let k = gaussian_kernel(sigma);
-        b.par_chunks_mut(w).zip(a.par_chunks(w)).for_each(|(o, row)| convolve(row, o, &k));
+        b.par_chunks_mut(w)
+            .zip(a.par_chunks(w))
+            .for_each(|(o, row)| convolve(row, o, &k));
         convolve_rows(&b, &mut a, w, h, &k);
     } else {
         for r in box_radii(sigma, 3) {
-            b.par_chunks_mut(w).zip(a.par_chunks(w)).for_each(|(o, row)| box_line(row, o, r));
+            b.par_chunks_mut(w)
+                .zip(a.par_chunks(w))
+                .for_each(|(o, row)| box_line(row, o, r));
             box_rows(&b, &mut a, w, h, r);
         }
     }
@@ -90,7 +94,10 @@ fn box_band(src: &[f32], out: &mut [f32], w: usize, h: usize, c0: usize, c1: usi
         }
     }
     for y in 0..n {
-        for (o, &a) in out[y as usize * bw..(y as usize + 1) * bw].iter_mut().zip(&acc) {
+        for (o, &a) in out[y as usize * bw..(y as usize + 1) * bw]
+            .iter_mut()
+            .zip(&acc)
+        {
             *o = (a * norm) as f32;
         }
         let (add, sub) = (row(y + r + 1), row(y - r));
@@ -123,7 +130,9 @@ pub(crate) fn box_radii(sigma: f32, n: usize) -> Vec<usize> {
     let m_ideal = (12.0 * s2 - nf * (wl * wl) as f64 - 4.0 * nf * wl as f64 - 3.0 * nf)
         / (-4.0 * wl as f64 - 4.0);
     let m = m_ideal.round() as usize;
-    (0..n).map(|i| (((if i < m { wl } else { wu }) - 1) / 2) as usize).collect()
+    (0..n)
+        .map(|i| (((if i < m { wl } else { wu }) - 1) / 2) as usize)
+        .collect()
 }
 
 fn convolve(line: &[f32], out: &mut [f32], k: &[f32]) {
@@ -157,29 +166,32 @@ pub fn gradient(f: &[f32], w: usize, h: usize, spacing: f32) -> (Vec<f32>, Vec<f
     if f.is_empty() {
         return (gy, gx);
     }
-    gy.par_chunks_mut(w).zip(gx.par_chunks_mut(w)).enumerate().for_each(|(y, (gy, gx))| {
-        for x in 0..w {
-            let i = y * w + x;
-            gx[x] = if w < 2 {
-                0.0
-            } else if x == 0 {
-                f[i + 1] - f[i]
-            } else if x == w - 1 {
-                f[i] - f[i - 1]
-            } else {
-                (f[i + 1] - f[i - 1]) * 0.5
-            } / spacing;
-            gy[x] = if h < 2 {
-                0.0
-            } else if y == 0 {
-                f[i + w] - f[i]
-            } else if y == h - 1 {
-                f[i] - f[i - w]
-            } else {
-                (f[i + w] - f[i - w]) * 0.5
-            } / spacing;
-        }
-    });
+    gy.par_chunks_mut(w)
+        .zip(gx.par_chunks_mut(w))
+        .enumerate()
+        .for_each(|(y, (gy, gx))| {
+            for x in 0..w {
+                let i = y * w + x;
+                gx[x] = if w < 2 {
+                    0.0
+                } else if x == 0 {
+                    f[i + 1] - f[i]
+                } else if x == w - 1 {
+                    f[i] - f[i - 1]
+                } else {
+                    (f[i + 1] - f[i - 1]) * 0.5
+                } / spacing;
+                gy[x] = if h < 2 {
+                    0.0
+                } else if y == 0 {
+                    f[i + w] - f[i]
+                } else if y == h - 1 {
+                    f[i] - f[i - w]
+                } else {
+                    (f[i + w] - f[i - w]) * 0.5
+                } / spacing;
+            }
+        });
     (gy, gx)
 }
 
@@ -235,11 +247,14 @@ pub fn percentile_rank(v: &[f32], mask: &[bool]) -> Vec<f32> {
         acc += hist[b] as u64;
     }
     let denom = (count - 1) as f32;
-    out.par_iter_mut().zip(v).zip(mask).for_each(|((o, &x), &m)| {
-        if m {
-            *o = below[bin(x)] / denom;
-        }
-    });
+    out.par_iter_mut()
+        .zip(v)
+        .zip(mask)
+        .for_each(|((o, &x), &m)| {
+            if m {
+                *o = below[bin(x)] / denom;
+            }
+        });
     out
 }
 
@@ -252,6 +267,10 @@ pub fn percentile(mut values: Vec<f32>, q: f32) -> f32 {
     let lo = pos.floor() as usize;
     let hi = (lo + 1).min(values.len() - 1);
     let (_, &mut a, rest) = values.select_nth_unstable_by(lo, |a, b| a.total_cmp(b));
-    let b = if hi == lo { a } else { rest.iter().copied().fold(f32::INFINITY, f32::min) };
+    let b = if hi == lo {
+        a
+    } else {
+        rest.iter().copied().fold(f32::INFINITY, f32::min)
+    };
     a + (b - a) * (pos - lo as f32)
 }

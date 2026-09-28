@@ -37,7 +37,11 @@ pub fn style_params() -> Result<JsValue, JsValue> {
     for p in Style::PARAMS {
         let o = js_sys::Object::new();
         Reflect::set(&o, &"name".into(), &p.name.into())?;
-        Reflect::set(&o, &"default".into(), &(d.get(p.name).unwrap() as f32 as f64).into())?;
+        Reflect::set(
+            &o,
+            &"default".into(),
+            &(d.get(p.name).unwrap() as f32 as f64).into(),
+        )?;
         Reflect::set(&o, &"help".into(), &p.help.into())?;
         Reflect::set(&o, &"group".into(), &p.group.into())?;
         arr.push(&o);
@@ -130,7 +134,12 @@ impl Drawing {
     /// GeoJSON MultiLineString FeatureCollection of the dashes.
     #[wasm_bindgen(getter)]
     pub fn geojson(&self) -> String {
-        let tr = GeoTransform { nw_lon: self.nw_lon, nw_lat: self.nw_lat, deg_per_px_lon: self.deg_per_px_lon, deg_per_px_lat: self.deg_per_px_lat };
+        let tr = GeoTransform {
+            nw_lon: self.nw_lon,
+            nw_lat: self.nw_lat,
+            deg_per_px_lon: self.deg_per_px_lon,
+            deg_per_px_lat: self.deg_per_px_lat,
+        };
         let paths: Vec<Line> = {
             let pts: Vec<f32> = self.paths.to_vec();
             let ends: Vec<u32> = self.ends.to_vec();
@@ -146,20 +155,33 @@ impl Drawing {
             }
             out
         };
-        burin_map_core::geojson::to_geojson(&paths, self.width as f64, self.height as f64, |x, y| tr.to_lonlat(x, y))
+        burin_map_core::geojson::to_geojson(
+            &paths,
+            self.width as f64,
+            self.height as f64,
+            |x, y| tr.to_lonlat(x, y),
+        )
     }
     /// NW corner longitude.
     #[wasm_bindgen(getter)]
-    pub fn nw_lon(&self) -> f64 { self.nw_lon }
+    pub fn nw_lon(&self) -> f64 {
+        self.nw_lon
+    }
     /// NW corner latitude.
     #[wasm_bindgen(getter)]
-    pub fn nw_lat(&self) -> f64 { self.nw_lat }
+    pub fn nw_lat(&self) -> f64 {
+        self.nw_lat
+    }
     /// Degrees of longitude per pixel (eastward).
     #[wasm_bindgen(getter)]
-    pub fn deg_per_px_lon(&self) -> f64 { self.deg_per_px_lon }
+    pub fn deg_per_px_lon(&self) -> f64 {
+        self.deg_per_px_lon
+    }
     /// Degrees of latitude per pixel (southward).
     #[wasm_bindgen(getter)]
-    pub fn deg_per_px_lat(&self) -> f64 { self.deg_per_px_lat }
+    pub fn deg_per_px_lat(&self) -> f64 {
+        self.deg_per_px_lat
+    }
 }
 
 /// Draw an elevation grid: metres, row 0 = north, square pixels of `px_m`
@@ -214,12 +236,24 @@ fn now_ms() -> f64 {
 }
 
 fn read_double(o: &JsValue, key: &str, default: f64) -> f64 {
-    if o.is_undefined() || o.is_null() { return default; }
-    Reflect::get(&o, &key.into()).ok().and_then(|v| v.as_f64()).unwrap_or(default)
+    if o.is_undefined() || o.is_null() {
+        return default;
+    }
+    Reflect::get(o, &key.into())
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
 }
 
 fn read_geo(o: &JsValue) -> GeoTransform {
-    if o.is_undefined() || o.is_null() { return GeoTransform { nw_lon: 0.0, nw_lat: 0.0, deg_per_px_lon: 0.0, deg_per_px_lat: 0.0 }; }
+    if o.is_undefined() || o.is_null() {
+        return GeoTransform {
+            nw_lon: 0.0,
+            nw_lat: 0.0,
+            deg_per_px_lon: 0.0,
+            deg_per_px_lat: 0.0,
+        };
+    }
     GeoTransform {
         nw_lon: read_double(o, "nw_lon", 0.0),
         nw_lat: read_double(o, "nw_lat", 0.0),
@@ -299,17 +333,30 @@ pub async fn draw_batches_gpu(
 ) -> Result<Drawing, JsValue> {
     let (w, h) = (width as usize, height as usize);
     if elev.len() != w * h {
-        return Err(JsValue::from_str(&format!("elevation length {} ≠ {}×{}", elev.len(), w, h)));
+        return Err(JsValue::from_str(&format!(
+            "elevation length {} ≠ {}×{}",
+            elev.len(),
+            w,
+            h
+        )));
     }
     let batches = parse_batches(&json)?;
-    let gpu = GPU.with(|g| g.borrow().clone()).ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
+    let gpu = GPU
+        .with(|g| g.borrow().clone())
+        .ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
     let t0 = now_ms();
     let f = gpu.build_fields(&elev, w, h, px_m, &batches[0].style).await;
     let d = burin_map_core::draw_fields(&f, &batches);
     Ok(finish(d, &batches, now_ms() - t0, &geo, mm_per_px))
 }
 
-fn finish(d: burin_map_core::Drawing, batches: &[Batch], ms: f64, geo: &JsValue, mm_per_px: Option<f32>) -> Drawing {
+fn finish(
+    d: burin_map_core::Drawing,
+    batches: &[Batch],
+    ms: f64,
+    geo: &JsValue,
+    mm_per_px: Option<f32>,
+) -> Drawing {
     let (width, height) = (d.width as u32, d.height as u32);
     let (pts, ends) = pack(&d.paths);
     let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);

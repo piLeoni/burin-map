@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Cargo output is long; only the interesting parts are echoed below.
+  RUST_BACKTRACE: 1
+
+jobs:
+  # The core, the CLI and the style engine. Runs on every push and it is the
+  # job that catches most mistakes, so it stays fast and self-contained.
+  rust:
+    name: rust (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The shipped configuration: terrain fields on the GPU (wgpu). No GPU
+          # is needed to *compile* it, and at runtime `device()` finds none and
+          # falls back to the CPU on its own — which is the behaviour a machine
+          # without a GPU gets, tested by accident but for real.
+          - { name: with-gpu, args: "--features gpu" }
+          # No wgpu at all: proves the fallback is a supported build, not a
+          # path that only survives because the feature is usually on.
+          - { name: no-gpu, args: "--no-default-features" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace ${{ matrix.args }} --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace ${{ matrix.args }}
+
+      # `--force-cpu` is the one flag left, and the only way to ask for
+      # reproducible bytes. It has a guard that panics when it arrives after the
+      # device is resolved, so both orderings are worth a run: the correct one
+      # must work, and the late one must fail loudly rather than silently
+      # drawing on the GPU.
+      - name: --force-cpu works, and the late call panics
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.name }}" = "no-gpu" ]; then
+            echo "skipping: force_cpu is a no-op without the gpu feature"
+            exit 0
+          fi
+          cargo build -p burin-map ${{ matrix.args }}
+
+          # Correct order: this is what a caller with a golden file does.
+          out=$(./target/debug/burin-map --force-cpu --tp san-francisco --out-file /tmp/a.svg)
+          echo "$out" | grep -q "CPU (forced)" \
+            || { echo "expected the CPU to be reported as forced"; echo "$out"; exit 1; }
+
+          # Late call: must not return quietly. In-repo test so the guard
+          # cannot rot into a no-op without anyone noticing.
+          cargo test -p burin-map-core ${{ matrix.args }} --test force_cpu_order
+
+  # Python and Node are thin wrappers over the same core, but they are built by
+  # maturin and napi rather than cargo, so they get their own jobs: a core that
+  # compiles says nothing about whether the bindings still build, or whether
+  # their surfaces stayed in step.
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install maturin pytest
+
+      # The venv is activated for each step: maturin decides where to install
+      # from VIRTUAL_ENV if it is set and from the running interpreter if not,
+      # so relying on `.venv/bin/maturin` alone installs into the wrong place
+      # and the import then fails with "No module named burin_map".
+      - name: build the extension
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          # From the repo root: pyproject.toml holds the manifest path and the
+          # python source, so maturin resolves both from here. Running it inside
+          # python/ fails, since there is no Cargo.toml there.
+          maturin develop --features gpu
+
+      # engine() reports where the fields go. On a machine with no GPU that is
+      # the CPU, and it is not an error: the drawing is the product either way.
+      - name: engine reports something sensible
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python - <<'PY'
+          import burin_map
+          where = burin_map.engine()
+          print("engine():", where)
+          assert where.startswith(("GPU:", "CPU")), where
+          # The old surface is gone for good.
+          assert not hasattr(burin_map, "force_gpu"), "force_gpu came back"
+          assert not hasattr(burin_map, "use_gpu"), "use_gpu came back"
+          PY
+
+      - name: pytest
+        run: |
+          source .venv/bin/activate
+          python -m pytest python/tests -q
+
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+        working-directory: node
+
+      - name: build the addon
+        run: npm run build
+        working-directory: node
+
+      - name: the engine surface is the expected one
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'JS'
+          import m from "./index.js"
+          console.log("engine():", m.engine())
+          if (typeof m.forceCpu !== "function") throw new Error("forceCpu is gone")
+          for (const dead of ["forceGpu", "useGpu"]) {
+            if (typeof m[dead] !== "undefined") throw new Error(`${dead} came back`)
+          }
+          JS
+        working-directory: node
+
+      - run: npm test
+        working-directory: node
+
+  # The web app ships the WASM it is served with: web/public/pkg and pkg-mt are
+  # committed. The stable package must match the crates, or the browser runs
+  # code nobody builds from this commit. pkg-mt needs nightly + build-std, so it
+  # is rebuilt only to check it still builds, not byte-compared.
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: rebuild pkg and diff against what is committed
+        run: |
+          set -euo pipefail
+          cd crates/burin-map-wasm
+          wasm-pack build --target web --release --out-dir /tmp/pkg -- --features gpu
+          # wasm-pack rewrites this on every build; it carries no meaning here.
+          rm -f /tmp/pkg/.gitignore
+          # The build is reproducible: two runs on one machine are byte-identical,
+          # checked before this job was written. So a plain diff is meaningful,
+          # and a mismatch means the committed package is stale — rerun
+          # web/build-wasm.sh. (wasm-pack draws a stale-package failure as
+          # "Binary files ... differ", which is exactly what was found here.)
+          diff -r -x '.gitignore' /tmp/pkg ../web/public/pkg && echo "in step"
+
+  # The browser draws on the WebGPU the page offers, and has nowhere to fall
+  # back to but the CPU. This is the only job that exercises the JS half, so it
+  # builds the app the way the site is served.
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+        working-directory: web
+
+      # Without --deny-warnings: there is one known react(set-state-in-effect)
+      # warning in NumInput, a deliberate sync of a text field that is not being
+      # edited. Errors still fail the job.
+      - run: npx oxlint src/
+        working-directory: web
+
+      - run: npm run build
+        working-directory: web

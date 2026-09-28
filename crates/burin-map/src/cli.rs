@@ -12,12 +12,12 @@ use std::time::Instant;
 use clap::parser::ValueSource;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
+use crate::document::size_pair;
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
-use crate::document::size_pair;
 use crate::{
-    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Document, Error, Frame,
-    Progress, Style, TileSource,
+    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Document, Error,
+    Frame, Progress, Style, TileSource,
 };
 
 const PLACES: &[(&str, Bounds)] = &[
@@ -155,7 +155,10 @@ pub fn command() -> Command {
 /// Area to draw, frame to draw it in and a name for the area, from the
 /// `san-francisco` → `San Francisco`.
 fn place_title(name: &str) -> String {
-    name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ")
+    name.split('-')
+        .map(|w| w[..1].to_uppercase() + &w[1..])
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Area to draw, frame to draw it in and a name for the area.
@@ -164,28 +167,37 @@ fn place_title(name: &str) -> String {
 /// the area block of the JSON document (`--style-json` / `--style-file`).
 fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, String), Error> {
     let area = doc.area.clone().unwrap_or_default();
-    let given = |name: &str| {
-        matches!(m.value_source(name), Some(ValueSource::CommandLine))
-    };
+    let given = |name: &str| matches!(m.value_source(name), Some(ValueSource::CommandLine));
 
     let paper = if given("frame-size") {
-        m.get_many::<f64>("frame-size").map(|v| v.copied().collect::<Vec<_>>())
+        m.get_many::<f64>("frame-size")
+            .map(|v| v.copied().collect::<Vec<_>>())
     } else {
         area.size_mm.clone()
     };
     let paper = match paper {
-        Some(v) => Some(size_pair(&v).filter(|p| p.iter().all(|x| *x > 0.0)).ok_or_else(|| {
-            Error::Input("the paper size needs 1 or 2 positive numbers in mm".into())
-        })?),
+        Some(v) => Some(
+            size_pair(&v)
+                .filter(|p| p.iter().all(|x| *x > 0.0))
+                .ok_or_else(|| {
+                    Error::Input("the paper size needs 1 or 2 positive numbers in mm".into())
+                })?,
+        ),
         None => None,
     };
     let mut frame = Frame {
         size_mm: paper,
-        pen_width: if given("pen-width") { *m.get_one("pen-width").unwrap() } else { area.pen_mm.unwrap_or(0.3) },
+        pen_width: if given("pen-width") {
+            *m.get_one("pen-width").unwrap()
+        } else {
+            area.pen_mm.unwrap_or(0.3)
+        },
         ..Frame::default()
     };
     let scale = if given("export-scale") {
-        m.get_one::<String>("export-scale").map(|s| parse_scale(s)).transpose()?
+        m.get_one::<String>("export-scale")
+            .map(|s| parse_scale(s))
+            .transpose()?
     } else {
         area.scale
     };
@@ -198,7 +210,10 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
             None => None,
         }
     } else {
-        area.size_km.as_ref().filter(|s| !s.is_empty()).map(|s| (s[0], s.get(1).copied()))
+        area.size_km
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| (s[0], s.get(1).copied()))
     };
     let frame_aspect = frame.size_mm.map(|[w, h]| h / w);
     // Paper for a ground of the given projected size at 1:n.
@@ -221,7 +236,9 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
     let place = if given("terrain-place") {
         m.get_one::<String>("terrain-place").cloned()
     } else {
-        area.place.clone().or_else(|| m.get_one::<String>("terrain-place").cloned())
+        area.place
+            .clone()
+            .or_else(|| m.get_one::<String>("terrain-place").cloned())
     };
 
     // A fixed area (bounds or place) needs no size at all: the ground is known.
@@ -229,7 +246,9 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
         // Only treat the place as fixed when the CLI default wasn't overridden
         // by an explicit --terrain-at.
         if at.is_none() {
-            place.as_ref().and_then(|name| PLACES.iter().find(|p| p.0 == name).map(|p| p.1))
+            place
+                .as_ref()
+                .and_then(|name| PLACES.iter().find(|p| p.0 == name).map(|p| p.1))
         } else {
             None
         }
@@ -237,12 +256,17 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
 
     let Some(q) = at else {
         if size.is_some() {
-            return Err(Error::Input("--terrain-size only applies with --terrain-at".into()));
+            return Err(Error::Input(
+                "--terrain-size only applies with --terrain-at".into(),
+            ));
         }
         let (bounds, label) = match fixed {
             Some(b) => {
                 if cli_bounds.is_some() {
-                    (b, format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])))
+                    (
+                        b,
+                        format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])),
+                    )
                 } else {
                     let name = place.as_deref().unwrap_or("san-francisco");
                     (b, place_title(name))
@@ -250,13 +274,21 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
             }
             None => {
                 let name = place.as_deref().unwrap_or("san-francisco");
-                (PLACES.iter().find(|p| p.0 == name).map(|p| p.1).unwrap_or(PLACES[0].1), place_title(name))
+                (
+                    PLACES
+                        .iter()
+                        .find(|p| p.0 == name)
+                        .map(|p| p.1)
+                        .unwrap_or(PLACES[0].1),
+                    place_title(name),
+                )
             }
         };
         if let Some(n) = scale {
             if frame.size_mm.is_some() {
                 return Err(Error::Input(
-                    "the area, --frame-size and --export-scale can't all be fixed: drop one".into()));
+                    "the area, --frame-size and --export-scale can't all be fixed: drop one".into(),
+                ));
             }
             frame.size_mm = Some(paper_for(&bounds, n));
         }
@@ -266,13 +298,16 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
     let (w_km, h_km) = match (size, scale, frame.size_mm) {
         (Some(_), Some(_), Some(_)) => {
             return Err(Error::Input(
-                "--terrain-size, --frame-size and --export-scale can't all be given: drop one".into()));
+                "--terrain-size, --frame-size and --export-scale can't all be given: drop one"
+                    .into(),
+            ));
         }
         (Some((w, h)), _, _) => (w, h.unwrap_or(w * frame_aspect.unwrap_or(1.0))),
         (None, Some(n), Some([fw, fh])) => (fw * n / 1e6, fh * n / 1e6),
         (None, Some(_), None) => {
             return Err(Error::Input(
-                "with --terrain-at, --export-scale needs --terrain-size or --frame-size".into()));
+                "with --terrain-at, --export-scale needs --terrain-size or --frame-size".into(),
+            ));
         }
         (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
     };
@@ -284,7 +319,12 @@ fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, Stri
         let (pw, ph) = projected_size(&bounds);
         let (w0, s0, e0, n0) = (bounds[0], bounds[1], bounds[2], bounds[3]);
         let (fx, fy) = (w_km * 1000.0 / pw, h_km * 1000.0 / ph);
-        let (cx, cy, hx, hy) = ((w0 + e0) / 2.0, (s0 + n0) / 2.0, (e0 - w0) / 2.0 * fx, (n0 - s0) / 2.0 * fy);
+        let (cx, cy, hx, hy) = (
+            (w0 + e0) / 2.0,
+            (s0 + n0) / 2.0,
+            (e0 - w0) / 2.0 * fx,
+            (n0 - s0) / 2.0 * fy,
+        );
         bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
     }
     if let (Some(n), None) = (scale, frame.size_mm) {
@@ -299,21 +339,29 @@ struct Report {
     live: bool,
 }
 
-const LABEL: Style_ = Style_::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
-const DONE: Style_ = Style_::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
+const LABEL: Style_ = Style_::new()
+    .bold()
+    .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+const DONE: Style_ = Style_::new()
+    .bold()
+    .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
 const DIM: Style_ = Style_::new().dimmed();
 const BOLD: Style_ = Style_::new().bold();
 use anstyle::Style as Style_;
 
 impl Report {
     fn new() -> Self {
-        Report { live: std::io::stdout().is_terminal() }
+        Report {
+            live: std::io::stdout().is_terminal(),
+        }
     }
 
     /// One step: label column, message, optional time on the right.
     fn step(&self, label: &str, msg: &str, secs: Option<f64>) {
         let clear = if self.live { "\r\x1b[2K" } else { "" };
-        let time = secs.map(|s| format!("{DIM}{s:>5.1} s{DIM:#}")).unwrap_or_default();
+        let time = secs
+            .map(|s| format!("{DIM}{s:>5.1} s{DIM:#}"))
+            .unwrap_or_default();
         let mut out = anstream::stdout();
         let _ = writeln!(out, "{clear}  {LABEL}{label:<10}{LABEL:#} {msg:<62}{time}");
     }
@@ -327,7 +375,10 @@ impl Report {
     fn transient(&self, label: &str, msg: &str) {
         if self.live {
             let mut out = anstream::stdout();
-            let _ = write!(out, "\r\x1b[2K  {LABEL}{label:<10}{LABEL:#} {DIM}{msg}{DIM:#}");
+            let _ = write!(
+                out,
+                "\r\x1b[2K  {LABEL}{label:<10}{LABEL:#} {DIM}{msg}{DIM:#}"
+            );
             let _ = out.flush();
         }
     }
@@ -335,37 +386,89 @@ impl Report {
     fn progress(&self, p: &Progress) {
         use crate::progress::{megabytes, thousands};
         match *p {
-            Progress::Tile { name, source, done, total } => {
+            Progress::Tile {
+                name,
+                source,
+                done,
+                total,
+            } => {
                 let what = match source {
                     TileSource::Cache => "from cache".to_string(),
                     TileSource::Download(b) => format!("downloaded ({})", megabytes(b)),
                     TileSource::Sea => "open sea".to_string(),
                 };
-                self.transient("elevation", &format!("SRTM tile {done} of {total}: {name} {what}"));
+                self.transient(
+                    "elevation",
+                    &format!("SRTM tile {done} of {total}: {name} {what}"),
+                );
             }
-            Progress::Elevation { tiles, downloaded, bytes, width, height, px_m, highest_m, secs, .. } => {
+            Progress::Elevation {
+                tiles,
+                downloaded,
+                bytes,
+                width,
+                height,
+                px_m,
+                highest_m,
+                secs,
+                ..
+            } => {
                 let plural = if tiles == 1 { "" } else { "s" };
                 let src = match downloaded {
                     0 => format!("{tiles} SRTM tile{plural}, all from cache"),
-                    d if d == tiles => format!("{tiles} SRTM tile{plural} downloaded ({})", megabytes(bytes)),
-                    d => format!("{tiles} SRTM tiles: {d} downloaded ({}), {} from cache", megabytes(bytes), tiles - d),
+                    d if d == tiles => format!(
+                        "{tiles} SRTM tile{plural} downloaded ({})",
+                        megabytes(bytes)
+                    ),
+                    d => format!(
+                        "{tiles} SRTM tiles: {d} downloaded ({}), {} from cache",
+                        megabytes(bytes),
+                        tiles - d
+                    ),
                 };
                 self.step("elevation", &src, Some(secs));
-                self.detail(&format!("projected onto {width} × {height} px, {px_m:.0} m per pixel, \
-                                      highest point {highest_m:.0} m"));
+                self.detail(&format!(
+                    "projected onto {width} × {height} px, {px_m:.0} m per pixel, \
+                                      highest point {highest_m:.0} m"
+                ));
             }
-            Progress::Frame { width_mm, height_mm, scale, pen_width, pitch_mm } => {
-                self.step("frame", &format!("{width_mm:.0} × {height_mm:.0} mm at {}",
-                                            crate::progress::scale(scale)), None);
-                self.detail(&format!("stroke {pen_width} mm, lines {pitch_mm:.2} mm apart"));
+            Progress::Frame {
+                width_mm,
+                height_mm,
+                scale,
+                pen_width,
+                pitch_mm,
+            } => {
+                self.step(
+                    "frame",
+                    &format!(
+                        "{width_mm:.0} × {height_mm:.0} mm at {}",
+                        crate::progress::scale(scale)
+                    ),
+                    None,
+                );
+                self.detail(&format!(
+                    "stroke {pen_width} mm, lines {pitch_mm:.2} mm apart"
+                ));
             }
-            Progress::Relief { secs } => self.step("relief", "light and shadow, slope, line directions", Some(secs)),
-            Progress::Lines { count, secs } => {
-                self.step("lines", &format!("{} lines traced along the contours", thousands(count as u64)), Some(secs))
-            }
-            Progress::Dashes { count, secs } => {
-                self.step("dashes", &format!("{} dashes", thousands(count as u64)), Some(secs))
-            }
+            Progress::Relief { secs } => self.step(
+                "relief",
+                "light and shadow, slope, line directions",
+                Some(secs),
+            ),
+            Progress::Lines { count, secs } => self.step(
+                "lines",
+                &format!(
+                    "{} lines traced along the contours",
+                    thousands(count as u64)
+                ),
+                Some(secs),
+            ),
+            Progress::Dashes { count, secs } => self.step(
+                "dashes",
+                &format!("{} dashes", thousands(count as u64)),
+                Some(secs),
+            ),
         }
     }
 }
@@ -378,7 +481,9 @@ where
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
     let (prefix, sections) = split_batch_argv(&args)?;
-    let m = command().try_get_matches_from(prefix).unwrap_or_else(|e| e.exit());
+    let m = command()
+        .try_get_matches_from(prefix)
+        .unwrap_or_else(|e| e.exit());
 
     // Parse the document (from --style-json / --style-file) once. A bare
     // batch array is accepted too, so older invocations keep working.
@@ -416,16 +521,25 @@ where
     #[cfg(feature = "gpu")]
     if m.get_flag("force-cpu") {
         crate::engine::force_cpu();
-        r.detail(&format!("terrain fields on the {}", crate::engine::describe()));
+        r.detail(&format!(
+            "terrain fields on the {}",
+            crate::engine::describe()
+        ));
     }
-    if m.get_one::<String>("terrain-at").is_some() || doc.area.as_ref().is_some_and(|a| a.at.is_some()) {
+    if m.get_one::<String>("terrain-at").is_some()
+        || doc.area.as_ref().is_some_and(|a| a.at.is_some())
+    {
         r.transient("where", "looking up the place");
     }
     let (bounds, frame, label) = area_and_frame(&m, &doc)?;
     let (wm, hm) = projected_size(&bounds);
     let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
     r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
-    r.detail(&format!("{:.1} × {:.1} km around {centre}", wm / 1000.0, hm / 1000.0));
+    r.detail(&format!(
+        "{:.1} × {:.1} km around {centre}",
+        wm / 1000.0,
+        hm / 1000.0
+    ));
     if batches.len() > 1 || batches[0].angle != 0.0 || batches[0].name.is_some() {
         let desc: Vec<String> = batches
             .iter()
@@ -434,7 +548,11 @@ where
                 None => format!("{:.0}°", b.angle),
             })
             .collect();
-        r.detail(&format!("{} batch passes ({})", batches.len(), desc.join(", ")));
+        r.detail(&format!(
+            "{} batch passes ({})",
+            batches.len(),
+            desc.join(", ")
+        ));
     }
 
     let t = Instant::now();
@@ -481,7 +599,12 @@ where
             path.display()
         );
     }
-    let _ = writeln!(out, "  {:<10} {DIM}done in {:.1} s{DIM:#}", "", t.elapsed().as_secs_f64());
+    let _ = writeln!(
+        out,
+        "  {:<10} {DIM}done in {:.1} s{DIM:#}",
+        "",
+        t.elapsed().as_secs_f64()
+    );
     Ok(())
 }
 
@@ -497,10 +620,13 @@ fn shared_style(m: &ArgMatches) -> Style {
     st
 }
 
+/// The clap prefix, then one entry per `--batch` section (if any).
+type BatchArgv = (Vec<OsString>, Option<Vec<Vec<OsString>>>);
+
 /// Split `argv` on `--batch` / `-b`. Terrain, frame and out flags always go
 /// to the clap prefix, even after a `--batch`; style flags stay in the
 /// current batch section.
-fn split_batch_argv(args: &[OsString]) -> Result<(Vec<OsString>, Option<Vec<Vec<OsString>>>), Error> {
+fn split_batch_argv(args: &[OsString]) -> Result<BatchArgv, Error> {
     let mut prefix = Vec::new();
     let mut sections: Option<Vec<Vec<OsString>>> = None;
     let mut cur: Option<Vec<OsString>> = None;
@@ -554,7 +680,11 @@ fn global_value_count(flag: &str, rest: &[OsString]) -> Option<usize> {
         Takes::One => 1,
         Takes::Four => 4,
         Takes::OneOrTwo => {
-            let n = rest.iter().take(2).take_while(|a| !a.to_string_lossy().starts_with("--")).count();
+            let n = rest
+                .iter()
+                .take(2)
+                .take_while(|a| !a.to_string_lossy().starts_with("--"))
+                .count();
             n.max(1)
         }
     })
@@ -568,24 +698,34 @@ fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> 
     while i < args.len() {
         let flag = args[i].to_string_lossy();
         let Some(name) = flag.strip_prefix("--") else {
-            return Err(Error::Input(format!("unexpected {flag:?} in --batch section")));
+            return Err(Error::Input(format!(
+                "unexpected {flag:?} in --batch section"
+            )));
         };
         let name = name.replace('-', "_");
-        let raw = args.get(i + 1).ok_or_else(|| Error::Input(format!("missing value for {flag}")))?;
+        let raw = args
+            .get(i + 1)
+            .ok_or_else(|| Error::Input(format!("missing value for {flag}")))?;
         let raw = raw.to_string_lossy();
         i += 2;
         if name == "batch_name" || name == "bn" {
             label = Some(raw.into_owned());
             continue;
         }
-        let v: f64 = raw.parse().map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
+        let v: f64 = raw
+            .parse()
+            .map_err(|_| Error::Input(format!("bad value {raw:?} for {flag}")))?;
         if name == "batch_angle" || name == "ba" {
             angle = v;
         } else if !st.set(&name, v) {
             return Err(Error::Input(format!("unknown batch parameter {flag}")));
         }
     }
-    Ok(Batch { name: label, angle: angle as f32, style: st })
+    Ok(Batch {
+        name: label,
+        angle: angle as f32,
+        style: st,
+    })
 }
 
 #[cfg(test)]
@@ -593,12 +733,17 @@ mod tests {
     use super::*;
 
     fn resolve(args: &[&str]) -> Result<(Bounds, Frame), Error> {
-        let m = command().try_get_matches_from(std::iter::once("burin-map").chain(args.iter().copied())).unwrap();
+        let m = command()
+            .try_get_matches_from(std::iter::once("burin-map").chain(args.iter().copied()))
+            .unwrap();
         area_and_frame(&m, &Document::default()).map(|(b, f, _)| (b, f))
     }
 
     fn argv(args: &[&str]) -> Vec<OsString> {
-        std::iter::once("burin-map").chain(args.iter().copied()).map(Into::into).collect()
+        std::iter::once("burin-map")
+            .chain(args.iter().copied())
+            .map(Into::into)
+            .collect()
     }
 
     #[test]
@@ -612,32 +757,86 @@ mod tests {
         let [w_mm, h_mm] = f.size_mm.unwrap();
         let (pw, ph) = projected_size(&b);
         assert!((w_mm - pw / 100.0).abs() < 1e-6 && (h_mm - ph / 100.0).abs() < 1e-6);
-        let (b, _) = resolve(&["--tat", "46,7.7", "--frame-size", "297", "420", "--export-scale", "1:50000"]).unwrap();
+        let (b, _) = resolve(&[
+            "--tat",
+            "46,7.7",
+            "--frame-size",
+            "297",
+            "420",
+            "--export-scale",
+            "1:50000",
+        ])
+        .unwrap();
         let (pw, ph) = projected_size(&b);
-        assert!((pw / 1000.0 - 14.85).abs() < 0.1 && (ph / 1000.0 - 21.0).abs() < 0.1, "{pw} {ph}");
+        assert!(
+            (pw / 1000.0 - 14.85).abs() < 0.1 && (ph / 1000.0 - 21.0).abs() < 0.1,
+            "{pw} {ph}"
+        );
     }
 
     #[test]
     fn one_paper_value_is_a_square() {
-        let (b, f) = resolve(&["--tat", "46,7.7", "--frame-size", "200", "--export-scale", "1:10000"]).unwrap();
+        let (b, f) = resolve(&[
+            "--tat",
+            "46,7.7",
+            "--frame-size",
+            "200",
+            "--export-scale",
+            "1:10000",
+        ])
+        .unwrap();
         assert_eq!(f.size_mm, Some([200.0, 200.0]));
         let (pw, ph) = projected_size(&b);
-        assert!((pw - 2000.0).abs() < 10.0 && (ph - 2000.0).abs() < 10.0, "{pw} {ph}");
+        assert!(
+            (pw - 2000.0).abs() < 10.0 && (ph - 2000.0).abs() < 10.0,
+            "{pw} {ph}"
+        );
     }
 
     #[test]
     fn overdetermined_is_an_error() {
-        assert!(resolve(&["--tp", "bern", "--export-scale", "1:1000", "--frame-size", "200"]).is_err());
-        assert!(resolve(&["--tat", "46,7", "--ts", "5km", "--frame-size", "200", "--export-scale", "1:1000"]).is_err());
+        assert!(resolve(&[
+            "--tp",
+            "bern",
+            "--export-scale",
+            "1:1000",
+            "--frame-size",
+            "200"
+        ])
+        .is_err());
+        assert!(resolve(&[
+            "--tat",
+            "46,7",
+            "--ts",
+            "5km",
+            "--frame-size",
+            "200",
+            "--export-scale",
+            "1:1000"
+        ])
+        .is_err());
         assert!(resolve(&["--tp", "bern", "--ts", "5km"]).is_err());
         assert!(resolve(&["--tat", "46,7", "--export-scale", "1:1000"]).is_err());
     }
 
     #[test]
     fn old_frame_flags_are_gone() {
-        for old in ["--frame-px", "--frame-width", "--frame-height", "--fpx", "--fw", "--fh",
-                    "--frame-scale", "--fsc", "--frame-pen", "--fpen"] {
-            assert!(command().try_get_matches_from(argv(&[old, "100"])).is_err(), "{old}");
+        for old in [
+            "--frame-px",
+            "--frame-width",
+            "--frame-height",
+            "--fpx",
+            "--fw",
+            "--fh",
+            "--frame-scale",
+            "--fsc",
+            "--frame-pen",
+            "--fpen",
+        ] {
+            assert!(
+                command().try_get_matches_from(argv(&[old, "100"])).is_err(),
+                "{old}"
+            );
         }
     }
 
@@ -645,12 +844,17 @@ mod tests {
     fn size_takes_units_and_two_values() {
         let (b, _) = resolve(&["--terrain-at", "46,7", "--terrain-size", "800m", "1.2km"]).unwrap();
         let (w, h) = projected_size(&b);
-        assert!((w - 800.0).abs() < 5.0 && (h - 1200.0).abs() < 5.0, "{w} {h}");
+        assert!(
+            (w - 800.0).abs() < 5.0 && (h - 1200.0).abs() < 5.0,
+            "{w} {h}"
+        );
     }
 
     #[test]
     fn short_and_long_style_flags_agree() {
-        let m = command().try_get_matches_from(argv(&["--s", "6", "--dash-light", "0.3"])).unwrap();
+        let m = command()
+            .try_get_matches_from(argv(&["--s", "6", "--dash-light", "0.3"]))
+            .unwrap();
         let st = shared_style(&m);
         assert!((st.space - 6.0).abs() < 1e-6);
         assert!((st.dash_light - 0.3).abs() < 1e-6);
@@ -658,17 +862,42 @@ mod tests {
 
     #[test]
     fn old_names_are_rejected() {
-        for old in ["--spacing", "--duty-min", "--place", "--svg", "--hatch", "--shade-gap"] {
-            assert!(command().try_get_matches_from(argv(&[old, "1"])).is_err(), "{old}");
+        for old in [
+            "--spacing",
+            "--duty-min",
+            "--place",
+            "--svg",
+            "--hatch",
+            "--shade-gap",
+        ] {
+            assert!(
+                command().try_get_matches_from(argv(&[old, "1"])).is_err(),
+                "{old}"
+            );
         }
     }
 
     #[test]
     fn batch_sections_parse() {
         let args = argv(&[
-            "--tp", "bern", "--space", "6",
-            "--batch", "--mod-breaks", "0.1", "--of", "x.png",
-            "-b", "--batch-name", "Steep valleys", "--ba", "90", "--mb", "0.9", "--batch-floor", "0.4",
+            "--tp",
+            "bern",
+            "--space",
+            "6",
+            "--batch",
+            "--mod-breaks",
+            "0.1",
+            "--of",
+            "x.png",
+            "-b",
+            "--batch-name",
+            "Steep valleys",
+            "--ba",
+            "90",
+            "--mb",
+            "0.9",
+            "--batch-floor",
+            "0.4",
         ]);
         let (prefix, secs) = split_batch_argv(&args).unwrap();
         let secs = secs.unwrap();

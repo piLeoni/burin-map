@@ -166,7 +166,11 @@ pub fn draw(
         })?),
         None => None,
     };
-    let frame = Frame { size_mm, pen_width: frame_pen_mm.unwrap_or(0.3), ..Frame::default() };
+    let frame = Frame {
+        size_mm,
+        pen_width: frame_pen_mm.unwrap_or(0.3),
+        ..Frame::default()
+    };
     let b = [west, south, east, north];
     let inner = burin_map::draw(&b, &st, &frame, |_| {}).map_err(js_err)?;
     Ok(Drawing { inner })
@@ -217,8 +221,7 @@ pub fn engine() -> String {
 /// Run the `burin-map` CLI (`argv[0]` is the program name).
 #[napi]
 pub fn run_cli(argv: Vec<String>) -> Result<()> {
-    burin_map::cli::run(argv)
-        .map_err(|e| Error::from_reason(e.to_string()))
+    burin_map::cli::run(argv).map_err(|e| Error::from_reason(e.to_string()))
 }
 
 #[napi]

@@ -23,7 +23,9 @@ fn style_from(d: Option<&Bound<'_, PyDict>>) -> PyResult<Style> {
         for (k, v) in d.iter() {
             let name: String = k.extract()?;
             if !st.set(&name, v.extract::<f64>()?) {
-                return Err(PyValueError::new_err(format!("unknown style parameter {name:?}")));
+                return Err(PyValueError::new_err(format!(
+                    "unknown style parameter {name:?}"
+                )));
             }
         }
     }
@@ -83,7 +85,9 @@ impl Map {
     }
     #[pyo3(signature = (mm_per_px=None))]
     fn svg(&self, mm_per_px: Option<f64>) -> String {
-        self.inner.drawing.to_svg(self.inner.style.batch_stroke, mm_per_px.map(|k| k as f32))
+        self.inner
+            .drawing
+            .to_svg(self.inner.style.batch_stroke, mm_per_px.map(|k| k as f32))
     }
     fn png<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         Ok(PyBytes::new(py, &self.inner.to_png().map_err(py_err)?))
@@ -95,7 +99,11 @@ impl Map {
 
 fn logger(log: Option<Py<PyAny>>) -> impl Fn(&burin_map::Progress) + Sync {
     move |p: &burin_map::Progress| {
-        if let burin_map::Progress::Tile { source: burin_map::TileSource::Cache, .. } = p {
+        if let burin_map::Progress::Tile {
+            source: burin_map::TileSource::Cache,
+            ..
+        } = p
+        {
             return;
         }
         if let Some(f) = &log {
@@ -112,7 +120,14 @@ fn style_params() -> Vec<(&'static str, f64, &'static str, &'static str)> {
     let d = Style::default();
     Style::PARAMS
         .iter()
-        .map(|p| (p.name, d.get(p.name).unwrap() as f32 as f64, p.help, p.group))
+        .map(|p| {
+            (
+                p.name,
+                d.get(p.name).unwrap() as f32 as f64,
+                p.help,
+                p.group,
+            )
+        })
         .collect()
 }
 
@@ -160,14 +175,22 @@ fn draw(
     let st = style_from(style)?;
     let size_mm = match frame_size_mm {
         Some(v) => Some(burin_map::document::size_pair(&v).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err("frame_size_mm needs 1 or 2 numbers: (side,) or (width, height)")
+            pyo3::exceptions::PyValueError::new_err(
+                "frame_size_mm needs 1 or 2 numbers: (side,) or (width, height)",
+            )
         })?),
         None => None,
     };
-    let frame = Frame { size_mm, pen_width: frame_pen_mm, ..Frame::default() };
+    let frame = Frame {
+        size_mm,
+        pen_width: frame_pen_mm,
+        ..Frame::default()
+    };
     let b = [bounds.0, bounds.1, bounds.2, bounds.3];
     let log = logger(log);
-    let inner = py.detach(|| burin_map::draw(&b, &st, &frame, log)).map_err(py_err)?;
+    let inner = py
+        .detach(|| burin_map::draw(&b, &st, &frame, log))
+        .map_err(py_err)?;
     Ok(Map { inner })
 }
 
@@ -183,12 +206,32 @@ fn draw_elevation(
     style: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Map> {
     if elev.len() != width * height * 4 {
-        return Err(PyValueError::new_err("elevation buffer does not match width × height"));
+        return Err(PyValueError::new_err(
+            "elevation buffer does not match width × height",
+        ));
     }
     let st = style_from(style)?;
-    let e: Vec<f32> = elev.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-    let drawing = py.detach(|| burin_map_core::draw_batches_auto(&e, width, height, px_m as f32, &[Batch::along(st.clone())]));
-    Ok(Map { inner: burin_map::Map { drawing, style: st, px_m, mm_per_px: None } })
+    let e: Vec<f32> = elev
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    let drawing = py.detach(|| {
+        burin_map_core::draw_batches_auto(
+            &e,
+            width,
+            height,
+            px_m as f32,
+            &[Batch::along(st.clone())],
+        )
+    });
+    Ok(Map {
+        inner: burin_map::Map {
+            drawing,
+            style: st,
+            px_m,
+            mm_per_px: None,
+        },
+    })
 }
 
 /// Derived rasters (tx, ty, input, space) as f32 bytes, for inspection.
@@ -202,14 +245,29 @@ fn fields<'py>(
     height: usize,
     px_m: f64,
     style: Option<&Bound<'_, PyDict>>,
-) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+) -> PyResult<(
+    Bound<'py, PyBytes>,
+    Bound<'py, PyBytes>,
+    Bound<'py, PyBytes>,
+    Bound<'py, PyBytes>,
+)> {
     if elev.len() != width * height * 4 {
-        return Err(PyValueError::new_err("elevation buffer does not match width × height"));
+        return Err(PyValueError::new_err(
+            "elevation buffer does not match width × height",
+        ));
     }
     let st = style_from(style)?;
-    let e: Vec<f32> = elev.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    let e: Vec<f32> = elev
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
     let f = py.detach(|| burin_map_core::build_fields(&e, width, height, px_m as f32, &st));
-    Ok((f32s(py, &f.tx), f32s(py, &f.ty), f32s(py, &f.input), f32s(py, &f.space)))
+    Ok((
+        f32s(py, &f.tx),
+        f32s(py, &f.ty),
+        f32s(py, &f.input),
+        f32s(py, &f.space),
+    ))
 }
 
 /// Run the `burin-map` command line with `argv` (program name first).

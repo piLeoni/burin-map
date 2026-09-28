@@ -8,7 +8,9 @@
 
 use std::time::Instant;
 
-use burin_map_core::{build_fields, dash_lines, pen_up_travel, plot_order, trace_streamlines, Drawing, Style};
+use burin_map_core::{
+    build_fields, dash_lines, pen_up_travel, plot_order, trace_streamlines, Drawing, Style,
+};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
@@ -19,14 +21,21 @@ fn main() {
     let (w, h): (usize, usize) = (a[2].parse().unwrap(), a[3].parse().unwrap());
     let px_m: f32 = a[4].parse().unwrap();
     let raw = std::fs::read(&a[1]).expect("read dem");
-    let elev: Vec<f32> = raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let elev: Vec<f32> = raw
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
     let st = Style::default();
 
     #[cfg(feature = "gpu")]
     let gpu = std::env::var("BURIN_GPU").is_ok().then(|| {
         let t = Instant::now();
         let g = burin_map_core::gpu::Gpu::new_blocking().expect("no GPU adapter");
-        println!("gpu init    {:7.0} ms  ({})", t.elapsed().as_secs_f64() * 1000.0, g.name);
+        println!(
+            "gpu init    {:7.0} ms  ({})",
+            t.elapsed().as_secs_f64() * 1000.0,
+            g.name
+        );
         let t = Instant::now();
         g.build_fields_blocking(&elev, w, h, px_m, &st);
         println!("gpu warm-up {:7.0} ms", t.elapsed().as_secs_f64() * 1000.0);
@@ -43,7 +52,12 @@ fn main() {
     let f = build_fields(&elev, w, h, px_m, &st);
     let t1 = Instant::now();
     if let Ok(dir) = std::env::var("BURIN_DUMP") {
-        for (name, v) in [("tx", &f.tx), ("ty", &f.ty), ("input", &f.input), ("space", &f.space)] {
+        for (name, v) in [
+            ("tx", &f.tx),
+            ("ty", &f.ty),
+            ("input", &f.input),
+            ("space", &f.space),
+        ] {
             let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
             std::fs::write(format!("{dir}/{name}.f32"), bytes).unwrap();
         }
@@ -59,10 +73,19 @@ fn main() {
     println!("fields      {:7.0} ms", ms(t0, t1));
     println!("streamlines {:7.0} ms  ({} lines)", ms(t1, t2), lines.len());
     println!("order       {:7.0} ms", ms(t2, t3));
-    println!("dashes      {:7.0} ms  ({} dashes)", ms(t3, t4), paths.len());
+    println!(
+        "dashes      {:7.0} ms  ({} dashes)",
+        ms(t3, t4),
+        paths.len()
+    );
     println!("total       {:7.0} ms", ms(t0, t4));
     println!("pen-up travel {:.0} px", pen_up_travel(&paths));
 
-    let d = Drawing { width: w, height: h, paths, lines };
+    let d = Drawing {
+        width: w,
+        height: h,
+        paths,
+        lines,
+    };
     std::fs::write(&a[5], d.to_svg(st.batch_stroke, None)).expect("write svg");
 }

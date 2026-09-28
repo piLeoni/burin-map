@@ -65,7 +65,11 @@ pub struct Frame {
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { px: 2400, size_mm: None, pen_width: 0.3 }
+        Frame {
+            px: 2400,
+            size_mm: None,
+            pen_width: 0.3,
+        }
     }
 }
 
@@ -80,7 +84,8 @@ pub struct Map {
 
 impl Map {
     pub fn to_svg(&self) -> String {
-        self.drawing.to_svg(self.style.batch_stroke, self.mm_per_px.map(|k| k as f32))
+        self.drawing
+            .to_svg(self.style.batch_stroke, self.mm_per_px.map(|k| k as f32))
     }
 
     pub fn to_png(&self) -> Result<Vec<u8>, Error> {
@@ -100,7 +105,9 @@ impl Map {
             deg_per_px_lon,
             deg_per_px_lat,
         };
-        burin_map_core::geojson::to_geojson(&self.drawing.paths, pix_w, pix_h, |x, y| tr.to_lonlat(x, y))
+        burin_map_core::geojson::to_geojson(&self.drawing.paths, pix_w, pix_h, |x, y| {
+            tr.to_lonlat(x, y)
+        })
     }
 }
 
@@ -151,8 +158,14 @@ pub fn draw_batches(
     let drawing = burin_map_core::draw_batches_auto(&dem.elev, w, h, dem.px_m as f32, batches);
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });
-    progress(&Progress::Lines { count: drawing.lines.len(), secs: secs * 0.5 });
-    progress(&Progress::Dashes { count: drawing.paths.len(), secs: secs * 0.2 });
+    progress(&Progress::Lines {
+        count: drawing.lines.len(),
+        secs: secs * 0.5,
+    });
+    progress(&Progress::Dashes {
+        count: drawing.paths.len(),
+        secs: secs * 0.2,
+    });
     Ok(Map {
         drawing,
         style: style.clone(),

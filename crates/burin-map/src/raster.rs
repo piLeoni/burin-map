@@ -12,7 +12,12 @@ pub fn to_png(paths: &[Line], width: usize, height: usize, stroke: f32) -> Resul
     let mut paint = Paint::default();
     paint.set_color_rgba8(0, 0, 0, 255);
     paint.anti_alias = true;
-    let st = Stroke { width: stroke, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+    let st = Stroke {
+        width: stroke,
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
     // One path per batch of dashes: far fewer calls than one per dash.
     for chunk in paths.chunks(256) {
         let mut pb = PathBuilder::new();
@@ -40,7 +45,8 @@ pub fn to_png(paths: &[Line], width: usize, height: usize, stroke: f32) -> Resul
         enc.set_color(png::ColorType::Grayscale);
         enc.set_depth(png::BitDepth::Eight);
         let mut w = enc.write_header().map_err(|e| Error::Data(e.to_string()))?;
-        w.write_image_data(&grey).map_err(|e| Error::Data(e.to_string()))?;
+        w.write_image_data(&grey)
+            .map_err(|e| Error::Data(e.to_string()))?;
     }
     Ok(out)
 }

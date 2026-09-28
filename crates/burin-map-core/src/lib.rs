@@ -25,7 +25,9 @@ pub use dashes::dash_lines;
 pub use fields::{batch_fields, build_fields, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, Line};
-pub use style::{from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS};
+pub use style::{
+    from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS,
+};
 
 /// Maps pixel coordinates back to geographic lon/lat. Pixel (0,0) is the
 /// north-west corner of the elevation grid; y grows southward.
@@ -44,7 +46,10 @@ pub struct GeoTransform {
 impl GeoTransform {
     /// Pixel `(x, y)` → `(lon, lat)`.
     pub fn to_lonlat(&self, x: f64, y: f64) -> (f64, f64) {
-        (self.nw_lon + x * self.deg_per_px_lon, self.nw_lat - y * self.deg_per_px_lat)
+        (
+            self.nw_lon + x * self.deg_per_px_lon,
+            self.nw_lat - y * self.deg_per_px_lat,
+        )
     }
 }
 
@@ -66,7 +71,13 @@ pub fn draw(elev: &[f32], width: usize, height: usize, px_m: f32, style: &Style)
 /// fields (direction, input) come from the first batch's style; each pass
 /// rotates that direction by its `angle` and uses its own space / dashes.
 /// Passes run in parallel.
-pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batches: &[Batch]) -> Drawing {
+pub fn draw_batches(
+    elev: &[f32],
+    width: usize,
+    height: usize,
+    px_m: f32,
+    batches: &[Batch],
+) -> Drawing {
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
 
@@ -80,7 +91,13 @@ pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batche
 ///
 /// On `wasm32` the GPU is driven from JavaScript (see `burin-map-wasm`), so
 /// there is nothing asynchronous to do here: it falls back to the CPU.
-pub fn draw_batches_auto(elev: &[f32], width: usize, height: usize, px_m: f32, batches: &[Batch]) -> Drawing {
+pub fn draw_batches_auto(
+    elev: &[f32],
+    width: usize,
+    height: usize,
+    px_m: f32,
+    batches: &[Batch],
+) -> Drawing {
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
         assert!(!batches.is_empty(), "need at least one batch");
@@ -122,7 +139,12 @@ pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
     if !paths.is_empty() {
         paths = plot_order(paths);
     }
-    Drawing { width, height, paths, lines }
+    Drawing {
+        width,
+        height,
+        paths,
+        lines,
+    }
 }
 
 impl Drawing {
@@ -132,7 +154,11 @@ impl Drawing {
         use std::fmt::Write;
         let (w, h) = (self.width, self.height);
         let size = match mm_per_px {
-            Some(k) => format!(r#"width="{:.2}mm" height="{:.2}mm""#, w as f32 * k, h as f32 * k),
+            Some(k) => format!(
+                r#"width="{:.2}mm" height="{:.2}mm""#,
+                w as f32 * k,
+                h as f32 * k
+            ),
             None => format!(r#"width="{w}" height="{h}""#),
         };
         let mut s = format!(
@@ -163,10 +189,12 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 let bump = |cx: f32, cy: f32, r: f32, hgt: f32| {
-                    hgt * (-((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)) / (2.0 * r * r)).exp()
+                    hgt * (-((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)) / (2.0 * r * r))
+                        .exp()
                 };
-                e[y * w + x] =
-                    (bump(150.0, 150.0, 60.0, 1500.0) + bump(270.0, 170.0, 40.0, 900.0) - 150.0).max(0.0);
+                e[y * w + x] = (bump(150.0, 150.0, 60.0, 1500.0) + bump(270.0, 170.0, 40.0, 900.0)
+                    - 150.0)
+                    .max(0.0);
             }
         }
         e
@@ -244,7 +272,12 @@ mod tests {
         let dc = draw_fields(&cpu, &[Batch::along(st.clone())]);
         let dg = draw_fields(&gpu, &[Batch::along(st)]);
         let ratio = dg.lines.len() as f32 / dc.lines.len() as f32;
-        assert!((0.8..1.25).contains(&ratio), "lines {} vs {}", dc.lines.len(), dg.lines.len());
+        assert!(
+            (0.8..1.25).contains(&ratio),
+            "lines {} vs {}",
+            dc.lines.len(),
+            dg.lines.len()
+        );
     }
 
     #[test]
@@ -271,9 +304,21 @@ mod tests {
             w,
             h,
             200.0,
-            &[Batch::along(st.clone()), Batch { name: None, angle: 90.0, style: st90 }],
+            &[
+                Batch::along(st.clone()),
+                Batch {
+                    name: None,
+                    angle: 90.0,
+                    style: st90,
+                },
+            ],
         );
-        assert!(d1.lines.len() > d0.lines.len(), "off={} on={}", d0.lines.len(), d1.lines.len());
+        assert!(
+            d1.lines.len() > d0.lines.len(),
+            "off={} on={}",
+            d0.lines.len(),
+            d1.lines.len()
+        );
     }
 
     #[test]
@@ -287,13 +332,19 @@ mod tests {
                 e[y * w + x] = (200.0 - (dx * dx + dy * dy).sqrt() * 2.0).max(0.0);
             }
         }
-        let mut st = Style::default();
-        st.dash_light = 1.0;
-        st.dash_dark = 1.0;
-        st.dash_drop = 0.0;
-        st.space_dark = 0.5;
-        st.space_light = 1.6;
+        let st = Style {
+            dash_light: 1.0,
+            dash_dark: 1.0,
+            dash_drop: 0.0,
+            space_dark: 0.5,
+            space_light: 1.6,
+            ..Style::default()
+        };
         let d = draw(&e, w, h, 30.0, &st);
-        assert_eq!(d.paths.len(), d.lines.len(), "each streamline stays one stroke");
+        assert_eq!(
+            d.paths.len(),
+            d.lines.len(),
+            "each streamline stays one stroke"
+        );
     }
 }

@@ -113,7 +113,11 @@ impl<'a> Tracer<'a> {
             return None;
         }
         let (u, v) = (u / n, v / n);
-        Some(if u * pu + v * pv < 0.0 { (-u, -v) } else { (u, v) })
+        Some(if u * pu + v * pv < 0.0 {
+            (-u, -v)
+        } else {
+            (u, v)
+        })
     }
 
     fn hits_itself(&self, own: &Own, x: f32, y: f32, k: i32) -> bool {
@@ -146,12 +150,16 @@ impl<'a> Tracer<'a> {
         let r_close = (self.sep_at(x0, y0) * self.st.engine_stop).max(1.5 * step);
         let mut pts = Vec::new();
         for i in 0..self.max_steps {
-            let Some(d1) = self.direction(x, y, pu, pv) else { break };
+            let Some(d1) = self.direction(x, y, pu, pv) else {
+                break;
+            };
             let (xm, ym) = (x + 0.5 * step * d1.0, y + 0.5 * step * d1.1);
             if !self.inside(xm, ym) {
                 break;
             }
-            let Some(d2) = self.direction(xm, ym, d1.0, d1.1) else { break };
+            let Some(d2) = self.direction(xm, ym, d1.0, d1.1) else {
+                break;
+            };
             x += step * d2.0;
             y += step * d2.1;
             (pu, pv) = d2;
@@ -185,8 +193,15 @@ impl<'a> Tracer<'a> {
             let q = (self.f.space[clamp(yi, h) * self.w + clamp(xi, w)] * 20.0).round();
             for (which, ratio) in [(0u64, self.st.engine_stop), (1u64, 0.95)] {
                 let key = (q as u64) << 1 | which;
-                let offsets = self.disks.entry(key).or_insert_with(|| disk(q / 20.0 * ratio));
-                let occ = if which == 0 { &mut self.occ_test } else { &mut self.occ_seed };
+                let offsets = self
+                    .disks
+                    .entry(key)
+                    .or_insert_with(|| disk(q / 20.0 * ratio));
+                let occ = if which == 0 {
+                    &mut self.occ_test
+                } else {
+                    &mut self.occ_seed
+                };
                 for &(dy, dx) in offsets.iter() {
                     occ[clamp(yi + dy, h) * self.w + clamp(xi + dx, w)] = true;
                 }
@@ -243,7 +258,8 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
         line_id: vec![-1; w * h],
         disks: FxMap::default(),
         cell: space_max.max(1.0),
-        lag: (std::f32::consts::TAU * space_max * st.engine_stop / st.engine_step).ceil() as i32 + 2,
+        lag: (std::f32::consts::TAU * space_max * st.engine_stop / st.engine_step).ceil() as i32
+            + 2,
         max_steps: (4.0 * (w + h) as f32 / st.engine_step) as usize,
     };
 
@@ -251,7 +267,11 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
     let g = (space_min as usize).max(2);
     let mut grid: Vec<(f32, f32)> = (2..h - 2)
         .step_by(g)
-        .flat_map(|y| (2..w - 2).step_by(g).map(move |x| (x as f32 + 0.5, y as f32 + 0.5)))
+        .flat_map(|y| {
+            (2..w - 2)
+                .step_by(g)
+                .map(move |x| (x as f32 + 0.5, y as f32 + 0.5))
+        })
         .collect();
     rng.shuffle(&mut grid);
     let mut grid_i = 0;
@@ -277,9 +297,16 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
         };
 
         let mut own = Own::default();
-        own.insert(cell_key((sx / t.cell) as i32, (sy / t.cell) as i32), vec![(0, sx, sy)]);
+        own.insert(
+            cell_key((sx / t.cell) as i32, (sy / t.cell) as i32),
+            vec![(0, sx, sy)],
+        );
         let (fwd, closed) = t.trace(sx, sy, 1.0, &mut own);
-        let bwd = if closed { Vec::new() } else { t.trace(sx, sy, -1.0, &mut own).0 };
+        let bwd = if closed {
+            Vec::new()
+        } else {
+            t.trace(sx, sy, -1.0, &mut own).0
+        };
         let mut pts: Line = bwd.into_iter().rev().collect();
         pts.push([sx, sy]);
         pts.extend(fwd);

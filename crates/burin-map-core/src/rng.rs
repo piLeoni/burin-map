@@ -10,7 +10,10 @@ pub struct Rng {
 
 impl Rng {
     pub fn new(seed: u64) -> Self {
-        let mut r = Rng { state: 0, inc: (seed << 1) | 1 };
+        let mut r = Rng {
+            state: 0,
+            inc: (seed << 1) | 1,
+        };
         r.next_u32();
         r.state = r.state.wrapping_add(0x853c_49e6_748f_ea9b ^ seed);
         r.next_u32();
@@ -126,7 +129,10 @@ mod tests {
         let mut b = Rng::new(3);
         let mut par = vec![0.0f32; n];
         b.fill_normal(&mut par);
-        assert!(seq.iter().zip(&par).all(|(x, y)| x.to_bits() == y.to_bits()));
+        assert!(seq
+            .iter()
+            .zip(&par)
+            .all(|(x, y)| x.to_bits() == y.to_bits()));
         assert_eq!(a.next_u32(), b.next_u32());
     }
 }

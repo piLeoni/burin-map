@@ -69,7 +69,10 @@ impl Document {
         let bare_list = strip_json5_comments(s).trim_start().starts_with('[');
         if bare_list {
             let batches: Vec<Batch> = json5::from_str(s)?;
-            return Ok(Document { area: None, batches });
+            return Ok(Document {
+                area: None,
+                batches,
+            });
         }
         json5::from_str(s)
     }
@@ -116,7 +119,8 @@ mod tests {
 
     #[test]
     fn parses_json5_with_comments() {
-        let doc = Document::parse(r#"
+        let doc = Document::parse(
+            r#"
             // Zermatt, A4
             {
               area: { at: "46.02,7.74", size_mm: [210, 297], },  // trailing commas are fine
@@ -124,7 +128,9 @@ mod tests {
                 /* one pass */
                 { "angle": 0, "style": { "space": 6, /* "dash_light": 0.2, */ } },
               ],
-            }"#).unwrap();
+            }"#,
+        )
+        .unwrap();
         assert_eq!(doc.area.unwrap().at.as_deref(), Some("46.02,7.74"));
         assert_eq!(doc.batches[0].style.space, 6.0);
         assert_eq!(doc.batches[0].style.dash_light, Style::default().dash_light);
@@ -182,7 +188,11 @@ mod tests {
     #[test]
     fn round_trips() {
         let doc = Document {
-            area: Some(AreaDoc { size_mm: Some(vec![210.0, 297.0]), scale: Some(25000.0), ..Default::default() }),
+            area: Some(AreaDoc {
+                size_mm: Some(vec![210.0, 297.0]),
+                scale: Some(25000.0),
+                ..Default::default()
+            }),
             batches: vec![Batch::along(Style::default())],
         };
         let json = serde_json::to_string(&doc).unwrap();

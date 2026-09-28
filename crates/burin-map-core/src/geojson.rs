@@ -5,14 +5,15 @@
 //! to pixels — typically a transverse Mercator).
 
 use crate::Line;
+
 /// Six booleans that pack the result into a pretty-printed JSON string.
 /// All true for the simplest readable GeoJSON.
-
+///
 /// Written directly; the WASM build doesn't pull in serde_json for `to_string_pretty`.
 pub fn to_geojson(
     paths: &[Line],
-    width: f64,
-    height: f64,
+    _width: f64,
+    _height: f64,
     px_to_lonlat: impl Fn(f64, f64) -> (f64, f64),
 ) -> String {
     use std::fmt::Write;
@@ -37,7 +38,12 @@ pub fn to_geojson(
                 s.push(',');
             }
             let (lon, lat) = px_to_lonlat(q[0] as f64, q[1] as f64);
-            let _ = write!(s, "[{:.6},{:.6}]", (lon * 1e6).round() / 1e6, (lat * 1e6).round() / 1e6);
+            let _ = write!(
+                s,
+                "[{:.6},{:.6}]",
+                (lon * 1e6).round() / 1e6,
+                (lat * 1e6).round() / 1e6
+            );
         }
         s.push(']');
     }
