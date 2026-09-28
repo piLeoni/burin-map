@@ -4,7 +4,7 @@
 //! numpy at build time and one abi3 wheel serves every Python version.
 
 use burin_map::{Error, Frame, Style};
-use burin_map_core::Line;
+use burin_map_core::{Batch, Line};
 use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -187,7 +187,7 @@ fn draw_elevation(
     }
     let st = style_from(style)?;
     let e: Vec<f32> = elev.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-    let drawing = py.detach(|| burin_map_core::draw(&e, width, height, px_m as f32, &st));
+    let drawing = py.detach(|| burin_map_core::draw_batches_auto(&e, width, height, px_m as f32, &[Batch::along(st.clone())]));
     Ok(Map { inner: burin_map::Map { drawing, style: st, px_m, mm_per_px: None } })
 }
 
@@ -219,6 +219,32 @@ fn run_cli(py: Python<'_>, argv: Vec<String>) -> PyResult<()> {
         .map_err(PyRuntimeError::new_err)
 }
 
+#[cfg(feature = "gpu")]
+#[pyfunction]
+fn force_cpu() {
+    burin_map::engine::force_cpu();
+}
+
+#[cfg(feature = "gpu")]
+#[pyfunction]
+fn force_gpu() -> bool {
+    burin_map::engine::force_gpu();
+    burin_map::engine::device().is_some()
+}
+
+/// Which device builds the terrain fields: "CPU (forced)", "GPU: <name>", …
+#[cfg(feature = "gpu")]
+#[pyfunction]
+fn engine() -> String {
+    burin_map::engine::describe()
+}
+
+#[cfg(not(feature = "gpu"))]
+#[pyfunction]
+fn engine() -> String {
+    "CPU (built without the gpu feature)".to_string()
+}
+
 #[pymodule]
 fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -232,6 +258,12 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(draw, m)?)?;
     m.add_function(wrap_pyfunction!(draw_elevation, m)?)?;
     m.add_function(wrap_pyfunction!(fields, m)?)?;
+    m.add_function(wrap_pyfunction!(engine, m)?)?;
+    #[cfg(feature = "gpu")]
+    {
+        m.add_function(wrap_pyfunction!(force_cpu, m)?)?;
+        m.add_function(wrap_pyfunction!(force_gpu, m)?)?;
+    }
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     Ok(())
 }

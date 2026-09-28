@@ -50,9 +50,19 @@ export declare function styleGroups(): Array<[string, string]>
 export declare function styleParams(): Array<[string, number, string, string]>
 
 /**
- * Build terrain fields on the GPU from now on (see `burin_map::use_gpu`).
- * Returns the adapter name, or null when there is no usable GPU.
+ * Build terrain fields on the GPU. Kept for callers that asked for it: the
+ * default is already "GPU when there is one". Returns the adapter name, or
+ * null when there is no usable GPU.
  */
 export declare function useGpu(): string | null
+
+/** Never build the fields on the GPU: reproducible output, for tests. */
+export declare function forceCpu(): void
+
+/** Insist on the GPU. False when there is none, and the fields stay on the CPU. */
+export declare function forceGpu(): boolean
+
+/** Which device builds the fields: "CPU (forced)", "GPU: <name>", … */
+export declare function engine(): string
 
 export declare function version(): string

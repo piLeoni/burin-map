@@ -9,6 +9,8 @@
 //! run in parallel and are merged.
 
 mod dashes;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod engine;
 mod fields;
 pub mod geojson;
 #[cfg(feature = "gpu")]
@@ -70,6 +72,22 @@ pub fn draw_batches(elev: &[f32], width: usize, height: usize, px_m: f32, batche
 
     let f = build_fields(elev, width, height, px_m, &batches[0].style);
     draw_fields(&f, batches)
+}
+
+/// [`draw_batches`] on whichever device [`engine`] picked: the GPU when the
+/// machine has one, the CPU otherwise. This is what the CLI, the bindings and
+/// the browser call — the drawing is the product, so they should not care.
+///
+/// On `wasm32` the GPU is driven from JavaScript (see `burin-map-wasm`), so
+/// there is nothing asynchronous to do here: it falls back to the CPU.
+pub fn draw_batches_auto(elev: &[f32], width: usize, height: usize, px_m: f32, batches: &[Batch]) -> Drawing {
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    if let Some(g) = engine::device() {
+        assert!(!batches.is_empty(), "need at least one batch");
+        let f = g.build_fields_blocking(elev, width, height, px_m, &batches[0].style);
+        return draw_fields(&f, batches);
+    }
+    draw_batches(elev, width, height, px_m, batches)
 }
 
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`) with the

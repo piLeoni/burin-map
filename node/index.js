@@ -789,4 +789,7 @@ module.exports.styleFromJson = nativeBinding.styleFromJson
 module.exports.styleGroups = nativeBinding.styleGroups
 module.exports.styleParams = nativeBinding.styleParams
 module.exports.useGpu = nativeBinding.useGpu
+module.exports.forceCpu = nativeBinding.forceCpu
+module.exports.forceGpu = nativeBinding.forceGpu
+module.exports.engine = nativeBinding.engine
 module.exports.version = nativeBinding.version

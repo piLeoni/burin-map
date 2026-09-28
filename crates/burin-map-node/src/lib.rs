@@ -197,12 +197,40 @@ pub fn draw_elevation(
     })
 }
 
-/// Build terrain fields on the GPU from now on (see `burin_map::use_gpu`).
-/// Returns the adapter name, or null when there is no usable GPU.
+/// Build terrain fields on the GPU. Kept for callers that asked for it; the
+/// default is already "GPU when there is one". Returns the adapter name, or
+/// null when there is no usable GPU.
 #[cfg(feature = "gpu")]
 #[napi]
 pub fn use_gpu() -> Option<String> {
-    burin_map::use_gpu().map(str::to_string)
+    burin_map::engine::force_gpu();
+    burin_map::engine::device().map(|g| g.name.to_string())
+}
+
+/// Never build the fields on the GPU: reproducible output, for tests and
+/// golden files.
+#[cfg(feature = "gpu")]
+#[napi]
+pub fn force_cpu() {
+    burin_map::engine::force_cpu();
+}
+
+/// Insist on the GPU. Returns false when there is none, in which case the
+/// fields stay on the CPU.
+#[cfg(feature = "gpu")]
+#[napi]
+pub fn force_gpu() -> bool {
+    burin_map::engine::force_gpu();
+    burin_map::engine::device().is_some()
+}
+
+/// Which device builds the terrain fields: "CPU (forced)", "GPU: <name>", …
+#[napi]
+pub fn engine() -> String {
+    #[cfg(feature = "gpu")]
+    return burin_map::engine::describe();
+    #[cfg(not(feature = "gpu"))]
+    return "CPU (built without the gpu feature)".to_string();
 }
 
 /// Run the `burin-map` CLI (`argv[0]` is the program name).

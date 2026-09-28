@@ -527,26 +527,45 @@ extension, `cd node && npm run build` for the Node addon, and re-run
 
 None chosen yet: all rights reserved for now.
 
-### GPU fields (experimental)
+### GPU fields
 
 Build the terrain fields (blurs, direction, shading, spacing) on the GPU
 instead of the CPU: wgpu on the desktop (Metal, Vulkan, DX12), WebGPU in the
 browser. Tracing stays on the CPU, since it is inherently sequential; on a
 big grid the fields are about 2.5× faster, which is 15–20% of the whole draw.
 
+**This is the default, and there is no switch to flip.** The fastest device
+the machine offers is simply the right one: the drawing is the product, and
+nobody should have to know which chip traced it. A machine without a GPU (or
+without WebGPU in the browser) builds the fields on the CPU and the drawing
+comes out the same shape.
+
+The escape hatch is for the cases that genuinely need reproducible bytes — a
+golden-file test, a share link, a bug report:
+
 ```bash
-burin-map --tp san-francisco --gpu --out-file sf.svg
+burin-map --force-cpu --tp san-francisco --out-file sf.svg
+BURIN_ENGINE=cpu burin-map --tp san-francisco --out-file sf.svg
+```
+
+`--force-gpu` insists on the GPU and *fails* when there is none, rather than
+quietly falling back; `--gpu` is kept as an alias. The environment variable
+`BURIN_ENGINE=cpu|gpu|auto` does the same for the CLI, Node and Python, so a
+script or a test suite can settle it without a code path. Python and Node
+also expose `force_cpu()`/`forceCpu()`, `force_gpu()`/`forceGpu()` and
+`engine()`, which reports what is in use:
+
+```python
+>>> burin_map.engine()
+'GPU: Apple M4 (Metal)'
 ```
 
 The math is the same, but the GPU works in f32 while the CPU path uses f64
 for the blurs, and no two float implementations round the same way. Those
 last-bit differences are what the tracer amplifies: the GPU drawing has the
 same terrain, the same lines per area and the same ink coverage, but every
-dash lands in a slightly different place. It is also not reproducible across
-GPU vendors. Anything that has to be reproducible — share links, the CLI
-default, the Python and Node packages — therefore stays on the CPU; the
-browser app has a CPU/GPU switch next to the counters, and the Node bindings
-expose `useGpu()`.
+dash lands in a slightly different place, and it is not reproducible across
+GPU vendors. That is the only reason `--force-cpu` exists.
 
 Building it for the web needs WebGPU in the browser (Chrome and Safari 26 on
 recent releases, Firefox behind a flag). The WASM packages are built with it

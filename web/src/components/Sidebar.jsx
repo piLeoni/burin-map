@@ -272,8 +272,8 @@ export default function Sidebar({ open, onClose, status, drawing }) {
                   + (drawing.gpu === false ? ' · no WebGPU' : '')
                 : '-'}
             </span>
-            <div className="join shrink-0" title="Build the terrain fields on the CPU or on the GPU (WebGPU). The GPU is faster; its lines come out slightly different.">
-              {['cpu', 'gpu'].map((id) => (
+            <div className="join shrink-0" title="Auto builds the terrain fields on the GPU when the browser has WebGPU, and on the CPU otherwise. CPU forces the CPU: slower, but bit-for-bit reproducible.">
+              {['auto', 'cpu'].map((id) => (
                 <button
                   key={id}
                   type="button"

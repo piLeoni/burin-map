@@ -109,7 +109,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
         nw_lat: bounds.north,
         deg_per_px_lon: (bounds.east - bounds.west) / outW,
         deg_per_px_lat: (bounds.north - bounds.south) / outH,
-      }, null, { gpu: engineRef.current === 'gpu' })
+      }, null, { gpu: engineRef.current !== 'cpu' })
       if (my !== genRef.current || movingRef.current) return
 
       onDrawing({

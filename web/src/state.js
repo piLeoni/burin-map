@@ -65,8 +65,25 @@ export const styleAtom = atom(
 /** The user's comments in the editor, by path (see lib/views.js). */
 export const notesAtom = atomWithStorage('burin-map.notes.v1', {})
 
-/** Where terrain fields are built: 'cpu', or 'gpu' (WebGPU; lines differ slightly). */
-export const engineAtom = atomWithStorage('burin-map.engine', 'cpu', undefined, { getOnInit: true })
+/**
+ * Where terrain fields are built. `auto` uses the GPU when the browser has
+ * WebGPU, which is what almost everyone wants: same drawing, built faster.
+ * `cpu` is the escape hatch for reproducible output (`?force-cpu` in the URL).
+ *
+ * The key used to hold 'cpu' | 'gpu'. 'gpu' is what 'auto' now does, so the
+ * old value is rewritten once, before the atom first reads it — otherwise an
+ * upgraded page would leave the toggle on nothing.
+ */
+if (typeof window !== 'undefined' && window.localStorage?.getItem('burin-map.engine') === '"gpu"') {
+  window.localStorage.setItem('burin-map.engine', '"auto"')
+}
+
+export const engineAtom = atomWithStorage(
+  'burin-map.engine',
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('force-cpu') ? 'cpu' : 'auto',
+  undefined,
+  { getOnInit: true },
+)
 
 /** Which way the editor writes the document: 'yaml', 'json5' or 'cli'. */
 export const viewKindAtom = atomWithStorage('burin-map.view', 'yaml')
