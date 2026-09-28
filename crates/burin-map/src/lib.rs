@@ -107,15 +107,6 @@ impl Map {
 #[cfg(feature = "gpu")]
 pub use burin_map_core::engine;
 
-/// Build terrain fields on the GPU from now on. Kept for callers that asked
-/// for it explicitly; the default is already "GPU when there is one".
-/// Returns the adapter name, or `None` when there is no usable GPU.
-#[cfg(feature = "gpu")]
-pub fn use_gpu() -> Option<&'static str> {
-    engine::force_gpu();
-    engine::device().map(|g| g.name.as_str())
-}
-
 /// Download SRTM elevation for `bounds` and draw it with a single batch.
 pub fn draw(
     bounds: &Bounds,

@@ -50,9 +50,7 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("out-geojson", "", Takes::One),
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
-    ("gpu", "", Takes::Zero),
     ("force-cpu", "", Takes::Zero),
-    ("force-gpu", "", Takes::Zero),
 ];
 
 fn short_of(long: &str) -> &'static str {
@@ -106,14 +104,9 @@ pub fn command() -> Command {
             .help("png, svg, both, or geojson; default from the --out-file extension"))
         .arg(global("out-geojson").value_name("PATH").value_parser(value_parser!(PathBuf))
             .help("write a GeoJSON FeatureCollection with geographic coordinates"))
-        .arg(global("gpu").action(ArgAction::SetTrue)
-            .help("alias of --force-gpu, kept for compatibility"))
         .arg(global("force-cpu").action(ArgAction::SetTrue)
-            .help("build the terrain fields on the CPU even when a GPU is available \
-                   (bit-for-bit reproducible, unlike the GPU)"))
-        .arg(global("force-gpu").action(ArgAction::SetTrue)
-            .help("insist on the GPU; fails if there is none. The default already \
-                   uses the GPU when the machine has one"))
+            .help("build the terrain fields on the CPU even when a GPU is available. Slower, but \
+                   bit-for-bit reproducible, unlike the GPU"))
         .next_help_heading("Batch — parallel drawing passes")
         .arg(Arg::new("batch").long("batch").short('b').action(ArgAction::Append).num_args(0)
             .help("start a pass (may repeat). Flags after each --batch apply to that pass until the \
@@ -421,27 +414,9 @@ where
 
     let r = Report::new();
     #[cfg(feature = "gpu")]
-    {
-        if m.get_flag("force-cpu") {
-            crate::engine::force_cpu();
-        }
-        // `--gpu` is the old spelling of `--force-gpu`.
-        if m.get_flag("force-gpu") || m.get_flag("gpu") {
-            crate::engine::force_gpu();
-        }
-        if m.get_flag("force-cpu") && (m.get_flag("force-gpu") || m.get_flag("gpu")) {
-            return Err("--force-cpu and --force-gpu contradict each other".into());
-        }
-        if crate::engine::gpu_unavailable() {
-            return Err("--force-gpu was given but no usable GPU is available".into());
-        }
-        if m.get_flag("force-cpu") || m.get_flag("force-gpu") || m.get_flag("gpu") {
-            r.detail(&format!("terrain fields on the {}", crate::engine::describe()));
-        }
-    }
-    #[cfg(not(feature = "gpu"))]
-    if m.get_flag("force-gpu") || m.get_flag("gpu") {
-        return Err("this build has no gpu feature, so the terrain fields cannot go on the GPU".into());
+    if m.get_flag("force-cpu") {
+        crate::engine::force_cpu();
+        r.detail(&format!("terrain fields on the {}", crate::engine::describe()));
     }
     if m.get_one::<String>("terrain-at").is_some() || doc.area.as_ref().is_some_and(|a| a.at.is_some()) {
         r.transient("where", "looking up the place");

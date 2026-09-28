@@ -225,14 +225,7 @@ fn force_cpu() {
     burin_map::engine::force_cpu();
 }
 
-#[cfg(feature = "gpu")]
-#[pyfunction]
-fn force_gpu() -> bool {
-    burin_map::engine::force_gpu();
-    burin_map::engine::device().is_some()
-}
-
-/// Which device builds the terrain fields: "CPU (forced)", "GPU: <name>", …
+/// Where the fields are built: "GPU: Apple M4 (Metal)", "CPU (forced)", …
 #[cfg(feature = "gpu")]
 #[pyfunction]
 fn engine() -> String {
@@ -260,10 +253,7 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fields, m)?)?;
     m.add_function(wrap_pyfunction!(engine, m)?)?;
     #[cfg(feature = "gpu")]
-    {
-        m.add_function(wrap_pyfunction!(force_cpu, m)?)?;
-        m.add_function(wrap_pyfunction!(force_gpu, m)?)?;
-    }
+    m.add_function(wrap_pyfunction!(force_cpu, m)?)?;
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     Ok(())
 }

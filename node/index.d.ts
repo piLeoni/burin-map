@@ -49,20 +49,10 @@ export declare function styleGroups(): Array<[string, string]>
 /** `(name, default, help, group)` for every style parameter. */
 export declare function styleParams(): Array<[string, number, string, string]>
 
-/**
- * Build terrain fields on the GPU. Kept for callers that asked for it: the
- * default is already "GPU when there is one". Returns the adapter name, or
- * null when there is no usable GPU.
- */
-export declare function useGpu(): string | null
-
 /** Never build the fields on the GPU: reproducible output, for tests. */
 export declare function forceCpu(): void
 
-/** Insist on the GPU. False when there is none, and the fields stay on the CPU. */
-export declare function forceGpu(): boolean
-
-/** Which device builds the fields: "CPU (forced)", "GPU: <name>", … */
+/** Where the fields are built: "GPU: Apple M4 (Metal)", "CPU (forced)", … */
 export declare function engine(): string
 
 export declare function version(): string

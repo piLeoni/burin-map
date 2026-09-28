@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom } from 'jotai'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
 import { drawBatches } from '../lib/burin'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg } from '../lib/crop'
-import { mapViewAtom, cameraRequestAtom, frameAtom, engineAtom } from '../state'
+import { mapViewAtom, cameraRequestAtom, frameAtom, forceCpu } from '../state'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
 const SETTLE_MS = 90
@@ -29,9 +29,6 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
   const settleTimer = useRef(0)
   const batchesRef = useRef(batches)
   batchesRef.current = batches
-  const engine = useAtomValue(engineAtom)
-  const engineRef = useRef(engine)
-  engineRef.current = engine
   const convertRef = useRef(async () => {})
 
   const [, setMapView] = useAtom(mapViewAtom)
@@ -109,7 +106,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
         nw_lat: bounds.north,
         deg_per_px_lon: (bounds.east - bounds.west) / outW,
         deg_per_px_lat: (bounds.north - bounds.south) / outH,
-      }, null, { gpu: engineRef.current !== 'cpu' })
+      }, null, { gpu: !forceCpu })
       if (my !== genRef.current || movingRef.current) return
 
       onDrawing({
@@ -254,31 +251,6 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     onDrawing(null)
     scheduleConvert(120)
   }, [batches, scheduleConvert, onDrawing])
-
-  const firstEngine = useRef(true)
-  useEffect(() => {
-    if (firstEngine.current) {
-      // The atom now reads localStorage on init (getOnInit), so the engine is
-      // already correct on the first draw: nothing to do at mount.
-      firstEngine.current = false
-      return
-    }
-    if (!readyRef.current || !mapRef.current) return
-    // A move in progress only postpones the redraw; never drop the switch.
-    onDrawing(null)
-    scheduleConvert(movingRef.current ? 200 : 0)
-  }, [engine, scheduleConvert, onDrawing])
-
-  // The engine buttons ask for a redraw when you click the one already active.
-  useEffect(() => {
-    const onRedraw = () => {
-      if (!readyRef.current || !mapRef.current) return
-      onDrawing(null)
-      scheduleConvert(movingRef.current ? 200 : 0)
-    }
-    window.addEventListener('burin:redraw', onRedraw)
-    return () => window.removeEventListener('burin:redraw', onRedraw)
-  }, [scheduleConvert, onDrawing])
 
   useEffect(() => {
     if (!cameraRequest || !readyRef.current) return

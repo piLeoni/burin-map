@@ -548,12 +548,11 @@ burin-map --force-cpu --tp san-francisco --out-file sf.svg
 BURIN_ENGINE=cpu burin-map --tp san-francisco --out-file sf.svg
 ```
 
-`--force-gpu` insists on the GPU and *fails* when there is none, rather than
-quietly falling back; `--gpu` is kept as an alias. The environment variable
-`BURIN_ENGINE=cpu|gpu|auto` does the same for the CLI, Node and Python, so a
-script or a test suite can settle it without a code path. Python and Node
-also expose `force_cpu()`/`forceCpu()`, `force_gpu()`/`forceGpu()` and
-`engine()`, which reports what is in use:
+`--force-cpu` is the only flag: there is nothing to turn *on*. The environment
+variable `BURIN_ENGINE=cpu` does the same for the CLI, Node and Python, so a
+script or a test suite can settle it without a code path, and `?force-cpu` in
+the browser URL does it for a single page. Python and Node also expose
+`force_cpu()`/`forceCpu()` and `engine()`, which reports what is in use:
 
 ```python
 >>> burin_map.engine()

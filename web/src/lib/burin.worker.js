@@ -36,7 +36,10 @@ function loadGpu(m) {
   gpu ??= (async () => {
     if (!navigator.gpu || !m.initGpu) return null
     try {
-      return (await m.initGpu()) ?? null
+      const name = await m.initGpu()
+      // The backend reports "(BrowserWebGpu)" with an empty adapter name on the
+      // web, which would render as a stray double space in the counters.
+      return name?.replace(/\s*\(([^)]+)\)/, ' $1').trim() || null
     } catch (e) {
       console.warn('burin-map: WebGPU unavailable, drawing on the CPU', e)
       return null

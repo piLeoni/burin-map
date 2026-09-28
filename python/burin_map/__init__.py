@@ -23,7 +23,7 @@ import numpy as np
 from . import _burin
 
 __all__ = ["Drawing", "Style", "bounds_around", "draw", "draw_elevation", "engine",
-           "fields", "force_cpu", "force_gpu", "locate", "projected_size", "style_groups",
+           "fields", "force_cpu", "locate", "projected_size", "style_groups",
            "style_help"]
 __version__ = _burin.__version__
 
@@ -32,28 +32,18 @@ Bounds = tuple[float, float, float, float]  # west, south, east, north (degrees)
 
 
 def engine() -> str:
-    """Which device builds the terrain fields: the GPU when the machine has
-    one, the CPU otherwise. The drawing is the same shape either way; the GPU
-    is faster but its float maths lands every dash in a slightly different
-    place, and differently on each GPU."""
+    """Where the terrain fields are built. The GPU when the machine has one,
+    the CPU when it does not: the drawing is the same shape either way."""
     return _burin.engine()
 
 
 def force_cpu() -> None:
-    """Never build the fields on the GPU. Use it when the output has to be
-    reproducible — tests, golden files, bug reports — since the GPU is not
-    bit-for-bit stable across machines."""
+    """Build the fields on the CPU from now on. Slower, but bit-for-bit
+    reproducible — the GPU works in f32 and lands every dash in a slightly
+    different place, differently on each GPU."""
     if not hasattr(_burin, "force_cpu"):
         return
     _burin.force_cpu()
-
-
-def force_gpu() -> bool:
-    """Insist on the GPU. Returns True when one was found; the fields stay on
-    the CPU when it returns False, since a missing GPU is not an error."""
-    if not hasattr(_burin, "force_gpu"):
-        return False
-    return _burin.force_gpu()
 
 # Every drawing parameter, with its default and description, as declared in
 # the Rust engine. Lengths are in output pixels, so the same style gives the
