@@ -212,8 +212,10 @@ fn draw_elevation(
     }
     let st = style_from(style)?;
     let e: Vec<f32> = elev
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect();
     let drawing = py.detach(|| {
         burin_map_core::draw_batches_auto(
@@ -258,8 +260,10 @@ fn fields<'py>(
     }
     let st = style_from(style)?;
     let e: Vec<f32> = elev
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect();
     let f = py.detach(|| burin_map_core::build_fields(&e, width, height, px_m as f32, &st));
     Ok((

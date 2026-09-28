@@ -38,7 +38,13 @@ pub fn to_png(paths: &[Line], width: usize, height: usize, stroke: f32) -> Resul
     }
 
     // Opaque on white, so any channel is the grey level.
-    let grey: Vec<u8> = pm.data().chunks_exact(4).map(|px| px[0]).collect();
+    let grey: Vec<u8> = pm
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|px| px[0])
+        .collect();
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, width as u32, height as u32);

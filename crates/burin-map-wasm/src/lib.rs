@@ -148,7 +148,12 @@ impl Drawing {
             for &e in &ends {
                 if e > start {
                     let slice = &pts[start as usize * 2..e as usize * 2];
-                    let line: Line = slice.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+                    let line: Line = slice
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| [c[0], c[1]])
+                        .collect();
                     out.push(line);
                 }
                 start = e;
