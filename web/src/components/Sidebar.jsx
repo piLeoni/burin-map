@@ -267,6 +267,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
             <span className="shrink-0 tabular-nums opacity-60">
               {drawing
                 ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
+                  + (drawing.threads > 1 ? ` · ${drawing.threads} threads` : '')
                 : '-'}
             </span>
             <span className={`ml-auto truncate tracking-wider uppercase ${status.phase === 'error' ? 'text-error' : 'opacity-40'}`}>

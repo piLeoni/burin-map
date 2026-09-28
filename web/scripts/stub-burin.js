@@ -21,4 +21,6 @@ export async function loadBurin() {
 }
 
 export function paintDrawing() {}
-export function drawBatches() {}
+export async function drawBatches() {
+  throw new Error('not used in render test')
+}

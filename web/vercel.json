@@ -4,5 +4,14 @@
       "source": "/terrarium/:path*",
       "destination": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/:path*"
     }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    }
   ]
 }

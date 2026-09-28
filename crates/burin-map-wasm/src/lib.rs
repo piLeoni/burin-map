@@ -8,6 +8,11 @@ use burin_map_core::{Batch, GeoTransform, Line, Style};
 use js_sys::{Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::prelude::*;
 
+/// `initThreadPool(n)`: start `n` Web Workers sharing this module's memory.
+/// Call once, from a worker, before drawing.
+#[cfg(feature = "threads")]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
     let mut st = Style::default();
     if obj.is_undefined() || obj.is_null() {

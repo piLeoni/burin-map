@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Cross-origin isolation, so the drawing worker can use the threaded engine
+// (SharedArrayBuffer). Same headers in vercel.json.
+const isolation = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -47,8 +54,11 @@ export default defineConfig({
       },
     }),
   ],
+  worker: { format: 'es' },
+  preview: { headers: isolation },
   server: {
     port: 8765,
+    headers: isolation,
     proxy: {
       // AWS S3 answers CORS preflights but not GETs — proxy so we can read pixels.
       '/terrarium': {

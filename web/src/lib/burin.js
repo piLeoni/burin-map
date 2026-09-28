@@ -1,4 +1,7 @@
-/** Load the burin-map WASM module once and paint drawings to a canvas. */
+/**
+ * The burin-map WASM engine: loaded on the page for the style schema, and in
+ * a Web Worker (burin.worker.js) for drawing.
+ */
 
 let ready = null
 
@@ -51,9 +54,32 @@ export function paintDrawing(canvas, drawing, style) {
   }
 }
 
+let worker = null
+let nextId = 0
+const pending = new Map()
+
+function drawWorker() {
+  if (!worker) {
+    worker = new Worker(new URL('./burin.worker.js', import.meta.url), { type: 'module' })
+    worker.onmessage = ({ data }) => {
+      const p = pending.get(data.id)
+      if (!p) return
+      pending.delete(data.id)
+      if (data.ok) p.resolve(data.result)
+      else p.reject(new Error(data.error))
+    }
+    worker.onerror = (e) => {
+      for (const p of pending.values()) p.reject(new Error(e.message || 'drawing worker failed'))
+      pending.clear()
+      worker = null
+    }
+  }
+  return worker
+}
+
 /**
- * Draw with multiple batch passes using draw_batches.
- * @param {object} burin
+ * Draw with multiple batch passes, in a Web Worker (threaded when the page is
+ * cross-origin isolated). `elev` is transferred to the worker: don't reuse it.
  * @param {Float32Array} elev
  * @param {number} width
  * @param {number} height
@@ -61,9 +87,9 @@ export function paintDrawing(canvas, drawing, style) {
  * @param {Array<{angle:number,style:Record<string,number>}>} batches
  * @param {{ nw_lon: number, nw_lat: number, deg_per_px_lon: number, deg_per_px_lat: number }} [geo]
  * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
- * @returns {object} drawing result
+ * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number }>}
  */
-export function drawBatches(burin, elev, width, height, pxM, batches, geo, mmPerPx) {
+export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx) {
   const list = Array.isArray(batches) ? batches : []
   const json = JSON.stringify(list.map((b) => ({
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
@@ -73,5 +99,9 @@ export function drawBatches(burin, elev, width, height, pxM, batches, geo, mmPer
       ),
     ),
   })))
-  return burin.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
+  const id = ++nextId
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx }, [elev.buffer])
+  })
 }

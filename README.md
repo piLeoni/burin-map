@@ -360,6 +360,8 @@ node/                   npm package: loader, `cli.js` for `npx`, native `.node`
 web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
   public/pkg/           wasm-pack output (served statically)
+  public/pkg-mt/        the same, multi-threaded (needs cross-origin isolation)
+  build-wasm.sh         build both WASM packages
   serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
 examples/               PNG gallery for the README
 ```
@@ -369,17 +371,26 @@ dependencies at all, so the same code builds for the browser.
 
 ## WebAssembly
 
-The same drawing engine runs in the browser via `burin-map-wasm`. Build it
-with [wasm-pack](https://rustwasm.github.io/wasm-pack/):
+The same drawing engine runs in the browser via `burin-map-wasm`.
+`web/build-wasm.sh` builds it with [wasm-pack](https://rustwasm.github.io/wasm-pack/)
+into two packages, served from `web/public/`:
 
-```bash
-cd crates/burin-map-wasm
-wasm-pack build --target web --release --out-dir ../../web/pkg
-cp -R ../../web/pkg ../../web/public/pkg   # Vite serves static files from public/
-```
+- `pkg/`: single-threaded, stable Rust. Works on any page.
+- `pkg-mt/`: multi-threaded with [wasm-bindgen-rayon](https://github.com/RReverser/wasm-bindgen-rayon).
+  Batches and the terrain fields use every core (about 1.4× faster for one
+  batch, 1.65× for two, in Chrome on a 10-core Mac; the drawing is identical).
+  It needs `SharedArrayBuffer`, so the page must be cross-origin isolated
+  (`Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`), and a pinned nightly
+  toolchain to rebuild the standard library with atomics. Without it the
+  script builds only `pkg/`:
 
-That produces `burin_map_wasm.js` + `.wasm`. From a page (or the demo in
-`web/`):
+  ```bash
+  rustup toolchain install nightly-2026-04-14 --profile minimal \
+    --component rust-src --target wasm32-unknown-unknown
+  ```
+
+From a page (or the demo in `web/`):
 
 ```js
 import init, { draw, style_params } from "./pkg/burin_map_wasm.js";
@@ -390,9 +401,12 @@ const result = draw(elev, width, height, pxM /* metres per pixel */, {
   space: 4.8,
   mod_wobble: 20,
 });
-result.paths();   // packed Float32Array for canvas stroking
-result.svg();     // SVG document string
+result.paths;   // packed Float32Array for canvas stroking
+result.svg;     // SVG document string
 ```
+
+With `pkg-mt/`, run it in a Web Worker and call
+`await initThreadPool(navigator.hardwareConcurrency)` once after `init()`.
 
 You still need elevation yourself (the web demo stitches Terrarium DEM tiles
 for the map viewport). Style knobs match the CLI / Python API; call
@@ -425,6 +439,12 @@ cd web && npm run dev
 
 Vite proxies `/terrarium/…` to AWS (S3 has no CORS on GET). The Vercel
 deploy uses a rewrite for the same path (`web/vercel.json`).
+
+Drawing runs in a Web Worker (`src/lib/burin.worker.js`), so the map stays
+responsive. Both the dev server and the Vercel deploy send the cross-origin
+isolation headers, so the worker uses the threaded engine and the status line
+shows the thread count. Without isolation, or if `pkg-mt/` fails to load, it
+falls back to the single-threaded one.
 
 ### Documents and share links
 
@@ -501,7 +521,7 @@ cargo run --release -- --terrain-place bern --out-file bern.png   # try the CLI 
 
 After changing Rust code, `pip install -e .` again to rebuild the Python
 extension, `cd node && npm run build` for the Node addon, and re-run
-`./web/serve.sh` (or just the `wasm-pack` line in it) for the browser.
+`./web/serve.sh` (or just `./web/build-wasm.sh`) for the browser.
 
 ## Licence
 

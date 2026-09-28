@@ -3,7 +3,7 @@ import { useAtom } from 'jotai'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
-import { loadBurin, drawBatches } from '../lib/burin'
+import { drawBatches } from '../lib/burin'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg } from '../lib/crop'
 import { mapViewAtom, cameraRequestAtom, frameAtom } from '../state'
@@ -112,18 +112,11 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     }
 
     try {
-      progress('Loading engine…')
-      const burin = await loadBurin()
-      if (my !== genRef.current || movingRef.current) return
-
       const dem = await buildDem(bounds, outW, outH, progress)
       if (my !== genRef.current || movingRef.current) return
 
       progress('Drawing…')
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-      if (my !== genRef.current || movingRef.current) return
-
-      const result = drawBatches(burin, dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current, {
+      const result = await drawBatches(dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current, {
         nw_lon: bounds.west,
         nw_lat: bounds.north,
         deg_per_px_lon: (bounds.east - bounds.west) / outW,
@@ -137,6 +130,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
         lines: result.lines,
         dashes: result.dashes,
         ms: Math.round(result.ms),
+        threads: result.threads,
         view: { cssW, cssH, outW, outH, bounds },
       })
       onStatus({ phase: 'ready' })

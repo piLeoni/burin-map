@@ -53,6 +53,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def end_headers(self):
+        # Cross-origin isolation for the threaded engine (SharedArrayBuffer).
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        super().end_headers()
+
     def log_message(self, fmt, *args):
         # Quieter: skip tile hits.
         if isinstance(args[0], str) and "/terrarium/" in args[0]:
