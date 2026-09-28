@@ -65,7 +65,7 @@ burin-map --terrain-bounds -122.75 37.45 -122.05 38.05 --out-file bay.png
 burin-map --help
 ```
 
-The image is 2400 px wide unless you give `--frame-px` or a frame size in mm (see
+The image is 2400 px wide unless you give a paper size in mm with `--frame-size` (see
 [Plotter and print](#plotter-and-print)).
 
 As a library:
@@ -105,7 +105,7 @@ import burin_map
 lat, lon, name = burin_map.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
 area = burin_map.bounds_around(lat, lon, 14, 14)                 # km
 
-d = burin_map.draw(area)                     # 2400 px wide; frame_px=... to change
+d = burin_map.draw(area)                     # 2400 px wide; frame_size_mm=... for paper
 d.save_png("tp.png")
 d.save_svg("tp.svg")
 d.paths                                  # dashes: list of N×2 numpy arrays, px
@@ -114,7 +114,7 @@ d.paths                                  # dashes: list of N×2 numpy arrays, px
 d = burin_map.draw(area, burin_map.Style(input_gain=4, mod_wobble=30))
 
 # Frame in mm (plotter / print): scale follows from frame and pen
-d = burin_map.draw(area, frame_width_mm=297, frame_height_mm=420, frame_pen_mm=0.3, log=print)
+d = burin_map.draw(area, frame_size_mm=(297, 420), frame_pen_mm=0.3, log=print)
 
 # Any elevation grid you already have (metres, square pixels, row 0 = north)
 d = burin_map.draw_elevation(elev, px_m=30.0)
@@ -185,7 +185,7 @@ any scale: a whole region or a single city.
 ## Plotter and print
 
 ```bash
-burin-map --terrain-place san-francisco --frame-width 267 --frame-height 390 --frame-pen 0.3 \
+burin-map --terrain-place san-francisco --frame-size 267 390 --pen-width 0.3 \
   --out-file bay.png --out-format both
 ```
 
@@ -200,11 +200,11 @@ follows.
 
 ```bash
 # terrain + frame → scale (the area takes the frame's proportions)
-burin-map --terrain-at "Mont Blanc" --terrain-size 40km --frame-width 267 --frame-height 390 --out-format svg
+burin-map --terrain-at "Mont Blanc" --terrain-size 40km --frame-size 267 390 --out-format svg
 # frame + scale → terrain: 297 mm at 1:50,000 is 14.85 km
-burin-map --tat Zermatt --fw 297 --fh 420 --fsc 1:50000 --fmt svg
+burin-map --tat Zermatt --fs 297 420 --esc 1:50000 --fmt svg
 # terrain + scale → frame
-burin-map --terrain-place bern --frame-scale 1:100000 --out-format svg
+burin-map --terrain-place bern --export-scale 1:100000 --out-format svg
 ```
 
 Giving all three is an error, since they can't all hold at once.
@@ -256,7 +256,7 @@ uniform space; `--dash-light 1 --dash-dark 1 --dash-drop 0` draws continuous
 lines.
 
 Every flag has a short form made of its initials (`--space-light` → `--sl`,
-`--dash-drop` → `--ddrop`, `--terrain-at` → `--ta`, `--frame-width` → `--fw`,
+`--dash-drop` → `--ddrop`, `--terrain-at` → `--tat`, `--frame-size` → `--fs`,
 `--out-format` → `--fmt`). `burin-map --help` (or
 `print(burin_map.style_help())` in Python) lists all of them. They are declared once in `crates/burin-map-core/src/style.rs`.
 

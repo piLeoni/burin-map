@@ -88,7 +88,7 @@ pub fn command() -> Command {
         .arg(global("export-scale").value_name("1:N")
             .help("map scale, e.g. 1:25000; with --terrain-size it sets the paper, with --frame-size the ground"))
         .arg(global("pen-width").value_name("MM").default_value("0.3").value_parser(value_parser!(f64))
-            .help("pen width on paper, mm (stroke-width in SVG, does not affect line density)"))
+            .help("pen width on paper, mm; with a paper size, a finer pen means more lines on the sheet"))
         .next_help_heading("Out — what gets written")
         .arg(global("out-file").value_name("PATH").default_value("burin-map.png")
             .help("output path"))

@@ -58,8 +58,8 @@ pub struct Frame {
     pub px: usize,
     /// Paper `[width, height]` in mm.
     pub size_mm: Option<[f64; 2]>,
-    /// Pen width on paper, mm. Sets the stroke-width in exported SVGs; does
-    /// not affect line density.
+    /// Pen width on paper, mm. With `size_mm` it sets the scale: a finer pen
+    /// means more pixels, so more lines on the same sheet.
     pub pen_width: f64,
 }
 
