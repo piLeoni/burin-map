@@ -15,21 +15,6 @@ const SETTLE_MS = 90
 /*  MapView                                                          */
 /* ---------------------------------------------------------------- */
 
-function setSymbolVisibility(map, visible) {
-  if (!map?.isStyleLoaded()) return
-  const style = map.getStyle()
-  if (!style?.layers) return
-  for (const layer of style.layers) {
-    if (layer.type === 'symbol') {
-      try {
-        map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
-      } catch {
-        /* layer may be gone after a style swap */
-      }
-    }
-  }
-}
-
 function isUserGesture(e) {
   return !!(e && e.originalEvent)
 }
@@ -221,12 +206,13 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
       scheduleConvert()
     }
 
-    map.on('style.load', () => {
-      setSymbolVisibility(map, false)
+    map.on('error', (e) => {
+      const err = e.error ?? {}
+      const url = String(err.url ?? '').replace(/access_token=[^&]+/, 'access_token=…')
+      console.error('mapbox:', err.status ?? '', err.message ?? String(err), url)
     })
 
     map.on('load', () => {
-      setSymbolVisibility(map, false)
       map.resize()
       if (cameraRequestRef.current) {
         applyCamera(cameraRequestRef.current)
@@ -410,7 +396,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
 
       {downloadOpen && <FrameOverlay frame={frame} map={mapRef.current} />}
 
-      <div className="absolute bottom-4 left-4 z-20">
+      <div className="safe-fab safe-fab-lg absolute left-4 z-20">
         <DownloadMenu
           open={downloadOpen}
           onOpenChange={setDownloadOpen}
