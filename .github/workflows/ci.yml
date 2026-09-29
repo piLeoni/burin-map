@@ -235,3 +235,38 @@ jobs:
 
       - run: npm run build
         working-directory: web
+
+  # What a release needs that the jobs above never try: the same version
+  # everywhere, and packages that cargo and maturin agree to make. The
+  # per-platform builds are in build.yml, run by hand.
+  packaging:
+    name: packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: one version for cargo, PyPI and npm
+        run: |
+          set -euo pipefail
+          cargo=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '[.packages[].version] | unique | join(" ")')
+          npm=$(jq -r .version node/package.json)
+          echo "cargo: $cargo, npm: $npm"
+          [ "$cargo" = "$npm" ] \
+            || { echo "bump node/package.json with the workspace version"; exit 1; }
+
+      # `publish = false` guards against an accidental upload; lifted here only,
+      # so that cargo packages and verifies the two crates meant for crates.io.
+      - name: the engine and the CLI package for crates.io
+        run: |
+          set -euo pipefail
+          sed -i '/^publish = false/d' crates/burin-map-core/Cargo.toml crates/burin-map/Cargo.toml
+          cargo package -p burin-map-core -p burin-map --allow-dirty
+
+      - name: the Python source package builds
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
