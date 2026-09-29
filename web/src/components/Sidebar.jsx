@@ -258,13 +258,10 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         <div className="flex shrink-0 flex-col gap-3.5 px-5 pt-5 pb-4">
           <header className="flex flex-col gap-2">
             <h1 className="hidden font-mono text-2xl font-bold tracking-tight lg:block">BurinMap</h1>
-            <p className="text-[13px] leading-relaxed opacity-65">
-              Terrain drawn as engraved lines. Pan or zoom the map; the view is
-              redrawn when you stop.
-            </p>
             <p className="text-[11px] leading-relaxed opacity-50">
-              An online demo of{' '}
-              <a className="link" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
+              Terrain drawn as engraved lines. Pan or zoom the map; the view is
+              redrawn when you stop. An online demo of{' '}
+              <a className="link whitespace-nowrap" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
               a terrain engine written in Rust, also available as a command-line
               tool and as Python and Node libraries. Here the same engine runs in
               your browser, compiled to WebAssembly.
