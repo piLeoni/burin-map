@@ -525,7 +525,7 @@ extension, `cd node && npm run build` for the Node addon, and re-run
 
 ## Licence
 
-None chosen yet: all rights reserved for now.
+Either of [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE), at your option.
 
 ### GPU fields
 

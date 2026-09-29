@@ -151,6 +151,7 @@ jobs:
           n=$(find . -maxdepth 1 -name 'burin-map.*.node' | wc -l)
           want=$(node -p 'require("./package.json").napi.targets.length')
           [ "$n" -eq "$want" ] || { echo "expected $want addons, found $n"; exit 1; }
+      - run: cp ../README.md ../LICENSE-MIT ../LICENSE-APACHE .
       - run: npm pack
       - uses: actions/upload-artifact@v4
         with:
@@ -172,7 +173,7 @@ jobs:
         with:
           tool: wasm-pack
       - run: wasm-pack build crates/burin-map-wasm --release --target web --scope pileoni --out-dir pkg -- --features gpu
-      - run: cp README.md crates/burin-map-wasm/pkg/
+      - run: cp README.md LICENSE-MIT LICENSE-APACHE crates/burin-map-wasm/pkg/
       - uses: actions/upload-artifact@v4
         with:
           name: wasm-pkg
