@@ -6,8 +6,9 @@
  *   area     the area block (`at`, `size_mm`, …), the same keys as the CLI's JSON
  *   batches  [{ name?, angle, style }], where `style` holds only the parameters
  *            that are set; the others are written commented out, at their default
- *   water    null, or { classes?, shore?, source?, batches: [{ name?, follow, angle, style }] },
- *            where `shore` is absent (drawn), false, or { lines, style };
+ *            or, for the terrain ones, at what a batch above sets
+ *   water    null, or { classes?, shoreline?, source?, batches: [{ name?, follow, angle, style }] },
+ *            where `shoreline` is absent (drawn), false, or { lines, style };
  *            `land: { batches }` is read as `batches`
  *   notes    the user's own comments, by path: { above?: string[], after?: string }
  *            '' is the top of the document; then 'area', 'area.at', 'batches',
@@ -85,15 +86,15 @@ function paramByName(schema, name) {
 const ANGLE_NOTE = 'default 0'
 
 /**
- * Where a style is: `land`, a `water` batch or the `shore`line. Each has its
+ * Where a style is: `land`, a `water` batch or the `shoreline`. Each has its
  * own defaults, and leaves out what means nothing there.
- * @typedef {'land' | 'water' | 'shore'} Kind
+ * @typedef {'land' | 'water' | 'shoreline'} Kind
  */
 
 /** A parameter's default in a style of that kind. */
 function defaultOf(p, kind) {
   if (kind === 'water') return p.water_default ?? p.default
-  if (kind === 'shore') return p.shore_default ?? p.default
+  if (kind === 'shoreline') return p.shoreline_default ?? p.default
   return p.default
 }
 
@@ -102,15 +103,20 @@ function defaultNote(p, kind = 'land') {
 }
 
 /** What the shoreline uses: no tracer and no terrain, just a line to dash and bend. */
-const SHORE_PARAMS = new Set([
+const SHORELINE_PARAMS = new Set([
   'space', 'dash_light', 'dash_dark', 'dash_period', 'dash_cutoff', 'mod_jitter', 'mod_breaks',
   'mod_wobble', 'mod_wobble_size', 'mod_smooth', 'batch_stroke', 'batch_seed', 'water_reach', 'water_fade',
 ])
 
-/** Parameters that mean nothing there: terrain shading on water, the shore on land. */
+/** What water has no use for: its tone is the distance from the shore, not terrain. */
+const WATER_SKIPS = new Set(['space_steep', 'space_steep_gamma', 'batch_floor'])
+
+/** Parameters that mean nothing there: terrain shading on water, water settings on land. */
 function skipsParam(p, kind) {
-  if (kind === 'shore') return !SHORE_PARAMS.has(p.name)
-  if (kind === 'water') return p.group === 'input' || p.group === 'sun'
+  if (kind === 'shoreline') return !SHORELINE_PARAMS.has(p.name)
+  if (kind === 'water') {
+    return (p.group === 'input' && p.name !== 'input_flat') || p.group === 'sun' || WATER_SKIPS.has(p.name)
+  }
   return p.group === 'water'
 }
 
@@ -118,7 +124,7 @@ const WATER_CLASSES = ['ocean', 'lake', 'river', 'dock', 'pond', 'swimming_pool'
 const WATER_HELP = {
   water: 'sea, lakes and rivers from OpenStreetMap; also decides where the land is',
   classes: `which water: ${WATER_CLASSES.join(', ')}`,
-  shore: 'draw the shoreline; or give it lines and a style, like a batch',
+  shoreline: 'draw the shoreline; or give it lines and a style, like a batch',
   lines: 'how many: the shore, then more out to sea, `space` px apart',
   source: 'TileJSON URL or {z}/{x}/{y} template; default OpenFreeMap',
   follow: 'shore: along the coast; map: one direction over the whole map',
@@ -143,10 +149,10 @@ function generatedAfter(schema, path) {
       const p = paramByName(schema, parts[4])
       if (p) return [defaultNote(p, 'water')]
     }
-    if (parts[1] === 'shore' && parts[2] === 'lines') return [WATER_HELP.lines]
-    if (parts[1] === 'shore' && parts[2] === 'style' && parts.length === 4) {
+    if (parts[1] === 'shoreline' && parts[2] === 'lines') return [WATER_HELP.lines]
+    if (parts[1] === 'shoreline' && parts[2] === 'style' && parts.length === 4) {
       const p = paramByName(schema, parts[3])
-      if (p) return [defaultNote(p, 'shore')]
+      if (p) return [defaultNote(p, 'shoreline')]
     }
   }
   return []
@@ -211,7 +217,7 @@ function emit(rows, marker) {
  * The rows for a batch's style: group headers, set values, commented-out
  * defaults. `base` is the path that holds the style; `kind` says whose it is.
  */
-function styleRows(rows, style, base, schema, notes, indent, line, kind = 'land') {
+function styleRows(rows, style, base, schema, notes, indent, line, kind = 'land', inherited = {}) {
   let group = null
   for (const p of schema.params) {
     if (skipsParam(p, kind) && !(p.name in style)) continue
@@ -224,9 +230,29 @@ function styleRows(rows, style, base, schema, notes, indent, line, kind = 'land'
       aboveRows(rows, notes[path], indent)
       rows.push(code(indent, line(p.name, style[p.name]), notes[path]?.after ?? defaultNote(p, kind)))
     } else {
-      rows.push(off(indent, line(p.name, defaultOf(p, kind))))
+      rows.push(off(indent, line(p.name, inherited[p.name] ?? defaultOf(p, kind))))
     }
   }
+}
+
+const TERRAIN_NAMES = new Set([
+  'space_light', 'space_dark', 'space_steep', 'space_steep_gamma', 'mod_wobble', 'mod_wobble_size', 'mod_smooth',
+])
+
+/** Shapes the terrain a batch follows; a batch that leaves one out takes the one above's. */
+function isTerrain(p) {
+  return p.group === 'input' || p.group === 'sun' || TERRAIN_NAMES.has(p.name)
+}
+
+/** For each land batch, the terrain values it takes from the batches above. */
+function inheritedTerrain(batches, schema) {
+  let carry = {}
+  return batches.map((b) => {
+    const mine = carry
+    carry = { ...carry }
+    for (const p of schema.params) if (isTerrain(p) && p.name in b.style) carry[p.name] = b.style[p.name]
+    return mine
+  })
 }
 
 function areaKeys(area) {
@@ -262,6 +288,7 @@ function renderYaml(model, schema) {
 
   aboveRows(rows, n.batches, 0)
   rows.push(code(0, 'batches:', n.batches?.after))
+  const inherited = inheritedTerrain(model.batches, schema)
   model.batches.forEach((b, i) => {
     const base = `batches.${i}`
     aboveRows(rows, n[base], 2)
@@ -275,7 +302,7 @@ function renderYaml(model, schema) {
     })
     aboveRows(rows, n[`${base}.style`], 4)
     rows.push(code(4, 'style:', n[`${base}.style`]?.after))
-    styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`)
+    styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'land', inherited[i])
   })
 
   const w = model.water
@@ -287,16 +314,16 @@ function renderYaml(model, schema) {
       rows.push(code(2, `${k}: ${v}`, n[`water.${k}`]?.after ?? WATER_HELP[k]))
     }
     if (w.classes) setting('classes', `[${w.classes.join(', ')}]`)
-    if (typeof w.shore === 'object') {
-      aboveRows(rows, n['water.shore'], 2)
-      rows.push(code(2, 'shore:', n['water.shore']?.after ?? WATER_HELP.shore))
-      aboveRows(rows, n['water.shore.lines'], 4)
-      rows.push(code(4, `lines: ${num(w.shore.lines)}`, n['water.shore.lines']?.after ?? WATER_HELP.lines))
-      aboveRows(rows, n['water.shore.style'], 4)
-      rows.push(code(4, 'style:', n['water.shore.style']?.after))
-      styleRows(rows, w.shore.style, 'water.shore', schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'shore')
+    if (typeof w.shoreline === 'object') {
+      aboveRows(rows, n['water.shoreline'], 2)
+      rows.push(code(2, 'shoreline:', n['water.shoreline']?.after ?? WATER_HELP.shoreline))
+      aboveRows(rows, n['water.shoreline.lines'], 4)
+      rows.push(code(4, `lines: ${num(w.shoreline.lines)}`, n['water.shoreline.lines']?.after ?? WATER_HELP.lines))
+      aboveRows(rows, n['water.shoreline.style'], 4)
+      rows.push(code(4, 'style:', n['water.shoreline.style']?.after))
+      styleRows(rows, w.shoreline.style, 'water.shoreline', schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'shoreline')
     } else {
-      setting('shore', w.shore === false ? 'false' : 'true')
+      setting('shoreline', w.shoreline === false ? 'false' : 'true')
     }
     if (w.source) setting('source', yamlValue(w.source))
     aboveRows(rows, n['water.batches'], 2)
@@ -419,6 +446,7 @@ function renderJson5(model, schema) {
 
   aboveRows(rows, n.batches, 2)
   rows.push(code(2, '"batches": [', n.batches?.after))
+  const inherited = inheritedTerrain(model.batches, schema)
   model.batches.forEach((b, i) => {
     const base = `batches.${i}`
     aboveRows(rows, n[base], 4)
@@ -431,7 +459,7 @@ function renderJson5(model, schema) {
     rows.push(code(6, `"angle": ${num(b.angle ?? 0)},`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
     aboveRows(rows, n[`${base}.style`], 6)
     rows.push(code(6, '"style": {', n[`${base}.style`]?.after))
-    styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`)
+    styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'land', inherited[i])
     rows.push(code(6, '},'))
     rows.push(code(4, '},'))
   })
@@ -446,18 +474,18 @@ function renderJson5(model, schema) {
       rows.push(code(4, `"${k}": ${v},`, n[`water.${k}`]?.after ?? WATER_HELP[k]))
     }
     if (w.classes) setting('classes', `[${w.classes.map((c) => JSON.stringify(c)).join(', ')}]`)
-    if (typeof w.shore === 'object') {
-      aboveRows(rows, n['water.shore'], 4)
-      rows.push(code(4, '"shore": {', n['water.shore']?.after ?? WATER_HELP.shore))
-      aboveRows(rows, n['water.shore.lines'], 6)
-      rows.push(code(6, `"lines": ${num(w.shore.lines)},`, n['water.shore.lines']?.after ?? WATER_HELP.lines))
-      aboveRows(rows, n['water.shore.style'], 6)
-      rows.push(code(6, '"style": {', n['water.shore.style']?.after))
-      styleRows(rows, w.shore.style, 'water.shore', schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'shore')
+    if (typeof w.shoreline === 'object') {
+      aboveRows(rows, n['water.shoreline'], 4)
+      rows.push(code(4, '"shoreline": {', n['water.shoreline']?.after ?? WATER_HELP.shoreline))
+      aboveRows(rows, n['water.shoreline.lines'], 6)
+      rows.push(code(6, `"lines": ${num(w.shoreline.lines)},`, n['water.shoreline.lines']?.after ?? WATER_HELP.lines))
+      aboveRows(rows, n['water.shoreline.style'], 6)
+      rows.push(code(6, '"style": {', n['water.shoreline.style']?.after))
+      styleRows(rows, w.shoreline.style, 'water.shoreline', schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'shoreline')
       rows.push(code(6, '},'))
       rows.push(code(4, '},'))
     } else {
-      setting('shore', w.shore === false ? 'false' : 'true')
+      setting('shoreline', w.shoreline === false ? 'false' : 'true')
     }
     if (w.source) setting('source', JSON.stringify(w.source))
     aboveRows(rows, n['water.batches'], 4)
@@ -672,6 +700,7 @@ function renderCli(model, schema) {
   }
 
   aboveRows(rows, n.batches, 2)
+  const inherited = inheritedTerrain(model.batches, schema)
   model.batches.forEach((b, i) => {
     const base = `batches.${i}`
     aboveRows(rows, n[base], 2)
@@ -683,7 +712,7 @@ function renderCli(model, schema) {
     aboveRows(rows, n[`${base}.angle`], 4)
     rows.push(code(4, `--batch-angle ${num(b.angle ?? 0)}`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
     aboveRows(rows, n[`${base}.style`], 4)
-    styleRows(rows, b.style, base, schema, n, 4, (k, v) => `--${k.replace(/_/g, '-')} ${num(v)}`)
+    styleRows(rows, b.style, base, schema, n, 4, (k, v) => `--${k.replace(/_/g, '-')} ${num(v)}`, 'land', inherited[i])
   })
   if (model.water) {
     aboveRows(rows, n.water, 2)
@@ -903,8 +932,8 @@ function readWater(w, schema) {
   if (w == null) return null
   if (typeof w !== 'object' || Array.isArray(w)) throw new Error('"water" must be a block of settings')
   for (const k of Object.keys(w)) {
-    if (!['classes', 'shore', 'source', 'batches'].includes(k)) {
-      throw new Error(`Unknown setting "${k}" in water: use classes, shore, source and batches`)
+    if (!['classes', 'shoreline', 'source', 'batches'].includes(k)) {
+      throw new Error(`Unknown setting "${k}" in water: use classes, shoreline, source and batches`)
     }
   }
   const out = {}
@@ -915,16 +944,16 @@ function readWater(w, schema) {
     }
     out.classes = w.classes.map(String)
   }
-  if (w.shore === false) out.shore = false
-  else if (w.shore != null && typeof w.shore === 'object' && !Array.isArray(w.shore)) {
-    for (const k of Object.keys(w.shore)) {
-      if (!['lines', 'style'].includes(k)) throw new Error(`Unknown setting "${k}" in water.shore: use lines and style`)
+  if (w.shoreline === false) out.shoreline = false
+  else if (w.shoreline != null && typeof w.shoreline === 'object' && !Array.isArray(w.shoreline)) {
+    for (const k of Object.keys(w.shoreline)) {
+      if (!['lines', 'style'].includes(k)) throw new Error(`Unknown setting "${k}" in water.shoreline: use lines and style`)
     }
-    const lines = w.shore.lines == null ? 1 : Number(w.shore.lines)
-    if (!Number.isInteger(lines) || lines < 1) throw new Error('water.shore.lines must be a whole number, 1 or more')
-    out.shore = { lines, style: readStyle(w.shore.style, 'the shoreline', schema) }
-  } else if (w.shore != null && w.shore !== true) {
-    throw new Error('water.shore is true, false, or a block with lines and a style')
+    const lines = w.shoreline.lines == null ? 1 : Number(w.shoreline.lines)
+    if (!Number.isInteger(lines) || lines < 1) throw new Error('water.shoreline.lines must be a whole number, 1 or more')
+    out.shoreline = { lines, style: readStyle(w.shoreline.style, 'the shoreline', schema) }
+  } else if (w.shoreline != null && w.shoreline !== true) {
+    throw new Error('water.shoreline is true, false, or a block with lines and a style')
   }
   if (w.source != null) out.source = String(w.source)
   if (w.batches != null && !Array.isArray(w.batches)) throw new Error('water.batches must be a list')

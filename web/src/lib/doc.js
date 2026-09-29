@@ -98,10 +98,10 @@ export function docToNote(doc) {
   // then that style.
   const w = doc.water
   const head = []
-  if (w.shore === false) head.push('noshore')
+  if (w.shoreline === false) head.push('noshore')
   if (w.classes) head.push(`c${w.classes.join('+')}`)
   if (w.source) head.push(`src${escapeNote(w.source)}`)
-  if (w.shore && typeof w.shore === 'object') head.push(batchNote({ style: w.shore.style }, [`l${w.shore.lines ?? 1}`]))
+  if (w.shoreline && typeof w.shoreline === 'object') head.push(batchNote({ style: w.shoreline.style }, [`l${w.shoreline.lines ?? 1}`]))
   const wet = w.batches.map((b) => batchNote(b, [b.follow ?? 'shore', `a${num(b.angle ?? 0)}`]))
   return `${note}|${[head.join(','), ...wet].join(';')}`
 }
@@ -232,7 +232,7 @@ function readWater(text) {
   let shore = null
   for (const tok of headText.split(',')) {
     if (!tok) continue
-    if (tok === 'noshore') water.shore = false
+    if (tok === 'noshore') water.shoreline = false
     else if (tok.startsWith('src')) water.source = decodeURIComponent(tok.slice(3))
     else if (tok[0] === 'c') water.classes = tok.slice(1).split('+')
     else if (/^l\d+$/.test(tok)) (shore ??= { style: {} }).lines = Number(tok.slice(1))
@@ -241,7 +241,7 @@ function readWater(text) {
       ;(shore ??= { style: {} }).style[key] = value
     }
   }
-  if (shore) water.shore = { lines: shore.lines ?? 1, style: shore.style }
+  if (shore) water.shoreline = { lines: shore.lines ?? 1, style: shore.style }
   return water
 }
 

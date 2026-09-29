@@ -119,7 +119,7 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
       }, null, {
         gpu: !forceCpu,
         water: wet && {
-          spec: JSON.stringify({ classes: wet.classes, shore: wet.shore, batches: wet.batches }),
+          spec: JSON.stringify({ classes: wet.classes, shoreline: wet.shoreline, batches: wet.batches }),
           bounds: [bounds.west, bounds.south, bounds.east, bounds.north],
           tiles,
         },

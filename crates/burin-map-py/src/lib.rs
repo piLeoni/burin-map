@@ -132,7 +132,7 @@ fn style_params() -> Vec<(&'static str, f64, &'static str, &'static str)> {
 /// Parse a JSON string into a list of batch dicts.
 #[pyfunction]
 fn style_from_json(_py: Python<'_>, json: &str) -> PyResult<String> {
-    let batches: Vec<burin_map::Batch> = serde_json::from_str(json)
+    let batches = burin_map_core::from_json_batches(json)
         .map_err(|e| PyValueError::new_err(format!("invalid --style-json: {e}")))?;
     // Return pretty-printed for Python consumption
     Ok(serde_json::to_string_pretty(&batches).unwrap_or_default())

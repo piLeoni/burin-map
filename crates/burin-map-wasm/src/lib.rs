@@ -29,14 +29,14 @@ fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
     Ok(st)
 }
 
-/// (name, default, water_default, shore_default, help, group) for every style
+/// (name, default, water_default, shoreline_default, help, group) for every style
 /// parameter — drives the web UI. `water_default` is the value in water
-/// batches, `shore_default` on the shoreline.
+/// batches, `shoreline_default` on the shoreline.
 #[wasm_bindgen]
 pub fn style_params() -> Result<JsValue, JsValue> {
     let d = Style::default();
     let wd = Style::water();
-    let sd = Style::shore();
+    let sd = Style::shoreline();
     let arr = js_sys::Array::new();
     for p in Style::PARAMS {
         let o = js_sys::Object::new();
@@ -53,7 +53,7 @@ pub fn style_params() -> Result<JsValue, JsValue> {
         )?;
         Reflect::set(
             &o,
-            &"shore_default".into(),
+            &"shoreline_default".into(),
             &(sd.get(p.name).unwrap() as f32 as f64).into(),
         )?;
         Reflect::set(&o, &"help".into(), &p.help.into())?;
@@ -335,10 +335,10 @@ pub fn water_tiles(
 struct WaterSpec {
     classes: Option<Vec<String>>,
     #[serde(
-        default = "burin_map_core::water::shore_option::default",
-        with = "burin_map_core::water::shore_option"
+        default = "burin_map_core::water::shoreline_option::default",
+        with = "burin_map_core::water::shoreline_option"
     )]
-    shore: Option<burin_map_core::Shoreline>,
+    shoreline: Option<burin_map_core::Shoreline>,
     #[serde(default)]
     batches: Vec<burin_map_core::WaterBatch>,
 }
@@ -426,24 +426,35 @@ pub fn draw_batches(
     }
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
-    let f = burin_map_core::build_fields_with(elev, w, h, px_m, &batches[0].style, coverage);
-    timings.push(("terrain fields (CPU)".to_string(), now_ms() - t1));
+    let fields: Vec<_> = burin_map_core::terrain_groups(&batches)
+        .0
+        .iter()
+        .map(|&i| burin_map_core::build_fields_with(elev, w, h, px_m, &batches[i].style, coverage))
+        .collect();
+    timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
+    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
+}
+
+fn terrain_label(n: usize, device: &str) -> String {
+    match n {
+        1 => format!("terrain fields ({device})"),
+        n => format!("terrain fields ×{n} ({device})"),
+    }
 }
 
 fn layer(wet: &Option<(Vec<f32>, WaterSpec)>) -> Option<burin_map_core::WaterLayer<'_>> {
     wet.as_ref().map(|(c, s)| burin_map_core::WaterLayer {
         coverage: c,
-        shore: s.shore.as_ref(),
+        shoreline: s.shoreline.as_ref(),
         batches: &s.batches,
     })
 }
 
 fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
-    let batches: Vec<Batch> = serde_json::from_str(json)
+    let batches = burin_map_core::from_json_batches(json)
         .map_err(|e| JsValue::from_str(&format!("invalid batch JSON: {e}")))?;
     if batches.is_empty() {
         return Err(JsValue::from_str("batch list is empty"));
@@ -506,12 +517,16 @@ pub async fn draw_batches_gpu(
     }
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
-    let f = gpu
-        .build_fields_with(&elev, w, h, px_m, &batches[0].style, coverage)
-        .await;
-    timings.push(("terrain fields (GPU)".to_string(), now_ms() - t1));
+    let mut fields = Vec::new();
+    for i in burin_map_core::terrain_groups(&batches).0 {
+        fields.push(
+            gpu.build_fields_with(&elev, w, h, px_m, &batches[i].style, coverage)
+                .await,
+        );
+    }
+    timings.push((terrain_label(fields.len(), "GPU"), now_ms() - t1));
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
+    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))
 }

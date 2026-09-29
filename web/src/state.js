@@ -63,8 +63,9 @@ export const styleAtom = atom(
 )
 
 /**
- * The document's water block, or null for none: `{ classes?, shore?, source?,
- * batches: [{ name?, follow, angle, style }] }`. Shaped by `normalizeWater`.
+ * The document's water block, or null for none: `{ classes?, shoreline?, source?,
+ * batches: [{ name?, follow, angle, style }] }`. Shaped by `normalizeWater`,
+ * which also takes the older name `shore` still in saved documents.
  * @param {unknown} value
  */
 export function normalizeWater(value) {
@@ -72,11 +73,12 @@ export function normalizeWater(value) {
   const v = /** @type {Record<string, any>} */ (value)
   const out = {}
   if (Array.isArray(v.classes)) out.classes = v.classes.map(String)
-  if (v.shore === false) out.shore = false
-  else if (v.shore && typeof v.shore === 'object' && !Array.isArray(v.shore)) {
-    const lines = Number(v.shore.lines)
-    const style = v.shore.style
-    out.shore = {
+  const shoreline = v.shoreline ?? v.shore
+  if (shoreline === false) out.shoreline = false
+  else if (shoreline && typeof shoreline === 'object' && !Array.isArray(shoreline)) {
+    const lines = Number(shoreline.lines)
+    const style = shoreline.style
+    out.shoreline = {
       lines: Number.isInteger(lines) && lines >= 1 ? lines : 1,
       style: style && typeof style === 'object' && !Array.isArray(style) ? style : {},
     }

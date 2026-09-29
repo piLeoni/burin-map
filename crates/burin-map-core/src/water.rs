@@ -78,7 +78,7 @@ fn water_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
 }
 
 fn shore_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
-    style_over(d, Style::shore())
+    style_over(d, Style::shoreline())
 }
 
 /// The shoreline, drawn with the land's modifiers: `dash_*` break it up,
@@ -90,7 +90,7 @@ fn shore_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
 #[serde(default)]
 pub struct Shoreline {
     pub lines: u32,
-    /// Missing parameters take [`Style::shore`]'s values.
+    /// Missing parameters take [`Style::shoreline`]'s values.
     #[serde(deserialize_with = "shore_style")]
     pub style: Style,
 }
@@ -99,14 +99,14 @@ impl Default for Shoreline {
     fn default() -> Self {
         Shoreline {
             lines: 1,
-            style: Style::shore(),
+            style: Style::shoreline(),
         }
     }
 }
 
 impl Style {
     /// Defaults for the shoreline: one clean, solid line.
-    pub fn shore() -> Style {
+    pub fn shoreline() -> Style {
         Style {
             space: 3.0,
             dash_light: 1.0,
@@ -120,9 +120,9 @@ impl Style {
     }
 }
 
-/// `shore` in a document: `true` (the default) or `false`, or the
+/// `shoreline` in a document: `true` (the default) or `false`, or the
 /// [`Shoreline`] itself. For `#[serde(with = "…")]`.
-pub mod shore_option {
+pub mod shoreline_option {
     use super::Shoreline;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -158,7 +158,7 @@ pub struct WaterLayer<'a> {
     /// Fraction of each pixel that is water, 0…1, row 0 at the top.
     pub coverage: &'a [f32],
     /// The shoreline, if it is drawn.
-    pub shore: Option<&'a Shoreline>,
+    pub shoreline: Option<&'a Shoreline>,
     pub batches: &'a [WaterBatch],
 }
 
@@ -529,24 +529,25 @@ mod tests {
     }
 
     #[test]
-    fn shore_is_a_flag_or_a_style() {
+    fn shoreline_is_a_flag_or_a_style() {
         #[derive(Deserialize, Serialize)]
         struct Doc {
-            #[serde(with = "shore_option", default = "shore_option::default")]
-            shore: Option<Shoreline>,
+            #[serde(with = "shoreline_option", default = "shoreline_option::default")]
+            shoreline: Option<Shoreline>,
         }
-        let read = |s: &str| serde_json::from_str::<Doc>(s).unwrap().shore;
+        let read = |s: &str| serde_json::from_str::<Doc>(s).unwrap().shoreline;
         assert_eq!(read("{}"), Some(Shoreline::default()));
-        assert_eq!(read(r#"{"shore": false}"#), None);
-        let sh = read(r#"{"shore": {"lines": 2, "style": {"dash_dark": 0.4, "bs": 2}}}"#).unwrap();
+        assert_eq!(read(r#"{"shoreline": false}"#), None);
+        let sh =
+            read(r#"{"shoreline": {"lines": 2, "style": {"dash_dark": 0.4, "bs": 2}}}"#).unwrap();
         assert_eq!(
             (sh.lines, sh.style.dash_dark, sh.style.batch_stroke),
             (2, 0.4, 2.0)
         );
-        assert_eq!(sh.style.dash_light, 1.0, "the rest from Style::shore");
-        let json = |shore| serde_json::to_string(&Doc { shore }).unwrap();
-        assert_eq!(json(Some(Shoreline::default())), r#"{"shore":true}"#);
-        assert_eq!(json(None), r#"{"shore":false}"#);
+        assert_eq!(sh.style.dash_light, 1.0, "the rest from Style::shoreline");
+        let json = |shoreline| serde_json::to_string(&Doc { shoreline }).unwrap();
+        assert_eq!(json(Some(Shoreline::default())), r#"{"shoreline":true}"#);
+        assert_eq!(json(None), r#"{"shoreline":false}"#);
     }
 
     #[test]

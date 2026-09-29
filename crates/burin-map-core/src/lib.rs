@@ -27,7 +27,8 @@ pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Field
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
-    from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS,
+    batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
+    Param, Style, GROUPS,
 };
 pub use water::{Follow, Shoreline, WaterBatch, WaterLayer};
 
@@ -76,9 +77,10 @@ pub fn draw(elev: &[f32], width: usize, height: usize, px_m: f32, style: &Style)
 }
 
 /// Draw one or more batch passes. `batches` must be non-empty. Terrain
-/// fields (direction, input) come from the first batch's style; each pass
-/// rotates that direction by its `angle` and uses its own space / dashes.
-/// Passes run in parallel.
+/// fields (direction, input) are built once for each distinct set of terrain
+/// parameters (see [`Style::is_terrain`]); each pass rotates its fields'
+/// direction by its `angle` and uses its own space / dashes. Passes run in
+/// parallel.
 pub fn draw_batches(
     elev: &[f32],
     width: usize,
@@ -89,8 +91,35 @@ pub fn draw_batches(
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
 
-    let f = build_fields(elev, width, height, px_m, &batches[0].style);
-    draw_fields(&f, batches)
+    let fields: Vec<Fields> = terrain_groups(batches)
+        .0
+        .iter()
+        .map(|&i| build_fields(elev, width, height, px_m, &batches[i].style))
+        .collect();
+    draw_fields(&fields, batches)
+}
+
+/// Batches that share terrain fields: the first batch of each distinct set of
+/// terrain parameters, and for every batch the index of its set in that list.
+pub fn terrain_groups(batches: &[Batch]) -> (Vec<usize>, Vec<usize>) {
+    let mut firsts: Vec<usize> = Vec::new();
+    let of = batches
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            match firsts
+                .iter()
+                .position(|&j| batches[j].style.same_terrain(&b.style))
+            {
+                Some(g) => g,
+                None => {
+                    firsts.push(i);
+                    firsts.len() - 1
+                }
+            }
+        })
+        .collect();
+    (firsts, of)
 }
 
 /// [`draw_batches`] on whichever device [`engine`] picked: the GPU when the
@@ -109,8 +138,12 @@ pub fn draw_batches_auto(
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
         assert!(!batches.is_empty(), "need at least one batch");
-        let f = g.build_fields_blocking(elev, width, height, px_m, &batches[0].style);
-        return draw_fields(&f, batches);
+        let fields: Vec<Fields> = terrain_groups(batches)
+            .0
+            .iter()
+            .map(|&i| g.build_fields_blocking(elev, width, height, px_m, &batches[i].style))
+            .collect();
+        return draw_fields(&fields, batches);
     }
     draw_batches(elev, width, height, px_m, batches)
 }
@@ -128,20 +161,28 @@ pub fn draw_batches_auto_with(
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
     let coverage = water.map(|w| w.coverage);
+    let firsts = terrain_groups(batches).0;
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
-        let f =
-            g.build_fields_with_blocking(elev, width, height, px_m, &batches[0].style, coverage);
-        return draw_fields_timed(&f, batches, water, || 0.0).0;
+        let fields: Vec<Fields> = firsts
+            .iter()
+            .map(|&i| {
+                g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, coverage)
+            })
+            .collect();
+        return draw_fields_timed(&fields, batches, water, || 0.0).0;
     }
-    let f = build_fields_with(elev, width, height, px_m, &batches[0].style, coverage);
-    draw_fields_timed(&f, batches, water, || 0.0).0
+    let fields: Vec<Fields> = firsts
+        .iter()
+        .map(|&i| build_fields_with(elev, width, height, px_m, &batches[i].style, coverage))
+        .collect();
+    draw_fields_timed(&fields, batches, water, || 0.0).0
 }
 
-/// `draw_batches` from fields already built (e.g. by `gpu::Gpu`) with the
-/// first batch's style.
-pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
-    draw_fields_timed(f, batches, None, || 0.0).0
+/// `draw_batches` from fields already built (e.g. by `gpu::Gpu`): one per
+/// entry of [`terrain_groups`], from that batch's style.
+pub fn draw_fields(fields: &[Fields], batches: &[Batch]) -> Drawing {
+    draw_fields_timed(fields, batches, None, || 0.0).0
 }
 
 /// Milliseconds per phase of a draw, in the order they ran. Phases that run
@@ -156,15 +197,15 @@ type Traced = (Vec<Line>, Vec<(f32, Vec<Line>)>, Timings);
 /// drawn alongside the land when there is some. The clock is passed in because
 /// `std::time::Instant` panics on wasm32.
 pub fn draw_fields_timed(
-    f: &Fields,
+    fields: &[Fields],
     batches: &[Batch],
     water: Option<&WaterLayer>,
     now: fn() -> f64,
 ) -> (Drawing, Timings) {
     assert!(!batches.is_empty(), "need at least one batch");
-    let (width, height) = (f.w, f.h);
+    let (width, height) = (fields[0].w, fields[0].h);
     let ((mut lines, dry, mut timings), wet) = rayon::join(
-        || trace_land(f, batches, now),
+        || trace_land(fields, batches, now),
         || water.map(|wl| trace_water(wl, width, height, now)),
     );
     let mut pens: Vec<(f32, Vec<Line>)> = Vec::new();
@@ -203,9 +244,14 @@ pub fn draw_fields_timed(
     (d, timings)
 }
 
-fn trace_land(f: &Fields, batches: &[Batch], now: fn() -> f64) -> Traced {
+fn trace_land(fields: &[Fields], batches: &[Batch], now: fn() -> f64) -> Traced {
     use rayon::prelude::*;
-    let base_space = batches[0].style.space;
+    let (firsts, of) = terrain_groups(batches);
+    assert_eq!(
+        fields.len(),
+        firsts.len(),
+        "one set of fields per terrain group"
+    );
     let parts: Vec<Part> = batches
         .par_iter()
         .enumerate()
@@ -213,7 +259,8 @@ fn trace_land(f: &Fields, batches: &[Batch], now: fn() -> f64) -> Traced {
             let mut st = b.style.clone();
             st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
             let t0 = now();
-            let bf = batch_fields(f, b, base_space);
+            let g = of[i];
+            let bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space);
             let t1 = now();
             let (lines, paths, t) = trace_batch(&bf, &st, now);
             (lines, (st.batch_stroke, paths), [t1 - t0, t[0], t[1], t[2]])
@@ -243,7 +290,7 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
         .collect();
     let (mut lines, mut paths, mut timings) = collect_parts(parts, "water");
     timings.insert(0, ("water shore distance".into(), t1 - t0));
-    if let Some(sh) = wl.shore {
+    if let Some(sh) = wl.shoreline {
         let t = now();
         let (l, p) = water::shoreline(&outlines, &dist, w, h, sh);
         timings.push(("water shoreline".into(), now() - t));
@@ -418,8 +465,8 @@ mod tests {
         }
         assert_eq!(cpu.walkable, gpu.walkable, "walkable");
 
-        let dc = draw_fields(&cpu, &[Batch::along(st.clone())]);
-        let dg = draw_fields(&gpu, &[Batch::along(st)]);
+        let dc = draw_fields(std::slice::from_ref(&cpu), &[Batch::along(st.clone())]);
+        let dg = draw_fields(std::slice::from_ref(&gpu), &[Batch::along(st)]);
         let ratio = dg.lines.len() as f32 / dc.lines.len() as f32;
         assert!(
             (0.8..1.25).contains(&ratio),
@@ -460,7 +507,7 @@ mod tests {
         sh.style.batch_stroke = 2.5;
         let layer = WaterLayer {
             coverage: &c,
-            shore: Some(&sh),
+            shoreline: Some(&sh),
             batches: &batches,
         };
         let d = draw_batches_auto_with(
@@ -532,6 +579,27 @@ mod tests {
             d0.lines.len(),
             d1.lines.len()
         );
+    }
+
+    #[test]
+    fn each_batch_can_have_its_own_sun() {
+        let (w, h) = (200, 200);
+        let e = island(w, h);
+        let lit = |az: f32| Batch {
+            name: None,
+            angle: 90.0,
+            style: Style {
+                sun_azimuth: az,
+                ..Style::default()
+            },
+        };
+        let first = Batch::along(Style::default());
+        let (firsts, of) = terrain_groups(&[first.clone(), lit(315.0), lit(135.0)]);
+        assert_eq!((firsts, of), (vec![0, 2], vec![0, 0, 1]));
+
+        let same = draw_batches(&e, w, h, 200.0, &[first.clone(), lit(315.0)]);
+        let other = draw_batches(&e, w, h, 200.0, &[first, lit(135.0)]);
+        assert_ne!(same.paths, other.paths, "the second sun is used");
     }
 
     #[test]

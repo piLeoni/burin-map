@@ -124,7 +124,7 @@ pub fn command() -> Command {
         .next_help_heading("Water — sea, lakes and rivers from OpenStreetMap")
         .arg(global("water").value_name("JSON")
             .help("the document's water block, as JSON or JSON5: '{}' for the shoreline alone, or \
-                   '{\"batches\": [{\"follow\": \"shore\"}, {\"follow\": \"map\", \"angle\": 20}]}'. \
+                   '{\"shoreline\": {\"lines\": 2}, \"batches\": [{\"follow\": \"shore\"}]}'. \
                    It also decides where the land is, instead of the height"));
 
     let mut last_group = "";
@@ -521,10 +521,16 @@ where
         doc.batches.clone()
     } else if let Some(sections) = sections {
         let base = shared_style(&m);
-        sections
-            .iter()
-            .map(|sec| parse_batch_section(&base, sec))
-            .collect::<Result<Vec<_>, _>>()?
+        let mut out: Vec<Batch> = Vec::new();
+        for sec in sections {
+            // Terrain flags left out carry over from the pass before.
+            let mut start = base.clone();
+            if let Some(prev) = out.last() {
+                start.inherit_terrain(&prev.style);
+            }
+            out.push(parse_batch_section(&start, &sec)?);
+        }
+        out
     } else {
         let mut st = Style::default();
         for p in Style::PARAMS {

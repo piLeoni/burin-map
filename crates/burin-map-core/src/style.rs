@@ -159,6 +159,77 @@ impl Batch {
     }
 }
 
+impl Style {
+    /// Whether the land's terrain fields are built from this parameter: the
+    /// shading (`input_*`, `sun_*`), how it sets the spacing, and how lines
+    /// wander and smooth. Batches that agree on all of them share one set of
+    /// fields; a batch that changes one gets its own.
+    pub fn is_terrain(name: &str) -> bool {
+        Self::PARAMS.iter().any(|p| {
+            p.name == name
+                && (matches!(p.group, "input" | "sun")
+                    || matches!(
+                        p.name,
+                        "space_light"
+                            | "space_dark"
+                            | "space_steep"
+                            | "space_steep_gamma"
+                            | "mod_wobble"
+                            | "mod_wobble_size"
+                            | "mod_smooth"
+                    ))
+        })
+    }
+
+    /// Same terrain parameters: the same terrain fields.
+    pub fn same_terrain(&self, other: &Style) -> bool {
+        Self::PARAMS
+            .iter()
+            .filter(|p| Self::is_terrain(p.name))
+            .all(|p| self.get(p.name) == other.get(p.name))
+    }
+
+    /// Take `from`'s terrain parameters.
+    pub fn inherit_terrain(&mut self, from: &Style) {
+        for p in Self::PARAMS.iter().filter(|p| Self::is_terrain(p.name)) {
+            self.set(p.name, from.get(p.name).unwrap());
+        }
+    }
+}
+
+/// Land batches as written: a terrain parameter left out takes the value of
+/// the batch before, and the default only in the first. Everything else left
+/// out takes its default. For `#[serde(deserialize_with = "…")]`.
+pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Batch>, D::Error> {
+    #[derive(Deserialize)]
+    struct Given {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        angle: f32,
+        #[serde(default)]
+        style: std::collections::BTreeMap<String, f64>,
+    }
+    let given = Vec::<Given>::deserialize(d)?;
+    let mut out: Vec<Batch> = Vec::with_capacity(given.len());
+    for g in given {
+        let mut style = Style::default();
+        if let Some(prev) = out.last() {
+            style.inherit_terrain(&prev.style);
+        }
+        for (name, v) in g.style {
+            // Unknown names are ignored.
+            style.set(&name, v);
+        }
+        out.push(Batch {
+            name: g.name,
+            angle: g.angle,
+            style,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,10 +272,9 @@ pub fn to_json_style(st: &Style) -> String {
     serde_json::to_string(st).unwrap_or_default()
 }
 
-/// Parse a JSON string into a `Vec<Batch>`. Equivalent to
-/// `serde_json::from_str(s)`.
+/// Parse a JSON string into a `Vec<Batch>`; see [`batches_inheriting`].
 pub fn from_json_batches(s: &str) -> Result<Vec<Batch>, serde_json::Error> {
-    serde_json::from_str(s)
+    batches_inheriting(&mut serde_json::Deserializer::from_str(s))
 }
 
 /// Serialise a slice of `Batch` into a compact JSON string.
@@ -254,6 +324,25 @@ mod json_tests {
     #[test]
     fn empty_array_parses_but_is_empty() {
         assert!(from_json_batches("[]").unwrap().is_empty());
+    }
+
+    #[test]
+    fn terrain_carries_over_to_the_next_batch() {
+        let json = r#"[
+            {"style": {"sun_azimuth": 45, "space": 6}},
+            {"angle": 90},
+            {"style": {"sun_azimuth": 200}}
+        ]"#;
+        let b = from_json_batches(json).unwrap();
+        assert_eq!(b[1].style.sun_azimuth, 45.0, "inherited");
+        assert_eq!(
+            b[1].style.space,
+            Style::default().space,
+            "not terrain: default"
+        );
+        assert_eq!(b[2].style.sun_azimuth, 200.0);
+        assert!(b[0].style.same_terrain(&b[1].style));
+        assert!(!b[1].style.same_terrain(&b[2].style));
     }
 
     #[test]

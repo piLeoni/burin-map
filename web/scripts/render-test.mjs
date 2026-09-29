@@ -98,7 +98,7 @@ const wet = {
       { name: 'coast; waves', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
     ],
-    shore: false,
+    shoreline: false,
     classes: ['ocean', 'lake'],
     source: 'https://example.org/tiles.json',
   },
@@ -110,7 +110,7 @@ const coast = {
   water: {
     batches: [{ follow: 'shore', angle: 0, style: {} }],
     classes: ['ocean'],
-    shore: { lines: 2, style: { dash_dark: 0.5, mod_wobble: 20, batch_stroke: 2 } },
+    shoreline: { lines: 2, style: { dash_dark: 0.5, mod_wobble: 20, batch_stroke: 2 } },
   },
 }
 const coastBack = docFromHash(docToHash(coast))
@@ -259,7 +259,7 @@ const model = {
   ],
   water: {
     classes: ['ocean', 'lake'],
-    shore: { lines: 2, style: { dash_dark: 0.5, batch_stroke: 2 } },
+    shoreline: { lines: 2, style: { dash_dark: 0.5, batch_stroke: 2 } },
     batches: [
       { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
@@ -270,7 +270,7 @@ const model = {
     'area.at': { after: 'the Matterhorn is south-west' },
     'batches.0.style.space': { above: ['wider in the valleys'], after: 'was 4.8' },
     'batches.1': { above: ['steep ground only'] },
-    'water.shore.style.dash_dark': { after: 'dotted' },
+    'water.shoreline.style.dash_dark': { after: 'dotted' },
     'water.batches.0.style.space': { after: 'wider offshore' },
   },
 }
@@ -287,6 +287,26 @@ for (const kind of kinds) {
     if (!same(again, kind === 'cli' || other === 'cli' ? dry : model)) missing.push(`views: ${kind} -> ${other} loses something`)
   }
   if (!text.includes('input_broad') && !text.includes('input-broad')) missing.push(`views: ${kind} should list unset parameters`)
+}
+
+// Water lists input_flat (its dashes use it) but no terrain-only parameters.
+{
+  const yaml = V.renderView('yaml', model, schema)
+  const wet = yaml.slice(yaml.indexOf('\nwater:'))
+  if (!wet.includes('# input_flat:')) missing.push('views: water should list input_flat')
+  for (const p of ['space_steep', 'batch_floor', 'sun_azimuth', 'input_gain']) {
+    if (wet.includes(`${p}:`)) missing.push(`views: water should not list ${p}`)
+  }
+}
+
+// A later land batch shows the terrain it takes from the one above, not the default.
+{
+  const two = { area: {}, batches: [{ angle: 0, style: { space: 6, sun_azimuth: 200 } }, { angle: 90, style: {} }], notes: {} }
+  const yaml = V.renderView('yaml', two, schema)
+  const second = yaml.slice(yaml.indexOf('angle: 90'))
+  if (!second.includes('# sun_azimuth: 200')) missing.push('views: second batch should show the inherited sun_azimuth')
+  if (!second.includes('# space: 4.8')) missing.push('views: space is not terrain, so it should not carry over')
+  if (!same(V.parseView('yaml', yaml, schema).batches, two.batches)) missing.push('views: inherited values must not become set')
 }
 
 // Uncommenting a default sets it; commenting a value out unsets it.

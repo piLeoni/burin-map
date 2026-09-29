@@ -53,6 +53,7 @@ pub fn size_pair(v: &[f64]) -> Option<[f64; 2]> {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LandDoc {
+    #[serde(deserialize_with = "burin_map_core::batches_inheriting")]
     pub batches: Vec<Batch>,
 }
 
@@ -67,8 +68,8 @@ pub struct WaterDoc {
     pub classes: Option<Vec<String>>,
     /// The shoreline: `true` (the default), `false`, or how to draw it
     /// (`{ lines, style }`, see [`Shoreline`]).
-    #[serde(with = "burin_map_core::water::shore_option")]
-    pub shore: Option<Shoreline>,
+    #[serde(with = "burin_map_core::water::shoreline_option")]
+    pub shoreline: Option<Shoreline>,
     /// TileJSON URL or `{z}/{x}/{y}` template of a source in the OpenMapTiles
     /// schema. Absent: OpenFreeMap.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,7 +83,7 @@ impl Default for WaterDoc {
     fn default() -> Self {
         WaterDoc {
             classes: None,
-            shore: Some(Shoreline::default()),
+            shoreline: Some(Shoreline::default()),
             source: None,
             batches: Vec::new(),
         }
@@ -97,7 +98,10 @@ pub struct Document {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub area: Option<AreaDoc>,
     /// The land passes. An absent list means "one pass with defaults".
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "burin_map_core::batches_inheriting"
+    )]
     pub batches: Vec<Batch>,
     /// `land: {batches}` is read into `batches` and never written back.
     #[serde(skip_serializing)]
@@ -115,7 +119,8 @@ impl Document {
     pub fn parse(s: &str) -> Result<Document, String> {
         let bare_list = strip_json5_comments(s).trim_start().starts_with('[');
         if bare_list {
-            let batches: Vec<Batch> = json5::from_str(s).map_err(|e| e.to_string())?;
+            let batches = burin_map_core::batches_inheriting(&mut json5::Deserializer::from_str(s))
+                .map_err(|e| e.to_string())?;
             return Ok(Document {
                 batches,
                 ..Default::default()
@@ -279,7 +284,7 @@ mod tests {
         .unwrap();
         let water = doc.water.unwrap();
         assert!(
-            water.shore.is_some(),
+            water.shoreline.is_some(),
             "the shoreline is on unless turned off"
         );
         assert_eq!(water.classes.as_deref(), Some(&["ocean".to_string()][..]));
@@ -289,16 +294,16 @@ mod tests {
         assert!(Document::parse(r#"{"water": {"shores": false}}"#).is_err());
 
         let styled = Document::parse(
-            r#"{ water: { shore: { lines: 2, style: { dash_dark: 0.4, mod_wobble: 15 } } } }"#,
+            r#"{ water: { shoreline: { lines: 2, style: { dash_dark: 0.4, mod_wobble: 15 } } } }"#,
         )
         .unwrap();
-        let sh = styled.water.unwrap().shore.unwrap();
+        let sh = styled.water.unwrap().shoreline.unwrap();
         assert_eq!(
             (sh.lines, sh.style.dash_dark, sh.style.mod_wobble),
             (2, 0.4, 15.0)
         );
-        let off = Document::parse(r#"{ water: { shore: false } }"#).unwrap();
-        assert!(off.water.unwrap().shore.is_none());
+        let off = Document::parse(r#"{ water: { shoreline: false } }"#).unwrap();
+        assert!(off.water.unwrap().shoreline.is_none());
     }
 
     #[test]

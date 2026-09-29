@@ -267,6 +267,12 @@ By default there is one pass at angle 0° (lines along the contours). Each
 that pass until the next `--batch` (`-b`). `--batch-angle` (`--ba`) is degrees
 from the contour tangent (0 = along, 90 = downslope).
 
+The terrain parameters (`input_*`, `sun_*`, `space_light`, `space_dark`,
+`space_steep*`, `mod_wobble*`, `mod_smooth`) carry over: a pass that leaves one
+out takes it from the pass before, so one sun set in the first pass lights
+them all, and a later pass can still set its own. Other parameters fall back
+to their defaults. The same holds for `batches` in a document.
+
 ```bash
 # simple — one pass, all defaults
 burin-map --terrain-place bern
@@ -300,7 +306,7 @@ batches:                 # the land, as before (`land: { batches: … }` is the 
   - angle: 0
 water:
   classes: [ocean, lake] # default: ocean, lake, river, dock
-  shore: true            # stroke the shoreline
+  shoreline: true        # stroke the shoreline
   batches:
     - follow: shore      # lines along the coast, fading out to sea
       style: { space: 4, water_reach: 60 }
@@ -308,9 +314,12 @@ water:
       angle: 70
 ```
 
-Water batches take the same style parameters as land ones, minus the
-terrain-only groups, plus three of their own: `water_start` (gap to the first
-line), `water_reach` (how far out the lines go, in px) and `water_fade`. On the
+Water batches take the same style parameters as land ones, minus those that
+need terrain (`sun_*`, most of `input_*`, `space_steep*`, `batch_floor`), plus
+three of their own: `water_start` (gap to the first line), `water_reach` (how
+far out the lines go, in px) and `water_fade`. There is no seabed: on water the
+tone that shading gives on land is the distance from the shore, so `*_dark`
+applies near the coast and `*_light` further out. On the
 command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
 
 The shoreline takes the land's modifiers too. Instead of `true`, give it
@@ -318,7 +327,7 @@ The shoreline takes the land's modifiers too. Instead of `true`, give it
 
 ```yaml
 water:
-  shore:
+  shoreline:
     lines: 2             # the shore, then one more `space` px out to sea
     style:
       space: 5

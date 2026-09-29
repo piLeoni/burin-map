@@ -80,9 +80,9 @@ export function initThreadPool(num_threads: number): Promise<any>;
 export function style_groups(): any;
 
 /**
- * (name, default, water_default, shore_default, help, group) for every style
+ * (name, default, water_default, shoreline_default, help, group) for every style
  * parameter — drives the web UI. `water_default` is the value in water
- * batches, `shore_default` on the shoreline.
+ * batches, `shoreline_default` on the shoreline.
  */
 export function style_params(): any;
 
