@@ -80,9 +80,7 @@ impl Drawing {
 
     #[napi]
     pub fn svg(&self, mm_per_px: Option<f64>) -> String {
-        self.inner
-            .drawing
-            .to_svg(self.inner.style.batch_stroke, mm_per_px.map(|k| k as f32))
+        self.inner.drawing.to_svg(mm_per_px.map(|k| k as f32))
     }
 
     #[napi]

@@ -105,6 +105,16 @@ const wet = {
 }
 const wetBack = docFromHash(docToHash(wet))
 if (JSON.stringify(wetBack) !== JSON.stringify(wet)) missing.push(`notation water round-trip ${JSON.stringify(wetBack)}`)
+const coast = {
+  ...doc,
+  water: {
+    batches: [{ follow: 'shore', angle: 0, style: {} }],
+    classes: ['ocean'],
+    shore: { lines: 2, style: { dash_dark: 0.5, mod_wobble: 20, batch_stroke: 2 } },
+  },
+}
+const coastBack = docFromHash(docToHash(coast))
+if (JSON.stringify(coastBack) !== JSON.stringify(coast)) missing.push(`notation shoreline round-trip ${JSON.stringify(coastBack)}`)
 
 // Batch names survive the link, whatever characters they hold.
 const named = {
@@ -249,7 +259,7 @@ const model = {
   ],
   water: {
     classes: ['ocean', 'lake'],
-    shore: false,
+    shore: { lines: 2, style: { dash_dark: 0.5, batch_stroke: 2 } },
     batches: [
       { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
@@ -260,6 +270,7 @@ const model = {
     'area.at': { after: 'the Matterhorn is south-west' },
     'batches.0.style.space': { above: ['wider in the valleys'], after: 'was 4.8' },
     'batches.1': { above: ['steep ground only'] },
+    'water.shore.style.dash_dark': { after: 'dotted' },
     'water.batches.0.style.space': { after: 'wider offshore' },
   },
 }

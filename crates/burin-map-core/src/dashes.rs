@@ -31,6 +31,13 @@ fn dash(line: &Line, s: &[f32], (a, b): (f32, f32)) -> Line {
 }
 
 pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style) -> Vec<Line> {
+    dash_lines_by(lines, st, |p| {
+        input[(p[1] as usize).min(h - 1) * w + (p[0] as usize).min(w - 1)]
+    })
+}
+
+/// [`dash_lines`] with the input at each dash's midpoint given by `tone`.
+pub fn dash_lines_by(lines: &[Line], st: &Style, tone: impl Fn([f32; 2]) -> f32) -> Vec<Line> {
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x9e37_79b9));
     let base = (st.dash_period * st.space) as f64;
     // Fully continuous: both ends solid and no drop lottery.
@@ -61,7 +68,7 @@ pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style)
             let period = (base * rng.uniform(1.0 - jit, 1.0 + jit)).max(0.3 * base);
             let mid = (cur + period * 0.5).min(total);
             let p = at(line, &s, mid as f32);
-            let mut t = input[(p[1] as usize).min(h - 1) * w + (p[0] as usize).min(w - 1)];
+            let mut t = tone(p);
             // Flat/light lottery: with strength dash_drop, randomly drop or bump to flat.
             if st.dash_drop > 1e-6
                 && t > st.dash_cutoff

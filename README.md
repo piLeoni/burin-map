@@ -313,6 +313,26 @@ terrain-only groups, plus three of their own: `water_start` (gap to the first
 line), `water_reach` (how far out the lines go, in px) and `water_fade`. On the
 command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
 
+The shoreline takes the land's modifiers too. Instead of `true`, give it
+`lines` and a `style`:
+
+```yaml
+water:
+  shore:
+    lines: 2             # the shore, then one more `space` px out to sea
+    style:
+      space: 5
+      dash_dark: 0.7     # dashed: ink at the shore, as on dark ground
+      dash_light: 0.35   # further lines fade towards this, over water_reach
+      mod_wobble: 25     # wanders as if drawn by hand
+      mod_smooth: 2      # rounds off the pixel steps
+      batch_stroke: 2    # its own line width
+```
+
+Every batch's `batch_stroke` is its own width: the SVG groups paths by width
+(one `<g stroke-width>` per pen, each plotted on its own), and the PNG strokes
+each group at its width.
+
 ## Data
 
 Elevation is SRTM 1 arc-second (≈30 m, 60°S–60°N), fetched from the

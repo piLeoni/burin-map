@@ -86,8 +86,9 @@ fn main() {
     let d = Drawing {
         width: w,
         height: h,
+        strokes: vec![(st.batch_stroke, paths.len())],
         paths,
         lines,
     };
-    std::fs::write(&a[5], d.to_svg(st.batch_stroke, None)).expect("write svg");
+    std::fs::write(&a[5], d.to_svg(None)).expect("write svg");
 }

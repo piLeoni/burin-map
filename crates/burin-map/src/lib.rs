@@ -22,7 +22,9 @@ pub mod raster;
 pub mod tmerc;
 pub mod water;
 
-pub use burin_map_core::{Batch, Drawing, Follow, GeoTransform, Line, Style, WaterBatch};
+pub use burin_map_core::{
+    Batch, Drawing, Follow, GeoTransform, Line, Shoreline, Style, WaterBatch,
+};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use document::{AreaDoc, Document, LandDoc, WaterDoc};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
@@ -85,13 +87,11 @@ pub struct Map {
 
 impl Map {
     pub fn to_svg(&self) -> String {
-        self.drawing
-            .to_svg(self.style.batch_stroke, self.mm_per_px.map(|k| k as f32))
+        self.drawing.to_svg(self.mm_per_px.map(|k| k as f32))
     }
 
     pub fn to_png(&self) -> Result<Vec<u8>, Error> {
-        let d = &self.drawing;
-        raster::to_png(&d.paths, d.width, d.height, self.style.batch_stroke)
+        raster::to_png(&self.drawing)
     }
 
     /// GeoJSON with geographic coordinates (the caller must supply the bounds).
@@ -175,7 +175,7 @@ pub fn draw_with_water(
         .zip(coverage.as_deref())
         .map(|(doc, c)| burin_map_core::WaterLayer {
             coverage: c,
-            shore: doc.shore,
+            shore: doc.shore.as_ref(),
             batches: &doc.batches,
         });
 

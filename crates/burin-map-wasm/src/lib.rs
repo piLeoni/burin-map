@@ -29,12 +29,14 @@ fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
     Ok(st)
 }
 
-/// (name, default, water_default, help, group) for every style parameter —
-/// drives the web UI. `water_default` is the value in water batches.
+/// (name, default, water_default, shore_default, help, group) for every style
+/// parameter — drives the web UI. `water_default` is the value in water
+/// batches, `shore_default` on the shoreline.
 #[wasm_bindgen]
 pub fn style_params() -> Result<JsValue, JsValue> {
     let d = Style::default();
     let wd = Style::water();
+    let sd = Style::shore();
     let arr = js_sys::Array::new();
     for p in Style::PARAMS {
         let o = js_sys::Object::new();
@@ -48,6 +50,11 @@ pub fn style_params() -> Result<JsValue, JsValue> {
             &o,
             &"water_default".into(),
             &(wd.get(p.name).unwrap() as f32 as f64).into(),
+        )?;
+        Reflect::set(
+            &o,
+            &"shore_default".into(),
+            &(sd.get(p.name).unwrap() as f32 as f64).into(),
         )?;
         Reflect::set(&o, &"help".into(), &p.help.into())?;
         Reflect::set(&o, &"group".into(), &p.group.into())?;
@@ -234,7 +241,7 @@ pub fn draw(
     let d = burin_map_core::draw(elev, w, h, px_m, &st);
     let ms = now_ms() - t0;
     let (pts, ends) = pack(&d.paths);
-    let svg = d.to_svg(st.batch_stroke, None);
+    let svg = d.to_svg(None);
     let geo = read_geo(geo);
     Ok(Drawing {
         width,
@@ -327,14 +334,13 @@ pub fn water_tiles(
 #[derive(serde::Deserialize)]
 struct WaterSpec {
     classes: Option<Vec<String>>,
-    #[serde(default = "yes")]
-    shore: bool,
+    #[serde(
+        default = "burin_map_core::water::shore_option::default",
+        with = "burin_map_core::water::shore_option"
+    )]
+    shore: Option<burin_map_core::Shoreline>,
     #[serde(default)]
     batches: Vec<burin_map_core::WaterBatch>,
-}
-
-fn yes() -> bool {
-    true
 }
 
 /// `water` is `undefined`, or `{ spec, bounds, tiles }`: `spec` the water part
@@ -425,13 +431,13 @@ pub fn draw_batches(
     let layer = layer(&wet);
     let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
-    Ok(finish(d, &batches, now_ms() - t0, timings, geo, mm_per_px))
+    Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
 }
 
 fn layer(wet: &Option<(Vec<f32>, WaterSpec)>) -> Option<burin_map_core::WaterLayer<'_>> {
     wet.as_ref().map(|(c, s)| burin_map_core::WaterLayer {
         coverage: c,
-        shore: s.shore,
+        shore: s.shore.as_ref(),
         batches: &s.batches,
     })
 }
@@ -507,12 +513,11 @@ pub async fn draw_batches_gpu(
     let layer = layer(&wet);
     let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
-    Ok(finish(d, &batches, now_ms() - t0, timings, &geo, mm_per_px))
+    Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))
 }
 
 fn finish(
     d: burin_map_core::Drawing,
-    batches: &[Batch],
     ms: f64,
     mut timings: burin_map_core::Timings,
     geo: &JsValue,
@@ -521,8 +526,7 @@ fn finish(
     let (width, height) = (d.width as u32, d.height as u32);
     let t = now_ms();
     let (pts, ends) = pack(&d.paths);
-    let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);
-    let svg = d.to_svg(stroke, mm_per_px);
+    let svg = d.to_svg(mm_per_px);
     timings.push(("svg".into(), now_ms() - t));
     let geo = read_geo(geo);
     Drawing {

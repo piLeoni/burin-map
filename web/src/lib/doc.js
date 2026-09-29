@@ -93,12 +93,15 @@ export function docToNote(doc) {
   if (!doc.water) return note
 
   // Water: its settings, then its batches, `;`-separated. A batch leads with
-  // how it follows (`shore` or `map`), which is what tells the two apart.
+  // how it follows (`shore` or `map`), which is what tells the two apart. A
+  // drawn shoreline with a style of its own is `l` and its number of lines,
+  // then that style.
   const w = doc.water
   const head = []
   if (w.shore === false) head.push('noshore')
   if (w.classes) head.push(`c${w.classes.join('+')}`)
   if (w.source) head.push(`src${escapeNote(w.source)}`)
+  if (w.shore && typeof w.shore === 'object') head.push(batchNote({ style: w.shore.style }, [`l${w.shore.lines ?? 1}`]))
   const wet = w.batches.map((b) => batchNote(b, [b.follow ?? 'shore', `a${num(b.angle ?? 0)}`]))
   return `${note}|${[head.join(','), ...wet].join(';')}`
 }
@@ -226,13 +229,19 @@ function readBatch(seg) {
 function readWater(text) {
   const [headText, ...segs] = text.split(';')
   const water = { batches: segs.filter((s) => s.trim() !== '').map((seg) => readBatch(seg)) }
+  let shore = null
   for (const tok of headText.split(',')) {
     if (!tok) continue
     if (tok === 'noshore') water.shore = false
     else if (tok.startsWith('src')) water.source = decodeURIComponent(tok.slice(3))
     else if (tok[0] === 'c') water.classes = tok.slice(1).split('+')
-    else throw new Error(`Unknown water setting "${tok}"`)
+    else if (/^l\d+$/.test(tok)) (shore ??= { style: {} }).lines = Number(tok.slice(1))
+    else {
+      const { key, value } = readNumber(tok, STYLE_BY_LENGTH, 'shoreline')
+      ;(shore ??= { style: {} }).style[key] = value
+    }
   }
+  if (shore) water.shore = { lines: shore.lines ?? 1, style: shore.style }
   return water
 }
 

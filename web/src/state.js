@@ -73,6 +73,14 @@ export function normalizeWater(value) {
   const out = {}
   if (Array.isArray(v.classes)) out.classes = v.classes.map(String)
   if (v.shore === false) out.shore = false
+  else if (v.shore && typeof v.shore === 'object' && !Array.isArray(v.shore)) {
+    const lines = Number(v.shore.lines)
+    const style = v.shore.style
+    out.shore = {
+      lines: Number.isInteger(lines) && lines >= 1 ? lines : 1,
+      style: style && typeof style === 'object' && !Array.isArray(style) ? style : {},
+    }
+  }
   if (typeof v.source === 'string' && v.source) out.source = v.source
   out.batches = (Array.isArray(v.batches) ? v.batches : [])
     .filter((b) => b && typeof b === 'object')

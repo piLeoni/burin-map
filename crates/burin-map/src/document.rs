@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Batch, Frame, Style, WaterBatch};
+use crate::{Batch, Frame, Shoreline, Style, WaterBatch};
 
 /// Where on the ground to draw and on what. The ground is a named place,
 /// explicit bounds, or a centre with a size; the paper is optional. The same
@@ -65,8 +65,10 @@ pub struct WaterDoc {
     /// `dock`, `pond`, `swimming_pool`. Absent: ocean, lake, river and dock.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classes: Option<Vec<String>>,
-    /// Draw the shoreline.
-    pub shore: bool,
+    /// The shoreline: `true` (the default), `false`, or how to draw it
+    /// (`{ lines, style }`, see [`Shoreline`]).
+    #[serde(with = "burin_map_core::water::shore_option")]
+    pub shore: Option<Shoreline>,
     /// TileJSON URL or `{z}/{x}/{y}` template of a source in the OpenMapTiles
     /// schema. Absent: OpenFreeMap.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,7 +82,7 @@ impl Default for WaterDoc {
     fn default() -> Self {
         WaterDoc {
             classes: None,
-            shore: true,
+            shore: Some(Shoreline::default()),
             source: None,
             batches: Vec::new(),
         }
@@ -276,12 +278,27 @@ mod tests {
         )
         .unwrap();
         let water = doc.water.unwrap();
-        assert!(water.shore, "the shoreline is on unless turned off");
+        assert!(
+            water.shore.is_some(),
+            "the shoreline is on unless turned off"
+        );
         assert_eq!(water.classes.as_deref(), Some(&["ocean".to_string()][..]));
         assert_eq!(water.batches.len(), 2);
         assert_eq!(water.batches[0].style.water_reach, 80.0);
         assert_eq!(water.batches[1].follow, burin_map_core::Follow::Map);
         assert!(Document::parse(r#"{"water": {"shores": false}}"#).is_err());
+
+        let styled = Document::parse(
+            r#"{ water: { shore: { lines: 2, style: { dash_dark: 0.4, mod_wobble: 15 } } } }"#,
+        )
+        .unwrap();
+        let sh = styled.water.unwrap().shore.unwrap();
+        assert_eq!(
+            (sh.lines, sh.style.dash_dark, sh.style.mod_wobble),
+            (2, 0.4, 15.0)
+        );
+        let off = Document::parse(r#"{ water: { shore: false } }"#).unwrap();
+        assert!(off.water.unwrap().shore.is_none());
     }
 
     #[test]
