@@ -5,8 +5,8 @@
 # size passed locally on 1.95 and failed the first CI run on 1.98. Pinning makes
 # the local answer the true one.
 #
-# Keep this in step with the `stable` used in .github/workflows/ci.yml; both
-# read the same version, so a bump here is what moves the CI.
+# The CI installs `stable` without a version, but rustup reads this file as
+# soon as cargo runs in the repo, so a bump here is what moves the CI.
 [toolchain]
 channel = "1.98.1"
 components = ["clippy", "rustfmt"]

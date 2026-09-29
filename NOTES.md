@@ -1,7 +1,7 @@
 # Session notes — 27/28 September 2026
 
 What changed, and why, between `976c08d` and `8f27d47`. Nine commits, all on
-`main`, all pushed. The CI is green:
+`main`, all pushed; this file was committed on top of them. The CI is green:
 [run 36387792910](https://github.com/piLeoni/burin-map/actions/runs/36387792910).
 
 This is a working note, not documentation. The user-facing explanation of the
@@ -37,7 +37,7 @@ case, it is a machine.
 
 ## The final surface
 
-One rule, one exception.
+One request, "use the CPU", and a way to make it from every surface.
 
 | Where | How to ask for the CPU |
 | --- | --- |
@@ -91,7 +91,8 @@ both checked clean with the call silently useless.
 
 ## CI
 
-Five jobs, one per way in. Every one was run by hand before being committed; a
+Five jobs, one per way in; `rust` runs twice, with and without the `gpu`
+feature, hence six rows. Every one was run by hand before being committed; a
 CI that has never executed is a CI that does not work.
 
 | Job | Covers |
@@ -123,8 +124,10 @@ Four faults, none of which I would have caught by hand:
 
 1. **clippy 1.95 ≠ 1.98.** Clean locally, failed on the runner, which knows
    `chunks_exact_to_as_chunks`. Six call sites now use `as_chunks`, checked to
-   discard the tail exactly as `chunks_exact` did. The bump to 1.98.1 found five
-   more sites in `burin-map-py` that the old clippy never reported.
+   discard the tail exactly as `chunks_exact` did: two in `burin-map-py`, one
+   each in the wasm crate, `raster.rs`, `dem.rs` and `examples/draw.rs`. The
+   message of `828fef0` also claims "five more sites in `burin-map-py`"; the
+   diff has none, so ignore that line.
 
 2. **`maturin` from `python/` fails** — there is no `Cargo.toml` there.
    `pyproject.toml` in the root names the manifest and the source, so it has to
@@ -154,7 +157,9 @@ Four faults, none of which I would have caught by hand:
 
 Added, pinned to 1.98.1 with `clippy`, `rustfmt` and `wasm32-unknown-unknown`.
 Without it the CI and a developer sit on different stables and a new lint lands
-in one and not the other. Keep it in step with the `stable` in the workflow.
+in one and not the other. The workflow installs `stable` without a version,
+but that does not matter: as soon as cargo runs inside the repo, rustup reads
+this file and installs 1.98.1. A bump here is all it takes to move the CI.
 
 ## Not covered, and worth knowing
 
@@ -164,29 +169,52 @@ in one and not the other. Keep it in step with the `stable` in the workflow.
   Metal/Vulkan produce correct output. Only your own machine does that.
 - **The flag test is the only engine test.** `describe()` and the fallback
   logic beyond the ordering have no coverage.
-- **`web/public/pkg` staleness relies on discipline.** No automated check can
-  catch it (see above), so `web/build-wasm.sh` must be run before committing a
-  change to `crates/burin-map-wasm`.
+- **Stale wasm packages rely on discipline.** Three are committed: `web/pkg`,
+  its copy `web/public/pkg`, and the threaded `web/public/pkg-mt`. CI checks
+  only the exports and size of `web/public/pkg`, and nothing at all of
+  `pkg-mt`. Run `web/build-wasm.sh` before committing a change to
+  `crates/burin-map-wasm`; `pkg-mt` needs the nightly named in the script, and
+  without it the script skips `pkg-mt` and still exits 0.
 
-## The bigger lever, still unbuilt
+## Afterwards: striped tracing, and joined dashes
 
-The GPU covers `build_fields`, which is 15–20% of a draw. Tracing is the
-bottleneck and it is still entirely CPU.
+Tracing was the bottleneck, about 60% of a draw, and ran on one core: every
+line depends on the lines already placed. The striped tracer that sat in
+`stash@{0}` is now on `main` (`8c36ae1`). It cuts the plane into 512 px
+vertical stripes and traces them in parallel with the same rule.
 
-The parallel version of tracing exists and is untouched by this session:
-`stripes-wip` and `stripes-tracing` branches, `stash@{0}`, and `/tmp/stripes-*.rs`
-(`lib`, `streamlines`, `example`). It is worth roughly 4×, which is an order of
-magnitude more than everything above.
+- Tracing alone is roughly 4× faster (446 → 112 ms on the 3072×2304 test
+  island). The whole draw gains much less: San Francisco from the CLI goes
+  from 0.7 to 0.5 s, because loading, dashes, ordering and writing do not
+  change. With several batches the gain shrinks too, since batches already
+  run on separate cores.
+- The drawing is equivalent, not identical: 5% more ink, the same density in
+  the barest cells, and a column about 4 px wide left of each seam with
+  10–20% less ink. Nobody could see a seam, in crops or in the app.
+- Narrower stripes do not help much (384 px: 95 ms, 256 px: 99 ms): the
+  stripe with the most terrain sets the time, and every stripe adds a seam.
+  The GPU is the wrong tool: tracing is sequential decisions, not the same
+  sum over many pixels.
 
-That is where the next session should start.
+Dashes that touch are now one stroke. In shadow a dash fills its whole period
+and ends where the next begins, and in mid-tones it can overrun it, so a line
+that looks solid used to be many paths, some drawn twice. `dash_lines` now
+extends the open dash instead; only a real gap ends it. The random sequence is
+unchanged, so the ink is where it was: San Francisco goes from 94,091 to
+76,403 paths, and the rasters differ only in edge antialiasing where overlaps
+used to double up (zero pixels differ at 25% tolerance).
+
+`stripes-wip` and `stripes-tracing` are empty despite their names (they point
+at commits already on `main`), and `stash@{0}` is now redundant.
 
 ## Verifying any of this
 
 ```bash
-cargo test --workspace --features gpu          # 40 tests
+cargo test --workspace --features gpu          # 42 tests
 cargo test --workspace --no-default-features   # the CPU-only build
 cargo clippy --workspace --features gpu --all-targets -- -D warnings
 
+cargo build --release -p burin-map             # the commands below use it
 ./target/release/burin-map --force-cpu --tp san-francisco --out-file sf.svg
 BURIN_ENGINE=cpu ./target/release/burin-map --tp san-francisco --out-file sf.svg
 ./target/release/burin-map --gpu --tp x        # error: unexpected argument
