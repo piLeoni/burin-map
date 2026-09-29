@@ -1,0 +1,18 @@
+// San Francisco Bay: contour lines with strong light and shade on land,
+// a tight double shoreline, and close concentric lines just off the coast.
+//   burin-map --style-file examples/bay-contours.json5 --out-file examples/bay-contours.png
+{
+  area: { at: "37.73811,-122.36351", size_km: [14, 10] },
+  batches: [
+    {
+      angle: 0,
+      style: { space_light: 1.8, space_dark: 0.6, space_steep: 0.3, dash_light: 0.1 },
+    },
+  ],
+  water: {
+    shoreline: { lines: 2, style: { space: 1.5 } },
+    batches: [
+      { follow: "shore", angle: 0, style: { space: 3, water_start: 3, water_reach: 20 } },
+    ],
+  },
+}

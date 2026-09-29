@@ -338,6 +338,14 @@ water:
       batch_stroke: 2    # its own line width
 ```
 
+[`examples/bay-contours.json5`](examples/bay-contours.json5) puts it together:
+contour lines with strong light and shade, a tight double shoreline and close
+lines just off the coast.
+
+<p align="center">
+  <img src="examples/bay-contours.png" width="720" alt="San Francisco Bay: contours and a double shoreline" />
+</p>
+
 Every batch's `batch_stroke` is its own width: the SVG groups paths by width
 (one `<g stroke-width>` per pen, each plotted on its own), and the PNG strokes
 each group at its width.
@@ -420,7 +428,7 @@ web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   public/pkg-mt/        the same, multi-threaded (needs cross-origin isolation)
   build-wasm.sh         build both WASM packages
   serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
-examples/               PNG gallery for the README
+examples/               PNG gallery for the README, and example documents
 ```
 
 Each module opens with a comment explaining its step. The engine has no
