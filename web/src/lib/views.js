@@ -6,6 +6,8 @@
  *   area     the area block (`at`, `size_mm`, …), the same keys as the CLI's JSON
  *   batches  [{ name?, angle, style }], where `style` holds only the parameters
  *            that are set; the others are written commented out, at their default
+ *   water    null, or { classes?, shore?, source?, batches: [{ name?, follow, angle, style }] };
+ *            `land: { batches }` is read as `batches`
  *   notes    the user's own comments, by path: { above?: string[], after?: string }
  *            '' is the top of the document; then 'area', 'area.at', 'batches',
  *            'batches.0', 'batches.0.name', 'batches.0.angle', 'batches.0.style',
@@ -81,8 +83,28 @@ function paramByName(schema, name) {
 
 const ANGLE_NOTE = 'default 0'
 
-function defaultNote(p) {
-  return `default ${num(p.default)}`
+/** A parameter's default on land, or in a water batch. */
+function defaultOf(p, water) {
+  return water ? (p.water_default ?? p.default) : p.default
+}
+
+function defaultNote(p, water = false) {
+  return `default ${num(defaultOf(p, water))}`
+}
+
+/** Groups that mean nothing there: terrain shading on water, the shore on land. */
+function skipsGroup(group, water) {
+  return water ? group === 'input' || group === 'sun' : group === 'water'
+}
+
+const WATER_CLASSES = ['ocean', 'lake', 'river', 'dock', 'pond', 'swimming_pool']
+const WATER_HELP = {
+  water: 'sea, lakes and rivers from OpenStreetMap; also decides where the land is',
+  classes: `which water: ${WATER_CLASSES.join(', ')}`,
+  shore: 'draw the shoreline',
+  source: 'TileJSON URL or {z}/{x}/{y} template; default OpenFreeMap',
+  follow: 'shore: along the coast; map: one direction over the whole map',
+  angle: 'follow shore: 0 along the coast, 90 straight out; follow map: degrees from north',
 }
 
 /** Trailing comments that are generated for a path — today's and older, longer ones. */
@@ -93,6 +115,16 @@ function generatedAfter(schema, path) {
   if (parts[0] === 'batches' && parts[2] === 'style' && parts.length === 4) {
     const p = paramByName(schema, parts[3])
     if (p) return [defaultNote(p), p.help, `${p.help} (default ${num(p.default)})`]
+  }
+  if (parts[0] === 'water') {
+    if (parts.length === 1) return [WATER_HELP.water]
+    if (parts.length === 2) return [WATER_HELP[parts[1]]]
+    if (parts[1] === 'batches' && parts[3] === 'angle') return [ANGLE_NOTE, ANGLE_HELP]
+    if (parts[1] === 'batches' && parts.length === 4) return [WATER_HELP[parts[3]]]
+    if (parts[1] === 'batches' && parts[3] === 'style' && parts.length === 5) {
+      const p = paramByName(schema, parts[4])
+      if (p) return [defaultNote(p, true)]
+    }
   }
   return []
 }
@@ -152,20 +184,25 @@ function emit(rows, marker) {
   }).join('\n') + '\n'
 }
 
-/** The rows for a batch's style: group headers, set values, commented-out defaults. */
-function styleRows(rows, b, i, schema, notes, indent, line) {
+/**
+ * The rows for a batch's style: group headers, set values, commented-out
+ * defaults. `base` is the batch's path; water batches have their own defaults
+ * and leave out the terrain groups.
+ */
+function styleRows(rows, style, base, schema, notes, indent, line, water = false) {
   let group = null
   for (const p of schema.params) {
+    if (skipsGroup(p.group, water) && !(p.name in style)) continue
     if (p.group !== group) {
       group = p.group
       rows.push(comment(indent, groupHeader(group)))
     }
-    const path = `batches.${i}.style.${p.name}`
-    if (p.name in b.style) {
+    const path = `${base}.style.${p.name}`
+    if (p.name in style) {
       aboveRows(rows, notes[path], indent)
-      rows.push(code(indent, line(p.name, b.style[p.name]), notes[path]?.after ?? defaultNote(p)))
+      rows.push(code(indent, line(p.name, style[p.name]), notes[path]?.after ?? defaultNote(p, water)))
     } else {
-      rows.push(off(indent, line(p.name, p.default)))
+      rows.push(off(indent, line(p.name, defaultOf(p, water))))
     }
   }
 }
@@ -216,8 +253,39 @@ function renderYaml(model, schema) {
     })
     aboveRows(rows, n[`${base}.style`], 4)
     rows.push(code(4, 'style:', n[`${base}.style`]?.after))
-    styleRows(rows, b, i, schema, n, 6, (k, v) => `${k}: ${num(v)}`)
+    styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`)
   })
+
+  const w = model.water
+  if (w) {
+    aboveRows(rows, n.water, 0)
+    rows.push(code(0, 'water:', n.water?.after ?? WATER_HELP.water))
+    const setting = (k, v) => {
+      aboveRows(rows, n[`water.${k}`], 2)
+      rows.push(code(2, `${k}: ${v}`, n[`water.${k}`]?.after ?? WATER_HELP[k]))
+    }
+    if (w.classes) setting('classes', `[${w.classes.join(', ')}]`)
+    setting('shore', w.shore === false ? 'false' : 'true')
+    if (w.source) setting('source', yamlValue(w.source))
+    aboveRows(rows, n['water.batches'], 2)
+    rows.push(code(2, w.batches.length ? 'batches:' : 'batches: []', n['water.batches']?.after))
+    w.batches.forEach((b, i) => {
+      const base = `water.batches.${i}`
+      aboveRows(rows, n[base], 4)
+      const head = []
+      if (b.name) head.push(['name', yamlValue(b.name), undefined])
+      head.push(['follow', b.follow, WATER_HELP.follow])
+      head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
+      head.forEach(([k, v, help], j) => {
+        const path = `${base}.${k}`
+        aboveRows(rows, n[path], j === 0 ? 4 : 6)
+        rows.push(code(j === 0 ? 4 : 6, `${j === 0 ? '- ' : ''}${k}: ${v}`, n[path]?.after ?? help))
+      })
+      aboveRows(rows, n[`${base}.style`], 6)
+      rows.push(code(6, 'style:', n[`${base}.style`]?.after))
+      styleRows(rows, b.style, base, schema, n, 8, (k, v) => `${k}: ${num(v)}`, true)
+    })
+  }
   return emit(rows, '#')
 }
 
@@ -331,11 +399,45 @@ function renderJson5(model, schema) {
     rows.push(code(6, `"angle": ${num(b.angle ?? 0)},`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
     aboveRows(rows, n[`${base}.style`], 6)
     rows.push(code(6, '"style": {', n[`${base}.style`]?.after))
-    styleRows(rows, b, i, schema, n, 8, (k, v) => `"${k}": ${num(v)},`)
+    styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`)
     rows.push(code(6, '},'))
     rows.push(code(4, '},'))
   })
   rows.push(code(2, '],'))
+
+  const w = model.water
+  if (w) {
+    aboveRows(rows, n.water, 2)
+    rows.push(code(2, '"water": {', n.water?.after ?? WATER_HELP.water))
+    const setting = (k, v) => {
+      aboveRows(rows, n[`water.${k}`], 4)
+      rows.push(code(4, `"${k}": ${v},`, n[`water.${k}`]?.after ?? WATER_HELP[k]))
+    }
+    if (w.classes) setting('classes', `[${w.classes.map((c) => JSON.stringify(c)).join(', ')}]`)
+    setting('shore', w.shore === false ? 'false' : 'true')
+    if (w.source) setting('source', JSON.stringify(w.source))
+    aboveRows(rows, n['water.batches'], 4)
+    rows.push(code(4, '"batches": [', n['water.batches']?.after))
+    w.batches.forEach((b, i) => {
+      const base = `water.batches.${i}`
+      aboveRows(rows, n[base], 6)
+      rows.push(code(6, '{', n[base]?.after))
+      const field = (k, v, help) => {
+        aboveRows(rows, n[`${base}.${k}`], 8)
+        rows.push(code(8, `"${k}": ${v},`, n[`${base}.${k}`]?.after ?? help))
+      }
+      if (b.name) field('name', JSON.stringify(b.name))
+      field('follow', JSON.stringify(b.follow), WATER_HELP.follow)
+      field('angle', num(b.angle ?? 0), ANGLE_NOTE)
+      aboveRows(rows, n[`${base}.style`], 8)
+      rows.push(code(8, '"style": {', n[`${base}.style`]?.after))
+      styleRows(rows, b.style, base, schema, n, 10, (k, v) => `"${k}": ${num(v)},`, true)
+      rows.push(code(8, '},'))
+      rows.push(code(6, '},'))
+    })
+    rows.push(code(4, '],'))
+    rows.push(code(2, '},'))
+  }
   rows.push(code(0, '}'))
   return emit(rows, '//')
 }
@@ -438,7 +540,9 @@ function parseJson5(text, schema) {
   const value = (path) => {
     const tok = take()
     if (tok.t === '{') {
-      lastPath = null
+      // A comment on the opening line belongs to the object itself.
+      lastPath = path || null
+      lastLine = tok.line
       const obj = {}
       for (;;) {
         const k = peek()
@@ -459,7 +563,8 @@ function parseJson5(text, schema) {
       return obj
     }
     if (tok.t === '[') {
-      lastPath = null
+      lastPath = path || null
+      lastLine = tok.line
       const arr = []
       for (;;) {
         if (peek()?.t === ']') break
@@ -534,8 +639,12 @@ function renderCli(model, schema) {
     aboveRows(rows, n[`${base}.angle`], 4)
     rows.push(code(4, `--batch-angle ${num(b.angle ?? 0)}`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
     aboveRows(rows, n[`${base}.style`], 4)
-    styleRows(rows, b, i, schema, n, 4, (k, v) => `--${k.replace(/_/g, '-')} ${num(v)}`)
+    styleRows(rows, b.style, base, schema, n, 4, (k, v) => `--${k.replace(/_/g, '-')} ${num(v)}`)
   })
+  if (model.water) {
+    aboveRows(rows, n.water, 2)
+    rows.push(code(2, `--water ${sh(JSON.stringify(model.water))}`, n.water?.after ?? WATER_HELP.water))
+  }
   rows.push(code(0, ')'))
   rows.push(code(0, 'burin-map "${args[@]}"'))
   return emit(rows, '#')
@@ -637,6 +746,7 @@ function parseCli(text, schema) {
   const area = {}
   const shared = { style: {}, notes: {} }
   const batches = []
+  let water = null
   let cur = null   // the batch being read; null before the first --batch
 
   const noteFor = (path, word) => {
@@ -690,6 +800,16 @@ function parseCli(text, schema) {
       continue
     }
     if (CLI_IGNORED.has(name)) { values(1, w); continue }
+    if (name === 'water') {
+      const [text] = values(1, w)
+      try {
+        water = JSON.parse(text)
+      } catch {
+        throw new Error(`CLI, line ${word.line}: --water needs the water block as JSON, like '{"batches": []}'`)
+      }
+      noteFor('water', word)
+      continue
+    }
     if (name === 'style-file' || name === 'sf' || name === 'style-json' || name === 'sj') {
       throw new Error(`CLI, line ${word.line}: ${w} can't be used here; paste the document in the YAML or JSON5 view instead`)
     }
@@ -715,18 +835,82 @@ function parseCli(text, schema) {
   }
   for (const b of batches) b.style = { ...shared.style, ...b.style }
   for (const [key, word] of Object.entries(shared.notes)) noteFor(`batches.0.${key}`, word)
-  return toModel({ ...(Object.keys(area).length ? { area } : {}), batches }, book.notes, schema)
+  return toModel({ ...(Object.keys(area).length ? { area } : {}), batches, ...(water ? { water } : {}) }, book.notes, schema)
 }
 
 /* ================================================================= */
 /*  Model checks and the public entry points                          */
 /* ================================================================= */
 
+/** A style block: known parameters with numbers only. */
+function readStyle(src, which, schema) {
+  const style = {}
+  if (src == null) return style
+  if (typeof src !== 'object' || Array.isArray(src)) throw new Error(`The style of ${which} must be a block of parameters`)
+  for (const [k, v] of Object.entries(src)) {
+    if (!paramByName(schema, k)) throw new Error(`Unknown parameter "${k}" in ${which}`)
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`"${k}" in ${which} must be a number`)
+    style[k] = v
+  }
+  return style
+}
+
+function readWater(w, schema) {
+  if (w == null) return null
+  if (typeof w !== 'object' || Array.isArray(w)) throw new Error('"water" must be a block of settings')
+  for (const k of Object.keys(w)) {
+    if (!['classes', 'shore', 'source', 'batches'].includes(k)) {
+      throw new Error(`Unknown setting "${k}" in water: use classes, shore, source and batches`)
+    }
+  }
+  const out = {}
+  if (w.classes != null) {
+    if (!Array.isArray(w.classes)) throw new Error('water.classes must be a list, like [ocean, lake]')
+    for (const c of w.classes) {
+      if (!WATER_CLASSES.includes(c)) throw new Error(`Unknown water class "${c}". Allowed: ${WATER_CLASSES.join(', ')}`)
+    }
+    out.classes = w.classes.map(String)
+  }
+  if (w.shore != null && typeof w.shore !== 'boolean') throw new Error('water.shore must be true or false')
+  if (w.shore === false) out.shore = false
+  if (w.source != null) out.source = String(w.source)
+  if (w.batches != null && !Array.isArray(w.batches)) throw new Error('water.batches must be a list')
+  out.batches = (w.batches ?? []).map((b, i) => {
+    const which = `water batch ${i + 1}`
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
+    for (const k of Object.keys(b)) {
+      if (!['name', 'follow', 'angle', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, follow, angle and style`)
+      }
+    }
+    const follow = b.follow ?? 'shore'
+    if (follow !== 'shore' && follow !== 'map') throw new Error(`follow in ${which} is "shore" or "map", not "${follow}"`)
+    const angle = b.angle == null ? 0 : Number(b.angle)
+    if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
+    const style = readStyle(b.style, which, schema)
+    const name = b.name != null && String(b.name).trim() ? String(b.name) : ''
+    return name ? { name, follow, angle, style } : { follow, angle, style }
+  })
+  return out
+}
+
 function toModel(value, notes, schema) {
-  const doc = Array.isArray(value) ? { batches: value } : value
+  let doc = Array.isArray(value) ? { batches: value } : value
   if (!doc || typeof doc !== 'object') throw new Error('Expected an area block and a list of batches')
   for (const key of Object.keys(doc)) {
-    if (key !== 'area' && key !== 'batches') throw new Error(`Unknown setting "${key}": only "area" and "batches" go at the top`)
+    if (!['area', 'batches', 'land', 'water'].includes(key)) {
+      throw new Error(`Unknown setting "${key}": only "area", "batches" (or "land") and "water" go at the top`)
+    }
+  }
+  if (doc.land != null) {
+    if (doc.batches != null) throw new Error('Give the land\'s batches either as "batches" or as "land.batches", not both')
+    if (typeof doc.land !== 'object' || Array.isArray(doc.land)) throw new Error('"land" must be a block with its batches')
+    for (const k of Object.keys(doc.land)) {
+      if (k !== 'batches') throw new Error(`Unknown setting "${k}" in land: only batches goes there`)
+    }
+    const { land, ...rest } = doc
+    doc = { ...rest, batches: land.batches }
+    notes = Object.fromEntries(Object.entries(notes).map(([p, n]) => [p.replace(/^land\.batches/, 'batches'), n]))
   }
 
   const area = {}
@@ -748,18 +932,11 @@ function toModel(value, notes, schema) {
     }
     const angle = b.angle == null ? 0 : Number(b.angle)
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
-    const style = {}
-    const src = b.style ?? {}
-    if (typeof src !== 'object' || Array.isArray(src)) throw new Error(`The style of ${which} must be a block of parameters`)
-    for (const [k, v] of Object.entries(src)) {
-      if (!paramByName(schema, k)) throw new Error(`Unknown parameter "${k}" in ${which}`)
-      if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`"${k}" in ${which} must be a number`)
-      style[k] = v
-    }
+    const style = readStyle(b.style, which, schema)
     const name = typeof b.name === 'string' && b.name.trim() ? b.name : b.name != null ? String(b.name) : ''
     return name ? { name, angle, style } : { angle, style }
   })
-  return { area, batches, notes }
+  return { area, batches, water: readWater(doc.water, schema), notes }
 }
 
 /** Write the model in one of the three views. */

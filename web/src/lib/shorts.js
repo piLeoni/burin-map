@@ -44,6 +44,9 @@ export const PARAM_SHORTS = {
   batch_floor: 'bf',
   batch_stroke: 'bs',
   batch_seed: 'bseed',
+  water_start: 'wst',
+  water_reach: 'wr',
+  water_fade: 'wf',
 }
 
 /** short → full_name. */

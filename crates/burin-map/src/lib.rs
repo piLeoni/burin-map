@@ -20,10 +20,11 @@ pub mod geo;
 pub mod progress;
 pub mod raster;
 pub mod tmerc;
+pub mod water;
 
-pub use burin_map_core::{Batch, Drawing, GeoTransform, Line, Style};
+pub use burin_map_core::{Batch, Drawing, Follow, GeoTransform, Line, Style, WaterBatch};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
-pub use document::{AreaDoc, Document};
+pub use document::{AreaDoc, Document, LandDoc, WaterDoc};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
 pub use progress::{Progress, TileSource};
 
@@ -131,6 +132,18 @@ pub fn draw_batches(
     frame: &Frame,
     progress: impl Fn(&Progress) + Sync,
 ) -> Result<Map, Error> {
+    draw_with_water(bounds, batches, None, frame, progress)
+}
+
+/// [`draw_batches`], and with `water` the water from OpenStreetMap too: it
+/// decides where the land is, and its batches draw on it.
+pub fn draw_with_water(
+    bounds: &Bounds,
+    batches: &[Batch],
+    water: Option<&WaterDoc>,
+    frame: &Frame,
+    progress: impl Fn(&Progress) + Sync,
+) -> Result<Map, Error> {
     use std::time::Instant;
     assert!(!batches.is_empty());
     let style = &batches[0].style;
@@ -154,8 +167,27 @@ pub fn draw_batches(
         });
     }
 
+    let coverage = match water {
+        Some(doc) => Some(water::load_water(bounds, &dem, doc, &progress)?),
+        None => None,
+    };
+    let layer = water
+        .zip(coverage.as_deref())
+        .map(|(doc, c)| burin_map_core::WaterLayer {
+            coverage: c,
+            shore: doc.shore,
+            batches: &doc.batches,
+        });
+
     let t = Instant::now();
-    let drawing = burin_map_core::draw_batches_auto(&dem.elev, w, h, dem.px_m as f32, batches);
+    let drawing = burin_map_core::draw_batches_auto_with(
+        &dem.elev,
+        w,
+        h,
+        dem.px_m as f32,
+        batches,
+        layer.as_ref(),
+    );
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });
     progress(&Progress::Lines {

@@ -62,6 +62,40 @@ export const styleAtom = atom(
   },
 )
 
+/**
+ * The document's water block, or null for none: `{ classes?, shore?, source?,
+ * batches: [{ name?, follow, angle, style }] }`. Shaped by `normalizeWater`.
+ * @param {unknown} value
+ */
+export function normalizeWater(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = /** @type {Record<string, any>} */ (value)
+  const out = {}
+  if (Array.isArray(v.classes)) out.classes = v.classes.map(String)
+  if (v.shore === false) out.shore = false
+  if (typeof v.source === 'string' && v.source) out.source = v.source
+  out.batches = (Array.isArray(v.batches) ? v.batches : [])
+    .filter((b) => b && typeof b === 'object')
+    .map((b) => ({
+      ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
+      follow: b.follow === 'map' ? 'map' : 'shore',
+      angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
+      style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
+    }))
+  return out
+}
+
+const rawWaterAtom = atomWithStorage('burin-map.water.v1', null)
+
+/** Water: read is always normalised (or null); write accepts either. */
+export const waterAtom = atom(
+  (get) => normalizeWater(get(rawWaterAtom)),
+  (get, set, next) => {
+    const value = typeof next === 'function' ? next(normalizeWater(get(rawWaterAtom))) : next
+    set(rawWaterAtom, normalizeWater(value))
+  },
+)
+
 /** The user's comments in the editor, by path (see lib/views.js). */
 export const notesAtom = atomWithStorage('burin-map.notes.v1', {})
 

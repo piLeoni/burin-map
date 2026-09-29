@@ -87,7 +87,9 @@ function drawWorker() {
  * @param {Array<{angle:number,style:Record<string,number>}>} batches
  * @param {{ nw_lon: number, nw_lat: number, deg_per_px_lon: number, deg_per_px_lat: number }} [geo]
  * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
- * @param {{ gpu?: boolean }} [opts] gpu: terrain fields on WebGPU, when available
+ * @param {{ gpu?: boolean, water?: { spec: string, bounds: number[], tiles: Array<[number, number, number, Uint8Array]> } | null }} [opts]
+ *   gpu: terrain fields on WebGPU, when available; water: the water part of the document (JSON), the grid's
+ *   bounds [west, south, east, north] and the OpenMapTiles tiles covering them
  * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number,
  *   gpu: string | false | null, timings: Array<[string, number]>, sent: number }>} gpu: adapter used, false if
  *   asked for but unavailable, null if not asked; timings: ms per phase in the worker; sent: epoch ms at postMessage
@@ -106,6 +108,7 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opt
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
     const gpu = !!opts?.gpu
-    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu }, [elev.buffer])
+    const water = opts?.water ?? null
+    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu, water }, [elev.buffer])
   })
 }

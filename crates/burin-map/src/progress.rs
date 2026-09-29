@@ -33,6 +33,16 @@ pub enum Progress<'a> {
         centre: (f64, f64),
         secs: f64,
     },
+    /// One water tile ready; `done` of `total`.
+    WaterTile {
+        done: usize,
+        total: usize,
+    },
+    /// Water rasterised onto the grid; `share` of it is water.
+    Water {
+        share: f64,
+        secs: f64,
+    },
     /// Frame with a physical size.
     Frame {
         width_mm: f64,
@@ -108,6 +118,10 @@ impl fmt::Display for Progress<'_> {
                 }
                 write!(f, ", projected around {} onto {width} × {height} px, {px_m:.0} m per px, \
                            highest point {highest_m:.0} m ({secs:.1} s)", latlon(centre.1, centre.0))
+            }
+            Progress::WaterTile { done, total } => write!(f, "water tile {done}/{total}"),
+            Progress::Water { share, secs } => {
+                write!(f, "water: OpenStreetMap, {:.0}% of the area ({secs:.1} s)", share * 100.0)
             }
             Progress::Frame { width_mm, height_mm, scale, pen_width, pitch_mm } => write!(
                 f, "frame: {width_mm:.0} × {height_mm:.0} mm at {}, stroke {pen_width} mm, lines {pitch_mm:.2} mm apart",

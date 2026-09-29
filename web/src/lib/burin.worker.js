@@ -49,7 +49,7 @@ function loadGpu(m) {
 }
 
 self.onmessage = async ({ data }) => {
-  const { id, elev, width, height, pxM, json, geo, mmPerPx } = data
+  const { id, elev, width, height, pxM, json, geo, mmPerPx, water } = data
   try {
     const timings = []
     let t = performance.now()
@@ -63,8 +63,8 @@ self.onmessage = async ({ data }) => {
     const adapter = data.gpu ? await loadGpu(m) : null
     if (data.gpu) lap('worker: WebGPU ready')
     const d = adapter != null
-      ? await m.draw_batches_gpu(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
-      : m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
+      ? await m.draw_batches_gpu(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined, water ?? null)
+      : m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined, water ?? null)
     timings.push(...d.timings)
     t = performance.now()
     const svg = d.svg

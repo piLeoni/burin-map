@@ -4,6 +4,7 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
 import { drawBatches } from '../lib/burin'
+import { waterTiles } from '../lib/water'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg, strokeOf } from '../lib/crop'
 import { logTimings, timingsOn } from '../lib/timings'
@@ -20,7 +21,7 @@ function isUserGesture(e) {
   return !!(e && e.originalEvent)
 }
 
-export default function MapView({ batches, onStatus, onDrawing, drawing }) {
+export default function MapView({ batches, water, onStatus, onDrawing, drawing }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const genRef = useRef(0)
@@ -30,6 +31,8 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
   const settleTimer = useRef(0)
   const batchesRef = useRef(batches)
   batchesRef.current = batches
+  const waterRef = useRef(water)
+  waterRef.current = water
   const convertRef = useRef(async () => {})
 
   const [, setMapView] = useAtom(mapViewAtom)
@@ -98,7 +101,11 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
 
     try {
       const t0 = performance.now()
-      const dem = await buildDem(bounds, outW, outH, progress)
+      const wet = waterRef.current
+      const [dem, tiles] = await Promise.all([
+        buildDem(bounds, outW, outH, progress),
+        wet ? waterTiles(bounds, outW, wet.source, progress) : null,
+      ])
       if (my !== genRef.current || movingRef.current) return
       const { width: demW, height: demH } = dem
       const tDem = performance.now()
@@ -109,7 +116,14 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
         nw_lat: bounds.north,
         deg_per_px_lon: (bounds.east - bounds.west) / outW,
         deg_per_px_lat: (bounds.north - bounds.south) / outH,
-      }, null, { gpu: !forceCpu })
+      }, null, {
+        gpu: !forceCpu,
+        water: wet && {
+          spec: JSON.stringify({ classes: wet.classes, shore: wet.shore, batches: wet.batches }),
+          bounds: [bounds.west, bounds.south, bounds.east, bounds.north],
+          tiles,
+        },
+      })
       const tBack = performance.now()
       const received = performance.timeOrigin + tBack
       if (my !== genRef.current || movingRef.current) return
@@ -124,7 +138,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
               + ` · ${result.threads} thread${result.threads > 1 ? 's' : ''} · ${device}`
               + ` · ${result.dashes} paths · svg ${(result.svg.length / 1e6).toFixed(1)} MB`,
             [
-              ['page: elevation tiles', tDem - t0],
+              [wet ? 'page: elevation and water tiles' : 'page: elevation tiles', tDem - t0],
               ...result.timings,
               ['worker → page', received - result.sent],
               ['page: shown on screen', tShown - tBack],
@@ -277,6 +291,15 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     onDrawing(null)
     scheduleConvert(120)
   }, [batches, scheduleConvert, onDrawing])
+
+  const shownWaterRef = useRef(water)
+  useEffect(() => {
+    if (shownWaterRef.current === water) return
+    shownWaterRef.current = water
+    if (!readyRef.current || !mapRef.current || movingRef.current) return
+    onDrawing(null)
+    scheduleConvert(120)
+  }, [water, scheduleConvert, onDrawing])
 
   useEffect(() => {
     if (!cameraRequest || !readyRef.current) return

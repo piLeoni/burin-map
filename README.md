@@ -286,6 +286,33 @@ burin-map --tp bern \
   -b --ba 45 --mb 0.7 --bf 0.5
 ```
 
+### Water
+
+Sea, lakes and rivers come from OpenStreetMap, through
+[watermask](https://github.com/piLeoni/watermask) and the
+[OpenFreeMap](https://openfreemap.org) vector tiles. When a document has a
+`water` block, that mask, not the elevation, decides what is land, so polders
+below sea level and lakes above it come out right. The shoreline is stroked,
+and each water batch fills the water with its own lines:
+
+```yaml
+batches:                 # the land, as before (`land: { batches: … }` is the long form)
+  - angle: 0
+water:
+  classes: [ocean, lake] # default: ocean, lake, river, dock
+  shore: true            # stroke the shoreline
+  batches:
+    - follow: shore      # lines along the coast, fading out to sea
+      style: { space: 4, water_reach: 60 }
+    - follow: map        # hatching in one direction: degrees clockwise from north
+      angle: 70
+```
+
+Water batches take the same style parameters as land ones, minus the
+terrain-only groups, plus three of their own: `water_start` (gap to the first
+line), `water_reach` (how far out the lines go, in px) and `water_fade`. On the
+command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
+
 ## Data
 
 Elevation is SRTM 1 arc-second (≈30 m, 60°S–60°N), fetched from the
@@ -300,7 +327,8 @@ Limits worth knowing:
 - At 30 m, areas narrower than ~10–15 km start to show the data's grain.
   SRTM also partly records trees and buildings, so cities and forests can
   show relief that isn't ground.
-- Sea is anything at or below 0.5 m, so land below sea level is left blank.
+- Without a `water` block, sea is anything at or below 0.5 m, so land below
+  sea level is left blank. With one, OpenStreetMap decides (see Water above).
 
 ## Architecture
 
@@ -491,6 +519,9 @@ comments), using a compact notation of the CLI's own short names:
 `|` separates area from batches, `,` separates parameters, `;` separates
 passes, and `a` is the pass angle. Values follow their short name with no
 space — the same abbreviations the CLI accepts (`--s`, `--dl`, `--bf`).
+Water, when there is some, is a third `|` section: its settings (`noshore`,
+`cocean+lake`), then its passes, each led by `shore` or `map`:
+`…|a0|;shore,a0,wr80;map,a70`.
 
 The comma is what makes it unambiguous. Short names overlap heavily (`s`,
 `sl`, `sd`, `ss`, `ssg`, `sa`, `salt`, `sx` all start with `s`), so a run-on

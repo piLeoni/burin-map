@@ -120,6 +120,19 @@ impl Gpu {
         pollster::block_on(self.build_fields(elev, w, h, px_m, st))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn build_fields_with_blocking(
+        &self,
+        elev: &[f32],
+        w: usize,
+        h: usize,
+        px_m: f32,
+        st: &Style,
+        water: Option<&[f32]>,
+    ) -> Fields {
+        pollster::block_on(self.build_fields_with(elev, w, h, px_m, st, water))
+    }
+
     pub async fn build_fields(
         &self,
         elev: &[f32],
@@ -128,12 +141,35 @@ impl Gpu {
         px_m: f32,
         st: &Style,
     ) -> Fields {
+        self.build_fields_with(elev, w, h, px_m, st, None).await
+    }
+
+    /// [`Gpu::build_fields`] with the water coverage deciding the land, as
+    /// [`crate::build_fields_with`] does.
+    pub async fn build_fields_with(
+        &self,
+        elev: &[f32],
+        w: usize,
+        h: usize,
+        px_m: f32,
+        st: &Style,
+        water: Option<&[f32]>,
+    ) -> Fields {
         let n = w * h;
         let mut r = Rec::new(self, w, h);
 
         let elev_b = r.upload_grid(elev);
-        let land = r.grid_buf();
-        r.grid("map1", r.p(1, &[0.0, 0.5]), &[(1, &elev_b), (2, &land)]);
+        let land = match water {
+            Some(c) => {
+                let l: Vec<f32> = c.iter().map(|&c| (c < 0.5) as u8 as f32).collect();
+                r.upload_grid(&l)
+            }
+            None => {
+                let land = r.grid_buf();
+                r.grid("map1", r.p(1, &[0.0, 0.5]), &[(1, &elev_b), (2, &land)]);
+                land
+            }
+        };
 
         // Direction: gradient of a heavily smoothed surface, turned 90°.
         let (a, t) = (r.grid_buf(), r.grid_buf());

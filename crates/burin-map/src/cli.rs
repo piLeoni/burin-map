@@ -16,8 +16,8 @@ use crate::document::size_pair;
 use crate::geo::{parse_length_km, parse_scale};
 use crate::progress::latlon;
 use crate::{
-    bounds_around, dem::projected_size, draw_batches, locate, Batch, Bounds, Document, Error,
-    Frame, Progress, Style, TileSource,
+    bounds_around, dem::projected_size, locate, Batch, Bounds, Document, Error, Frame, Progress,
+    Style, TileSource,
 };
 
 const PLACES: &[(&str, Bounds)] = &[
@@ -50,6 +50,7 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("out-geojson", "", Takes::One),
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
+    ("water", "", Takes::One),
     ("force-cpu", "", Takes::Zero),
 ];
 
@@ -119,7 +120,12 @@ pub fn command() -> Command {
         .arg(global("style-file").value_name("PATH").value_parser(value_parser!(PathBuf))
             .help("JSON or JSON5 document (comments allowed) with an optional area block and the batch passes"))
         .arg(global("style-json").value_name("JSON")
-            .help("inline JSON or JSON5 document (or a bare list of batches)"));
+            .help("inline JSON or JSON5 document (or a bare list of batches)"))
+        .next_help_heading("Water — sea, lakes and rivers from OpenStreetMap")
+        .arg(global("water").value_name("JSON")
+            .help("the document's water block, as JSON or JSON5: '{}' for the shoreline alone, or \
+                   '{\"batches\": [{\"follow\": \"shore\"}, {\"follow\": \"map\", \"angle\": 20}]}'. \
+                   It also decides where the land is, instead of the height"));
 
     let mut last_group = "";
     for p in Style::PARAMS {
@@ -132,6 +138,7 @@ pub fn command() -> Command {
                 "sun" => "Sun",
                 "engine" => "Engine — streamline tracer",
                 "batch" => "Batch style — per-pass floor, stroke, seed",
+                "water" => "Water style — only in water batches (inside --water)",
                 other => other,
             };
             cmd = cmd.next_help_heading(heading);
@@ -432,6 +439,14 @@ impl Report {
                                       highest point {highest_m:.0} m"
                 ));
             }
+            Progress::WaterTile { done, total } => {
+                self.transient("water", &format!("OpenStreetMap tile {done} of {total}"));
+            }
+            Progress::Water { share, secs } => self.step(
+                "water",
+                &format!("OpenStreetMap, {:.0}% of the area", share * 100.0),
+                Some(secs),
+            ),
             Progress::Frame {
                 width_mm,
                 height_mm,
@@ -487,7 +502,7 @@ where
 
     // Parse the document (from --style-json / --style-file) once. A bare
     // batch array is accepted too, so older invocations keep working.
-    let doc: Document = if let Some(json) = m.get_one::<String>("style-json") {
+    let mut doc: Document = if let Some(json) = m.get_one::<String>("style-json") {
         Document::parse(json).map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?
     } else if let Some(path) = m.get_one::<PathBuf>("style-file") {
         let s = std::fs::read_to_string(path)
@@ -496,6 +511,11 @@ where
     } else {
         Document::default()
     };
+    if let Some(json) = m.get_one::<String>("water") {
+        let water =
+            json5::from_str(json).map_err(|e| Error::Input(format!("invalid --water: {e}")))?;
+        doc.water = Some(water);
+    }
 
     let batches: Vec<Batch> = if !doc.batches.is_empty() {
         doc.batches.clone()
@@ -556,7 +576,9 @@ where
     }
 
     let t = Instant::now();
-    let map = draw_batches(&bounds, &batches, &frame, |p| r.progress(p))?;
+    let map = crate::draw_with_water(&bounds, &batches, doc.water.as_ref(), &frame, |p| {
+        r.progress(p)
+    })?;
     let out = PathBuf::from(m.get_one::<String>("out-file").unwrap());
     let d = &map.drawing;
     let is_svg = out.extension().map(|e| e == "svg").unwrap_or(false);

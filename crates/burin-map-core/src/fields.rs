@@ -57,8 +57,29 @@ fn relative_shade(
 }
 
 pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> Fields {
+    build_fields_with(elev, w, h, px_m, st, None)
+}
+
+/// Land: less than half water where the coverage is known, and above sea level
+/// where it is not. Height alone misses lakes and floods land below the sea.
+pub fn land_mask(elev: &[f32], water: Option<&[f32]>) -> Vec<bool> {
+    match water {
+        Some(c) => c.par_iter().map(|&c| c < 0.5).collect(),
+        None => elev.par_iter().map(|&e| e > 0.5).collect(),
+    }
+}
+
+/// [`build_fields`] with the water coverage (0…1 per pixel) deciding the land.
+pub fn build_fields_with(
+    elev: &[f32],
+    w: usize,
+    h: usize,
+    px_m: f32,
+    st: &Style,
+    water: Option<&[f32]>,
+) -> Fields {
     let n = w * h;
-    let land: Vec<bool> = elev.par_iter().map(|&e| e > 0.5).collect();
+    let land = land_mask(elev, water);
 
     // Direction: gradient of a heavily smoothed surface, turned 90°.
     let surf = blur(elev, w, h, st.mod_smooth);
@@ -79,29 +100,7 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
 
     // On near-flat ground a smooth random rotation, fading to none on slopes,
     // keeps lines from coming out combed-parallel.
-    if st.mod_wobble > 0.0 {
-        let mut noise = vec![0.0f32; n];
-        Rng::new(st.batch_seed).fill_normal(&mut noise);
-        let noise = blur(&noise, w, h, st.mod_wobble_size);
-        let mean = noise.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
-        let var = noise
-            .iter()
-            .map(|&v| (v as f64 - mean).powi(2))
-            .sum::<f64>()
-            / n as f64;
-        let inv_std = 1.0 / (var.sqrt() as f32).max(1e-12);
-        let amp = st.mod_wobble.to_radians();
-        tx.par_iter_mut()
-            .zip(&mut ty)
-            .enumerate()
-            .for_each(|(i, (tx, ty))| {
-                let a = amp * noise[i] * inv_std * (1.0 - steep[i]).powi(2);
-                let (sa, ca) = a.sin_cos();
-                let (u, v) = (*tx, *ty);
-                *tx = u * ca - v * sa;
-                *ty = u * sa + v * ca;
-            });
-    }
+    wobble(&mut tx, &mut ty, w, h, st, |i| (1.0 - steep[i]).powi(2));
 
     // Shading at two scales: detail keeps ridges readable up close, the
     // massif scale gives whole mountain sides one value from afar.
@@ -163,6 +162,43 @@ pub fn build_fields(elev: &[f32], w: usize, h: usize, px_m: f32, st: &Style) -> 
         walkable,
         space,
     }
+}
+
+/// Turn the direction field by a smooth random angle of up to about
+/// `mod_wobble` degrees, times `weight(i)` at each pixel.
+pub(crate) fn wobble(
+    tx: &mut [f32],
+    ty: &mut [f32],
+    w: usize,
+    h: usize,
+    st: &Style,
+    weight: impl Fn(usize) -> f32 + Sync,
+) {
+    if st.mod_wobble <= 0.0 {
+        return;
+    }
+    let n = w * h;
+    let mut noise = vec![0.0f32; n];
+    Rng::new(st.batch_seed).fill_normal(&mut noise);
+    let noise = blur(&noise, w, h, st.mod_wobble_size);
+    let mean = noise.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+    let var = noise
+        .iter()
+        .map(|&v| (v as f64 - mean).powi(2))
+        .sum::<f64>()
+        / n as f64;
+    let inv_std = 1.0 / (var.sqrt() as f32).max(1e-12);
+    let amp = st.mod_wobble.to_radians();
+    tx.par_iter_mut()
+        .zip(ty)
+        .enumerate()
+        .for_each(|(i, (tx, ty))| {
+            let a = amp * noise[i] * inv_std * weight(i);
+            let (sa, ca) = a.sin_cos();
+            let (u, v) = (*tx, *ty);
+            *tx = u * ca - v * sa;
+            *ty = u * sa + v * ca;
+        });
 }
 
 /// Fields for one batch: rotate the contour direction by `batch.angle` degrees,

@@ -29,10 +29,12 @@ fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
     Ok(st)
 }
 
-/// (name, default, help, group) for every style parameter — drives the web UI.
+/// (name, default, water_default, help, group) for every style parameter —
+/// drives the web UI. `water_default` is the value in water batches.
 #[wasm_bindgen]
 pub fn style_params() -> Result<JsValue, JsValue> {
     let d = Style::default();
+    let wd = Style::water();
     let arr = js_sys::Array::new();
     for p in Style::PARAMS {
         let o = js_sys::Object::new();
@@ -41,6 +43,11 @@ pub fn style_params() -> Result<JsValue, JsValue> {
             &o,
             &"default".into(),
             &(d.get(p.name).unwrap() as f32 as f64).into(),
+        )?;
+        Reflect::set(
+            &o,
+            &"water_default".into(),
+            &(wd.get(p.name).unwrap() as f32 as f64).into(),
         )?;
         Reflect::set(&o, &"help".into(), &p.help.into())?;
         Reflect::set(&o, &"group".into(), &p.group.into())?;
@@ -291,10 +298,100 @@ fn read_geo(o: &JsValue) -> GeoTransform {
     }
 }
 
+/// Water tiles to fetch for a north-up Web Mercator grid `width` px across the
+/// box, flat: z, x, y, z, x, y, … Across the 180° meridian x runs past
+/// 2^z - 1; wrap it for the URL, but hand it back as it is.
+#[wasm_bindgen]
+pub fn water_tiles(
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+    width: u32,
+    max_zoom: u8,
+    max_tiles: u32,
+) -> Vec<u32> {
+    let b = [west, south, east, north];
+    let limits = watermask::ZoomLimits {
+        max_zoom,
+        max_tiles: max_tiles as usize,
+    };
+    let z = watermask::zoom_for(&b, width as usize, &limits);
+    watermask::tiles_for(&b, z)
+        .into_iter()
+        .flat_map(|t| [t.z as u32, t.x, t.y])
+        .collect()
+}
+
+/// What the page asks for on water; the document's `water` minus its source.
+#[derive(serde::Deserialize)]
+struct WaterSpec {
+    classes: Option<Vec<String>>,
+    #[serde(default = "yes")]
+    shore: bool,
+    #[serde(default)]
+    batches: Vec<burin_map_core::WaterBatch>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// `water` is `undefined`, or `{ spec, bounds, tiles }`: `spec` the water part
+/// of the document as JSON, `bounds` the grid's `[west, south, east, north]`
+/// (north-up Web Mercator, like the elevation), `tiles` an array of
+/// `[z, x, y, bytes]` as listed by [`water_tiles`].
+fn read_water(
+    water: &JsValue,
+    w: usize,
+    h: usize,
+) -> Result<Option<(Vec<f32>, WaterSpec)>, JsValue> {
+    if water.is_undefined() || water.is_null() {
+        return Ok(None);
+    }
+    let get = |k: &str| Reflect::get(water, &k.into());
+    let spec: WaterSpec = serde_json::from_str(&get("spec")?.as_string().unwrap_or_default())
+        .map_err(|e| JsValue::from_str(&format!("invalid water: {e}")))?;
+    let b: Vec<f64> = js_sys::Array::from(&get("bounds")?)
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .collect();
+    let [west, south, east, north] = b[..] else {
+        return Err(JsValue::from_str(
+            "water.bounds needs [west, south, east, north]",
+        ));
+    };
+    let mut filter = watermask::Filter {
+        lines: Vec::new(),
+        ..Default::default()
+    };
+    if let Some(c) = &spec.classes {
+        filter.areas = c.clone();
+    }
+    let mut found = watermask::Water::new();
+    for t in js_sys::Array::from(&get("tiles")?).iter() {
+        let t = js_sys::Array::from(&t);
+        let n = |i| t.get(i).as_f64().unwrap_or(0.0) as u32;
+        let bytes = js_sys::Uint8Array::new(&t.get(3)).to_vec();
+        if bytes.is_empty() {
+            continue;
+        }
+        let id = watermask::TileId::new(n(0) as u8, n(1), n(2));
+        found
+            .add_tile(id, &bytes, &filter)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    }
+    let grid = watermask::Grid::new([west, south, east, north], w, h);
+    let mask = found.mask(&grid, &watermask::MaskOptions::default());
+    Ok(Some((mask.coverage, spec)))
+}
+
 /// Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
 /// `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }`.
-/// With `mm_per_px` the SVG is sized in millimetres, for paper.
+/// With `mm_per_px` the SVG is sized in millimetres, for paper. `water`: see
+/// [`read_water`]; it decides the land, and its batches draw on it.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn draw_batches(
     elev: &[f32],
     width: u32,
@@ -303,6 +400,7 @@ pub fn draw_batches(
     json: &str,
     geo: &JsValue,
     mm_per_px: Option<f32>,
+    water: &JsValue,
 ) -> Result<Drawing, JsValue> {
     let (w, h) = (width as usize, height as usize);
     if elev.len() != w * h {
@@ -315,11 +413,27 @@ pub fn draw_batches(
     }
     let batches = parse_batches(json)?;
     let t0 = now_ms();
-    let f = burin_map_core::build_fields(elev, w, h, px_m, &batches[0].style);
-    let mut timings = vec![("terrain fields (CPU)".to_string(), now_ms() - t0)];
-    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, now_ms);
+    let wet = read_water(water, w, h)?;
+    let mut timings = Vec::new();
+    if wet.is_some() {
+        timings.push(("water mask".to_string(), now_ms() - t0));
+    }
+    let t1 = now_ms();
+    let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
+    let f = burin_map_core::build_fields_with(elev, w, h, px_m, &batches[0].style, coverage);
+    timings.push(("terrain fields (CPU)".to_string(), now_ms() - t1));
+    let layer = layer(&wet);
+    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
     Ok(finish(d, &batches, now_ms() - t0, timings, geo, mm_per_px))
+}
+
+fn layer(wet: &Option<(Vec<f32>, WaterSpec)>) -> Option<burin_map_core::WaterLayer<'_>> {
+    wet.as_ref().map(|(c, s)| burin_map_core::WaterLayer {
+        coverage: c,
+        shore: s.shore,
+        batches: &s.batches,
+    })
 }
 
 fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
@@ -354,6 +468,7 @@ pub async fn init_gpu() -> Option<String> {
 /// [`init_gpu`] first). Lines come out slightly different from the CPU path.
 #[cfg(feature = "gpu")]
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub async fn draw_batches_gpu(
     elev: Vec<f32>,
     width: u32,
@@ -362,6 +477,7 @@ pub async fn draw_batches_gpu(
     json: String,
     geo: JsValue,
     mm_per_px: Option<f32>,
+    water: JsValue,
 ) -> Result<Drawing, JsValue> {
     let (w, h) = (width as usize, height as usize);
     if elev.len() != w * h {
@@ -377,9 +493,19 @@ pub async fn draw_batches_gpu(
         .with(|g| g.borrow().clone())
         .ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
     let t0 = now_ms();
-    let f = gpu.build_fields(&elev, w, h, px_m, &batches[0].style).await;
-    let mut timings = vec![("terrain fields (GPU)".to_string(), now_ms() - t0)];
-    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, now_ms);
+    let wet = read_water(&water, w, h)?;
+    let mut timings = Vec::new();
+    if wet.is_some() {
+        timings.push(("water mask".to_string(), now_ms() - t0));
+    }
+    let t1 = now_ms();
+    let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
+    let f = gpu
+        .build_fields_with(&elev, w, h, px_m, &batches[0].style, coverage)
+        .await;
+    timings.push(("terrain fields (GPU)".to_string(), now_ms() - t1));
+    let layer = layer(&wet);
+    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, layer.as_ref(), now_ms);
     timings.extend(t);
     Ok(finish(d, &batches, now_ms() - t0, timings, &geo, mm_per_px))
 }

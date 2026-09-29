@@ -31,7 +31,7 @@ export function parseDoc(text) {
       throw new Error(`Unknown area setting "${key}". Allowed: ${AREA_KEYS.join(', ')}`)
     }
   }
-  return { area, batches: raw.batches ?? [] }
+  return { area, batches: raw.batches ?? raw.land?.batches ?? [], water: raw.water ?? null }
 }
 
 /* ================================================================= */
@@ -88,17 +88,32 @@ export function docToNote(doc) {
     else areaParts.push(`${short}${num(v)}`)
   }
 
-  const batchParts = doc.batches.map((b) => {
-    const toks = [`a${num(b.angle ?? 0)}`]
-    // Only the notation's own separators are escaped; docToHash URL-encodes the rest.
-    if (b.name) toks.push(`n${b.name.replace(/[%,;|]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`)
-    for (const [key, v] of Object.entries(numericStyle(b.style))) {
-      toks.push(`${PARAM_SHORTS[key] ?? key}${num(v)}`)
-    }
-    return toks.join(',')
-  })
+  const batchParts = doc.batches.map((b) => batchNote(b, [`a${num(b.angle ?? 0)}`]))
+  const note = `${areaParts.join(',')}|${batchParts.join(';')}`
+  if (!doc.water) return note
 
-  return `${areaParts.join(',')}|${batchParts.join(';')}`
+  // Water: its settings, then its batches, `;`-separated. A batch leads with
+  // how it follows (`shore` or `map`), which is what tells the two apart.
+  const w = doc.water
+  const head = []
+  if (w.shore === false) head.push('noshore')
+  if (w.classes) head.push(`c${w.classes.join('+')}`)
+  if (w.source) head.push(`src${escapeNote(w.source)}`)
+  const wet = w.batches.map((b) => batchNote(b, [b.follow ?? 'shore', `a${num(b.angle ?? 0)}`]))
+  return `${note}|${[head.join(','), ...wet].join(';')}`
+}
+
+/** Only the notation's own separators are escaped; docToHash URL-encodes the rest. */
+function escapeNote(s) {
+  return s.replace(/[%,;|]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+}
+
+function batchNote(b, toks) {
+  if (b.name) toks.push(`n${escapeNote(b.name)}`)
+  for (const [key, v] of Object.entries(numericStyle(b.style))) {
+    toks.push(`${PARAM_SHORTS[key] ?? key}${num(v)}`)
+  }
+  return toks.join(',')
 }
 
 /**
@@ -140,7 +155,7 @@ export function noteToDoc(note) {
   const text = String(note || '').trim()
   if (!text) throw new Error('The URL holds no drawing')
 
-  const [areaText, batchText] = text.includes('|') ? text.split('|', 2) : ['', text]
+  const [areaText, batchText, waterText] = text.includes('|') ? text.split('|', 3) : ['', text]
   const area = {}
 
   if (areaText) {
@@ -175,26 +190,50 @@ export function noteToDoc(note) {
     }
   }
 
-  const batches = (batchText ? batchText.split(';') : []).filter((s) => s.trim() !== '').map((seg) => {
-    let angle = 0
-    let name
-    const style = {}
-    for (const tok of seg.split(',')) {
-      if (!tok) continue
-      // No style short starts with `n`, so an `n…` token is always the name.
-      if (tok[0] === 'n') {
-        name = decodeURIComponent(tok.slice(1))
-        continue
-      }
-      const { key, value } = readNumber(tok, ANGLE_AND_STYLE, 'style')
-      if (key === 'angle') angle = value
-      else style[key] = value
-    }
-    return name ? { name, angle, style } : { angle, style }
-  })
+  const batches = (batchText ? batchText.split(';') : []).filter((s) => s.trim() !== '').map((seg) => readBatch(seg))
 
   if (batches.length === 0) throw new Error('The URL holds no batches')
-  return { area: Object.keys(area).length ? area : undefined, batches }
+  const doc = { area: Object.keys(area).length ? area : undefined, batches }
+  if (waterText != null) doc.water = readWater(waterText)
+  return doc
+}
+
+/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` for water. */
+function readBatch(seg) {
+  let angle = 0
+  let name
+  let follow
+  const style = {}
+  for (const tok of seg.split(',')) {
+    if (!tok) continue
+    // No style short starts with `n`, so an `n…` token is always the name.
+    if (tok[0] === 'n') {
+      name = decodeURIComponent(tok.slice(1))
+      continue
+    }
+    if (tok === 'shore' || tok === 'map') {
+      follow = tok
+      continue
+    }
+    const { key, value } = readNumber(tok, ANGLE_AND_STYLE, 'style')
+    if (key === 'angle') angle = value
+    else style[key] = value
+  }
+  const b = follow ? { follow, angle, style } : { angle, style }
+  return name ? { name, ...b } : b
+}
+
+function readWater(text) {
+  const [headText, ...segs] = text.split(';')
+  const water = { batches: segs.filter((s) => s.trim() !== '').map((seg) => readBatch(seg)) }
+  for (const tok of headText.split(',')) {
+    if (!tok) continue
+    if (tok === 'noshore') water.shore = false
+    else if (tok.startsWith('src')) water.source = decodeURIComponent(tok.slice(3))
+    else if (tok[0] === 'c') water.classes = tok.slice(1).split('+')
+    else throw new Error(`Unknown water setting "${tok}"`)
+  }
+  return water
 }
 
 /* ================================================================= */

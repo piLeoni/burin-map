@@ -31,6 +31,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("sun", "Where the light comes from."),
     ("engine", "How lines are traced. Usually best left alone."),
     ("batch", "Settings for this batch only: line width, random seed, and where it draws."),
+    ("water", "Lines on water: where they start and end away from the shore, and how they fade. Water batches only."),
 ];
 
 macro_rules! style {
@@ -129,6 +130,10 @@ style! {
     batch: batch_floor ("bf"): f32 = 0.0, "this batch draws only where the shading input is at least this; 0 draws on all land";
     batch: batch_stroke ("bs"): f32 = 1.2, "line width, in px";
     batch: batch_seed ("bseed"): u64 = 1, "random seed; change it for another variation of the same style";
+
+    water: water_start ("wst"): f32 = 2.0, "gap between the shore and the first line, in px";
+    water: water_reach ("wr"): f32 = 60.0, "how far out from the shore the lines go, in px";
+    water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
 }
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
@@ -169,7 +174,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 33);
+        assert_eq!(Style::PARAMS.len(), 36);
     }
 
     #[test]

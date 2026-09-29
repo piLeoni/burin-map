@@ -7,7 +7,7 @@ import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import { VIEWS, detectView, parseView, renderView } from '../lib/views'
 import {
-  BATCHES_V1_KEY, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom,
+  BATCHES_V1_KEY, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom, waterAtom,
 } from '../state'
 
 const PHASE_LABEL = {
@@ -68,6 +68,7 @@ const FRESH = [{ angle: 0, style: {} }]
 export default function Sidebar({ open, onClose, status, drawing }) {
   const [schema, setSchema] = useState(null)   // { params, groups } from the engine
   const [batches, setBatches] = useAtom(styleAtom)
+  const [water, setWater] = useAtom(waterAtom)
   const [notes, setNotes] = useAtom(notesAtom)
   const [kind, setKind] = useAtom(viewKindAtom)
   const [mapView] = useAtom(mapViewAtom)
@@ -101,6 +102,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const load = (m) => {
     applyArea(m.area)
     setBatches(m.batches)
+    setWater(m.water ?? null)
     setNotes(m.notes ?? {})
   }
 
@@ -123,6 +125,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
 
       if (fromHash && Array.isArray(fromHash.batches) && fromHash.batches.length > 0) {
         setBatches(fromHash.batches)
+        setWater(fromHash.water ?? null)
         setNotes({})
         return
       }
@@ -136,7 +139,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   }, [setBatches, setCameraRequest])
 
   // ---------- the text ----------
-  const model = { area: areaFromFrame(frame, mapView?.center), batches: list, notes: notes ?? {} }
+  const model = { area: areaFromFrame(frame, mapView?.center), batches: list, water, notes: notes ?? {} }
   const liveText = schema && list.length > 0 ? renderView(view, model, schema) : ''
   const shown = draft ?? liveText
   const dirty = draft != null && draft !== liveText
@@ -177,6 +180,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
 
   const reset = () => {
     setBatches(FRESH)
+    setWater(null)
     setNotes({})
     setDraft(null)
     setError('')
@@ -216,7 +220,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
 
   const copyLink = () => {
     const loc = globalThis.location
-    copy(`${loc.origin}${loc.pathname}${docToHash({ area: model.area, batches: list })}`, 'Link')
+    copy(`${loc.origin}${loc.pathname}${docToHash({ area: model.area, batches: list, water })}`, 'Link')
   }
 
   // A link pasted into an open tab only changes the hash, which doesn't reload.
@@ -227,7 +231,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
       const doc = takeDocFromHash()
       if (!doc) return
       try {
-        load({ area: doc.area, batches: doc.batches, notes: {} })
+        load({ area: doc.area, batches: doc.batches, water: doc.water, notes: {} })
         setDraft(null)
         flash('Opened URL')
       } catch (e) {

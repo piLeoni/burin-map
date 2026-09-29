@@ -55,15 +55,16 @@ export function draw(elev: Float32Array, width: number, height: number, px_m: nu
 /**
  * Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
  * `geo` is an optional `{ nw_lon, nw_lat, deg_per_px_lon, deg_per_px_lat }`.
- * With `mm_per_px` the SVG is sized in millimetres, for paper.
+ * With `mm_per_px` the SVG is sized in millimetres, for paper. `water`: see
+ * [`read_water`]; it decides the land, and its batches draw on it.
  */
-export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px?: number | null): Drawing;
+export function draw_batches(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px: number | null | undefined, water: any): Drawing;
 
 /**
  * [`draw_batches`] with the terrain fields built on the GPU (call
  * [`init_gpu`] first). Lines come out slightly different from the CPU path.
  */
-export function draw_batches_gpu(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px?: number | null): Promise<Drawing>;
+export function draw_batches_gpu(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px: number | null | undefined, water: any): Promise<Drawing>;
 
 /**
  * `initGpu()`: set up WebGPU for [`draw_batches_gpu`]. Resolves to the
@@ -79,9 +80,17 @@ export function initThreadPool(num_threads: number): Promise<any>;
 export function style_groups(): any;
 
 /**
- * (name, default, help, group) for every style parameter — drives the web UI.
+ * (name, default, water_default, help, group) for every style parameter —
+ * drives the web UI. `water_default` is the value in water batches.
  */
 export function style_params(): any;
+
+/**
+ * Water tiles to fetch for a north-up Web Mercator grid `width` px across the
+ * box, flat: z, x, y, z, x, y, … Across the 180° meridian x runs past
+ * 2^z - 1; wrap it for the URL, but hand it back as it is.
+ */
+export function water_tiles(west: number, south: number, east: number, north: number, width: number, max_zoom: number, max_tiles: number): Uint32Array;
 
 export class wbg_rayon_PoolBuilder {
     private constructor();
@@ -101,8 +110,8 @@ export interface InitOutput {
     readonly __wbg_drawing_free: (a: number, b: number) => void;
     readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
     readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
-    readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => [number, number, number];
-    readonly draw_batches_gpu: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number) => any;
+    readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => [number, number, number];
+    readonly draw_batches_gpu: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => any;
     readonly drawing_dashes: (a: number) => number;
     readonly drawing_deg_per_px_lat: (a: number) => number;
     readonly drawing_deg_per_px_lon: (a: number) => number;
@@ -121,6 +130,7 @@ export interface InitOutput {
     readonly initThreadPool: (a: number) => any;
     readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
+    readonly water_tiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly wbg_rayon_poolbuilder_build: (a: number) => void;
     readonly wbg_rayon_poolbuilder_mainJS: (a: number) => any;
     readonly wbg_rayon_poolbuilder_numThreads: (a: number) => number;
@@ -129,8 +139,8 @@ export interface InitOutput {
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue__core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__31: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__32: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__33: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___futures__task__wait_async_polyfill__MessageEvent______true_: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue______true_: (a: number, b: number, c: any) => void;
     readonly memory: WebAssembly.Memory;

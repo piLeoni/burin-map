@@ -14,6 +14,7 @@ globalThis.window = dom.window
 globalThis.document = dom.window.document
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 globalThis.HTMLElement = dom.window.HTMLElement
+globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window)
 globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0)
 globalThis.cancelAnimationFrame = clearTimeout
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
@@ -89,6 +90,22 @@ if (hash.startsWith('#d=')) {
 const exact = docToNote(doc)
 if (JSON.stringify(noteToDoc(exact)) !== JSON.stringify(doc)) missing.push('notation exact round-trip')
 
+// Water rides in a third section, and survives it exactly.
+const wet = {
+  ...doc,
+  water: {
+    batches: [
+      { name: 'coast; waves', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
+      { follow: 'map', angle: 70, style: {} },
+    ],
+    shore: false,
+    classes: ['ocean', 'lake'],
+    source: 'https://example.org/tiles.json',
+  },
+}
+const wetBack = docFromHash(docToHash(wet))
+if (JSON.stringify(wetBack) !== JSON.stringify(wet)) missing.push(`notation water round-trip ${JSON.stringify(wetBack)}`)
+
 // Batch names survive the link, whatever characters they hold.
 const named = {
   area: { at: '37.75,-122.44' },
@@ -128,13 +145,14 @@ const rustShorts = {
   input_broad: 'ibr', sun_azimuth: 'sa', sun_altitude: 'salt', sun_exag: 'sx',
   engine_step: 'es', engine_min: 'em', engine_stop: 'esp', engine_fill: 'ef',
   batch_floor: 'bf', batch_stroke: 'bs', batch_seed: 'bseed',
+  water_start: 'wst', water_reach: 'wr', water_fade: 'wf',
 }
 for (const [full, short] of Object.entries(rustShorts)) {
   if (PARAM_SHORTS[full] !== short) missing.push(`drift: ${full} should be "${short}", got "${PARAM_SHORTS[full]}"`)
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 33) missing.push(`expected 33 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 36) missing.push(`expected 36 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`
@@ -221,7 +239,7 @@ const schema = {
     .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
   groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
 }
-if (schema.params.length !== 33) missing.push(`views: read ${schema.params.length} params from style.rs`)
+if (schema.params.length !== 36) missing.push(`views: read ${schema.params.length} params from style.rs`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const model = {
   area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
@@ -229,22 +247,33 @@ const model = {
     { name: "Bob's ridges: #1", angle: 0, style: { space: 6, input_gain: 3.5 } },
     { angle: -30, style: { batch_floor: 0.45 } },
   ],
+  water: {
+    classes: ['ocean', 'lake'],
+    shore: false,
+    batches: [
+      { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
+      { follow: 'map', angle: 70, style: {} },
+    ],
+  },
   notes: {
     '': { above: ['Zermatt, A4 at 1:25000', 'second line'] },
     'area.at': { after: 'the Matterhorn is south-west' },
     'batches.0.style.space': { above: ['wider in the valleys'], after: 'was 4.8' },
     'batches.1': { above: ['steep ground only'] },
+    'water.batches.0.style.space': { after: 'wider offshore' },
   },
 }
 const kinds = Object.keys(V.VIEWS)
+// The command gives water as one JSON argument, which holds no comments.
+const dry = { ...model, notes: Object.fromEntries(Object.entries(model.notes).filter(([k]) => !k.startsWith('water.'))) }
 for (const kind of kinds) {
   const text = V.renderView(kind, model, schema)
   let back
   try { back = V.parseView(kind, text, schema) } catch (e) { missing.push(`views: ${kind} can't read itself: ${e.message}`); continue }
-  if (!same(back, model)) missing.push(`views: ${kind} round trip\n${JSON.stringify(back)}`)
+  if (!same(back, kind === 'cli' ? dry : model)) missing.push(`views: ${kind} round trip\n${JSON.stringify(back)}`)
   for (const other of kinds) {
     const again = V.parseView(other, V.renderView(other, back, schema), schema)
-    if (!same(again, model)) missing.push(`views: ${kind} -> ${other} loses something`)
+    if (!same(again, kind === 'cli' || other === 'cli' ? dry : model)) missing.push(`views: ${kind} -> ${other} loses something`)
   }
   if (!text.includes('input_broad') && !text.includes('input-broad')) missing.push(`views: ${kind} should list unset parameters`)
 }

@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Batch, Frame, Style};
+use crate::{Batch, Frame, Style, WaterBatch};
 
 /// Where on the ground to draw and on what. The ground is a named place,
 /// explicit bounds, or a centre with a size; the paper is optional. The same
@@ -48,6 +48,45 @@ pub fn size_pair(v: &[f64]) -> Option<[f64; 2]> {
     }
 }
 
+/// The land, spelled out. The same as the top-level `batches`, which is the
+/// short form; a document gives one or the other.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LandDoc {
+    pub batches: Vec<Batch>,
+}
+
+/// Water from OpenStreetMap, and how to draw it. Present, even empty, it also
+/// decides where the land is, in place of the elevation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterDoc {
+    /// Which water: OpenMapTiles area classes, from `ocean`, `lake`, `river`,
+    /// `dock`, `pond`, `swimming_pool`. Absent: ocean, lake, river and dock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classes: Option<Vec<String>>,
+    /// Draw the shoreline.
+    pub shore: bool,
+    /// TileJSON URL or `{z}/{x}/{y}` template of a source in the OpenMapTiles
+    /// schema. Absent: OpenFreeMap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Passes on the water. None: the shoreline only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub batches: Vec<WaterBatch>,
+}
+
+impl Default for WaterDoc {
+    fn default() -> Self {
+        WaterDoc {
+            classes: None,
+            shore: true,
+            source: None,
+            batches: Vec::new(),
+        }
+    }
+}
+
 /// One or more drawing passes.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -55,9 +94,15 @@ pub struct Document {
     /// Area and frame: `null`/absent means "take it from the command line".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub area: Option<AreaDoc>,
-    /// The passes. An absent list means "one pass with defaults".
+    /// The land passes. An absent list means "one pass with defaults".
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub batches: Vec<Batch>,
+    /// `land: {batches}` is read into `batches` and never written back.
+    #[serde(skip_serializing)]
+    pub land: Option<LandDoc>,
+    /// Absent: no water, and the land is wherever the ground is above sea level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub water: Option<WaterDoc>,
 }
 
 impl Document {
@@ -65,16 +110,26 @@ impl Document {
     /// work): comments, trailing commas and unquoted keys are allowed.
     /// Accepts either the full object or a bare batch array (the shape older
     /// builds and `--style-json` already used).
-    pub fn parse(s: &str) -> Result<Document, json5::Error> {
+    pub fn parse(s: &str) -> Result<Document, String> {
         let bare_list = strip_json5_comments(s).trim_start().starts_with('[');
         if bare_list {
-            let batches: Vec<Batch> = json5::from_str(s)?;
+            let batches: Vec<Batch> = json5::from_str(s).map_err(|e| e.to_string())?;
             return Ok(Document {
-                area: None,
                 batches,
+                ..Default::default()
             });
         }
-        json5::from_str(s)
+        let mut doc: Document = json5::from_str(s).map_err(|e| e.to_string())?;
+        if let Some(land) = doc.land.take() {
+            if !doc.batches.is_empty() {
+                return Err(
+                    "give the land's batches either as `batches` or as `land.batches`, not both"
+                        .into(),
+                );
+            }
+            doc.batches = land.batches;
+        }
+        Ok(doc)
     }
 
     /// The batches, or one default pass when the document has none.
@@ -194,6 +249,7 @@ mod tests {
                 ..Default::default()
             }),
             batches: vec![Batch::along(Style::default())],
+            ..Default::default()
         };
         let json = serde_json::to_string(&doc).unwrap();
         let back = Document::parse(&json).unwrap();
@@ -201,5 +257,41 @@ mod tests {
         assert_eq!(area.size_mm.as_deref(), Some(&[210.0, 297.0][..]));
         assert_eq!(area.scale, Some(25000.0));
         assert_eq!(back.batches.len(), 1);
+        assert!(back.water.is_none());
+    }
+
+    #[test]
+    fn parses_water() {
+        let doc = Document::parse(
+            r#"{
+              batches: [{ angle: 0 }],
+              water: {
+                classes: ["ocean"],
+                batches: [
+                  { name: "Coast", style: { water_reach: 80 } },
+                  { follow: "map", angle: 20 },
+                ],
+              },
+            }"#,
+        )
+        .unwrap();
+        let water = doc.water.unwrap();
+        assert!(water.shore, "the shoreline is on unless turned off");
+        assert_eq!(water.classes.as_deref(), Some(&["ocean".to_string()][..]));
+        assert_eq!(water.batches.len(), 2);
+        assert_eq!(water.batches[0].style.water_reach, 80.0);
+        assert_eq!(water.batches[1].follow, burin_map_core::Follow::Map);
+        assert!(Document::parse(r#"{"water": {"shores": false}}"#).is_err());
+    }
+
+    #[test]
+    fn land_is_the_long_form_of_batches() {
+        let doc =
+            Document::parse(r#"{"land": {"batches": [{"angle": 90}]}, "water": {}}"#).unwrap();
+        assert_eq!(doc.batches[0].angle, 90.0);
+        assert!(doc.land.is_none());
+        assert!(!serde_json::to_string(&doc).unwrap().contains("land"));
+        let both = Document::parse(r#"{"batches": [{}], "land": {"batches": [{}]}}"#);
+        assert!(both.unwrap_err().contains("not both"));
     }
 }

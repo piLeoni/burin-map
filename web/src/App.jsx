@@ -3,13 +3,19 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import PasswordGate from './components/PasswordGate'
-import { drawingAtom, statusAtom, styleAtom } from './state'
+import { drawingAtom, statusAtom, styleAtom, waterAtom } from './state'
 
 export default function App() {
   const batches = useAtomValue(styleAtom)
   // Names are labels only; renaming a batch must not trigger a redraw.
   const drawKey = JSON.stringify(batches.map(({ angle, style }) => ({ angle, style })))
   const drawn = useMemo(() => JSON.parse(drawKey), [drawKey])
+  const water = useAtomValue(waterAtom)
+  const waterKey = JSON.stringify(water && {
+    ...water,
+    batches: water.batches.map(({ follow, angle, style }) => ({ follow, angle, style })),
+  })
+  const wet = useMemo(() => JSON.parse(waterKey), [waterKey])
   const status = useAtomValue(statusAtom)
   const drawing = useAtomValue(drawingAtom)
   const setStatus = useSetAtom(statusAtom)
@@ -20,7 +26,7 @@ export default function App() {
     <PasswordGate>
       <div className="relative flex h-full min-h-0 w-full flex-col lg:flex-row">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <MapView batches={drawn} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
+          <MapView batches={drawn} water={wet} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
 
           <button
             type="button"

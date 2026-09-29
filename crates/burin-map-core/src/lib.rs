@@ -20,14 +20,16 @@ mod order;
 mod rng;
 mod streamlines;
 mod style;
+pub mod water;
 
 pub use dashes::dash_lines;
-pub use fields::{batch_fields, build_fields, Fields};
+pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS,
 };
+pub use water::{Follow, WaterBatch, WaterLayer};
 
 /// Stripe width used by the drawing engine, in px. See `streamlines::trace_stripes`.
 pub const STRIPE: i32 = 512;
@@ -110,54 +112,61 @@ pub fn draw_batches_auto(
     draw_batches(elev, width, height, px_m, batches)
 }
 
+/// [`draw_batches_auto`] with water: its coverage decides the land, and its
+/// batches draw on it.
+pub fn draw_batches_auto_with(
+    elev: &[f32],
+    width: usize,
+    height: usize,
+    px_m: f32,
+    batches: &[Batch],
+    water: Option<&WaterLayer>,
+) -> Drawing {
+    assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
+    assert!(!batches.is_empty(), "need at least one batch");
+    let coverage = water.map(|w| w.coverage);
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    if let Some(g) = engine::device() {
+        let f =
+            g.build_fields_with_blocking(elev, width, height, px_m, &batches[0].style, coverage);
+        return draw_fields_timed(&f, batches, water, || 0.0).0;
+    }
+    let f = build_fields_with(elev, width, height, px_m, &batches[0].style, coverage);
+    draw_fields_timed(&f, batches, water, || 0.0).0
+}
+
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`) with the
 /// first batch's style.
 pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
-    draw_fields_timed(f, batches, || 0.0).0
+    draw_fields_timed(f, batches, None, || 0.0).0
 }
 
 /// Milliseconds per phase of a draw, in the order they ran. Phases that run
 /// once per batch carry the batch index in their label.
 pub type Timings = Vec<(String, f64)>;
 
-/// [`draw_fields`], timing each phase with `now` (milliseconds). The clock is
-/// passed in because `std::time::Instant` panics on wasm32.
-pub fn draw_fields_timed(f: &Fields, batches: &[Batch], now: fn() -> f64) -> (Drawing, Timings) {
+/// Streamlines and dashes of some batches, and the time each phase took.
+type Traced = (Vec<Line>, Vec<Line>, Timings);
+
+/// [`draw_fields`], timing each phase with `now` (milliseconds), with water
+/// drawn alongside the land when there is some. The clock is passed in because
+/// `std::time::Instant` panics on wasm32.
+pub fn draw_fields_timed(
+    f: &Fields,
+    batches: &[Batch],
+    water: Option<&WaterLayer>,
+    now: fn() -> f64,
+) -> (Drawing, Timings) {
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (f.w, f.h);
-    let base_space = batches[0].style.space;
-
-    let parts: Vec<(Vec<Line>, Vec<Line>, [f64; 4])> = {
-        use rayon::prelude::*;
-        batches
-            .par_iter()
-            .enumerate()
-            .map(|(i, b)| {
-                let mut st = b.style.clone();
-                st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
-                let t0 = now();
-                let bf = batch_fields(f, b, base_space);
-                let t1 = now();
-                let traced = trace_stripes(&bf, &st, crate::STRIPE);
-                let t2 = now();
-                let lines = plot_order(traced);
-                let t3 = now();
-                let paths = dash_lines(&lines, &f.input, width, height, &st);
-                let t4 = now();
-                (lines, paths, [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
-            })
-            .collect()
-    };
-
-    let mut timings = Timings::new();
-    let mut lines = Vec::new();
-    let mut paths = Vec::new();
-    for (i, (l, p, t)) in parts.into_iter().enumerate() {
-        for (name, ms) in ["fields", "trace", "order lines", "dashes"].iter().zip(t) {
-            timings.push((format!("batch {i} {name}"), ms));
-        }
+    let ((mut lines, mut paths, mut timings), wet) = rayon::join(
+        || trace_land(f, batches, now),
+        || water.map(|wl| trace_water(wl, width, height, now)),
+    );
+    if let Some((l, p, t)) = wet {
         lines.extend(l);
         paths.extend(p);
+        timings.extend(t);
     }
     if !paths.is_empty() {
         let t = now();
@@ -171,6 +180,79 @@ pub fn draw_fields_timed(f: &Fields, batches: &[Batch], now: fn() -> f64) -> (Dr
         lines,
     };
     (d, timings)
+}
+
+fn trace_land(f: &Fields, batches: &[Batch], now: fn() -> f64) -> Traced {
+    use rayon::prelude::*;
+    let base_space = batches[0].style.space;
+    let parts: Vec<(Vec<Line>, Vec<Line>, [f64; 4])> = batches
+        .par_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let mut st = b.style.clone();
+            st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
+            let t0 = now();
+            let bf = batch_fields(f, b, base_space);
+            let t1 = now();
+            let (lines, paths, t) = trace_batch(&bf, &st, now);
+            (lines, paths, [t1 - t0, t[0], t[1], t[2]])
+        })
+        .collect();
+    collect_parts(parts, "batch")
+}
+
+fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced {
+    use rayon::prelude::*;
+    let t0 = now();
+    let (dist, shoreline) = water::shore(wl.coverage, w, h);
+    let t1 = now();
+    let parts: Vec<(Vec<Line>, Vec<Line>, [f64; 4])> = wl
+        .batches
+        .par_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let mut st = b.style.clone();
+            st.batch_seed = st.batch_seed.wrapping_add(0x5EA ^ (i as u64 * 0x9E37_79B9));
+            let t0 = now();
+            let f = water::water_fields(wl.coverage, &dist, w, h, b);
+            let t1 = now();
+            let (lines, paths, t) = trace_batch(&f, &st, now);
+            (lines, paths, [t1 - t0, t[0], t[1], t[2]])
+        })
+        .collect();
+    let (mut lines, mut paths, mut timings) = collect_parts(parts, "water");
+    timings.insert(0, ("water shore distance".into(), t1 - t0));
+    if wl.shore {
+        lines.extend(shoreline.iter().cloned());
+        paths.extend(shoreline);
+    }
+    (lines, paths, timings)
+}
+
+/// Trace, order and dash one batch on its own fields; ms for each of the three.
+fn trace_batch(f: &Fields, st: &Style, now: fn() -> f64) -> (Vec<Line>, Vec<Line>, [f64; 3]) {
+    let t0 = now();
+    let traced = trace_stripes(f, st, crate::STRIPE);
+    let t1 = now();
+    let lines = plot_order(traced);
+    let t2 = now();
+    let paths = dash_lines(&lines, &f.input, f.w, f.h, st);
+    let t3 = now();
+    (lines, paths, [t1 - t0, t2 - t1, t3 - t2])
+}
+
+fn collect_parts(parts: Vec<(Vec<Line>, Vec<Line>, [f64; 4])>, kind: &str) -> Traced {
+    let mut timings = Timings::new();
+    let mut lines = Vec::new();
+    let mut paths = Vec::new();
+    for (i, (l, p, t)) in parts.into_iter().enumerate() {
+        for (name, ms) in ["fields", "trace", "order lines", "dashes"].iter().zip(t) {
+            timings.push((format!("{kind} {i} {name}"), ms));
+        }
+        lines.extend(l);
+        paths.extend(p);
+    }
+    (lines, paths, timings)
 }
 
 impl Drawing {
@@ -304,6 +386,58 @@ mod tests {
             dc.lines.len(),
             dg.lines.len()
         );
+    }
+
+    /// A polder below sea level on the left, a lake up a hill on the right:
+    /// height alone gets both wrong, the water coverage gets both right.
+    #[test]
+    fn water_coverage_decides_the_land() {
+        let (w, h) = (200, 100);
+        let mut e = vec![-4.0f32; w * h];
+        let mut c = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if x >= 100 {
+                    e[i] = 50.0 + ((x - 100) as f32).powf(1.3) + (y as f32 * 0.2).sin() * 5.0;
+                }
+                if x >= 150 {
+                    c[i] = 1.0;
+                }
+                if x < 100 {
+                    e[i] += (x as f32 * 0.3).sin() + (y as f32 * 0.25).cos();
+                }
+            }
+        }
+        let by_height = land_mask(&e, None);
+        let by_water = land_mask(&e, Some(&c));
+        assert!(!by_height[50 * w + 50] && by_water[50 * w + 50], "polder");
+        assert!(by_height[50 * w + 170] && !by_water[50 * w + 170], "lake");
+
+        let batches = [WaterBatch::default()];
+        let layer = WaterLayer {
+            coverage: &c,
+            shore: true,
+            batches: &batches,
+        };
+        let d = draw_batches_auto_with(
+            &e,
+            w,
+            h,
+            30.0,
+            &[Batch::along(Style::default())],
+            Some(&layer),
+        );
+        let (mut wet, mut dry) = (0, 0);
+        for p in d.paths.iter().flatten() {
+            let x = p[0] as usize;
+            if x >= 152 {
+                wet += 1;
+            } else if x < 148 {
+                dry += 1;
+            }
+        }
+        assert!(wet > 50 && dry > 50, "lines on both: {wet} wet, {dry} dry");
     }
 
     #[test]

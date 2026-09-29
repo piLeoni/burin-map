@@ -160,6 +160,18 @@ pub fn projected_aspect(b: &Bounds) -> f64 {
 }
 
 /// Elevation for `bounds` on a grid `width` px wide with square metric pixels.
+/// Lon/lat → position on the grid [`load_dem`] makes for `b` at this size,
+/// x right and y down, pixel centres at +0.5.
+pub fn projector(b: &Bounds, width: usize, height: usize) -> impl Fn(f64, f64) -> [f64; 2] {
+    let t = centred(b);
+    let [xmin, ymin, xmax, ymax] = projected_extent(b, &t);
+    let (px, py) = ((xmax - xmin) / width as f64, (ymax - ymin) / height as f64);
+    move |lon, lat| {
+        let (x, y) = t.forward(lon, lat);
+        [(x - xmin) / px, (ymax - y) / py]
+    }
+}
+
 pub fn load_dem(b: &Bounds, width: usize) -> Result<Dem, Error> {
     load_dem_with(b, width, &|_| {})
 }
