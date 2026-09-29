@@ -20,6 +20,16 @@ fn at(line: &Line, s: &[f32], d: f32) -> [f32; 2] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
 
+/// The stretch of `line` between arc lengths `a` and `b`.
+fn dash(line: &Line, s: &[f32], (a, b): (f32, f32)) -> Line {
+    let mut dash = vec![at(line, s, a)];
+    let lo = s.partition_point(|&v| v <= a);
+    let hi = s.partition_point(|&v| v < b);
+    dash.extend_from_slice(&line[lo..hi.max(lo)]);
+    dash.push(at(line, s, b));
+    dash
+}
+
 pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style) -> Vec<Line> {
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x9e37_79b9));
     let base = (st.dash_period * st.space) as f64;
@@ -42,6 +52,9 @@ pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style)
             s.push(s[k - 1] + d);
         }
         let total = *s.last().unwrap() as f64;
+        // A dash that reaches the start of the next one is the same stroke on
+        // paper, so it is extended rather than emitted; only a real gap ends it.
+        let mut open: Option<(f32, f32)> = None;
         let mut cur = -rng.f64() * base;
         while cur < total {
             let jit = st.mod_jitter as f64;
@@ -79,16 +92,54 @@ pub fn dash_lines(lines: &[Line], input: &[f32], w: usize, h: usize, st: &Style)
                 let b = b.min(total);
                 if b - a > 0.6 {
                     let (a, b) = (a as f32, b as f32);
-                    let mut dash = vec![at(line, &s, a)];
-                    let lo = s.partition_point(|&v| v <= a);
-                    let hi = s.partition_point(|&v| v < b);
-                    dash.extend_from_slice(&line[lo..hi.max(lo)]);
-                    dash.push(at(line, &s, b));
-                    out.push(dash);
+                    open = match open {
+                        Some((a0, b0)) if a <= b0 => Some((a0, b0.max(b))),
+                        Some(done) => {
+                            out.push(dash(line, &s, done));
+                            Some((a, b))
+                        }
+                        None => Some((a, b)),
+                    };
                 }
             }
             cur += period;
         }
+        if let Some(done) = open {
+            out.push(dash(line, &s, done));
+        }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A straight line in full shadow: every dash fills its whole period, so
+    /// each one ends exactly where the next begins.
+    fn in_shadow(mod_breaks: f32) -> Vec<Line> {
+        let line: Line = (0..=100).map(|x| [x as f32 + 2.0, 5.0]).collect();
+        let (w, h) = (110, 10);
+        let st = Style {
+            dash_light: 0.5,
+            dash_drop: 0.0,
+            mod_jitter: 0.0,
+            mod_breaks,
+            ..Style::default()
+        };
+        dash_lines(&[line], &vec![1.0; w * h], w, h, &st)
+    }
+
+    #[test]
+    fn touching_dashes_are_one_stroke() {
+        let out = in_shadow(0.0);
+        assert_eq!(out.len(), 1, "{} strokes", out.len());
+        assert_eq!(out[0][0], [2.0, 5.0]);
+        assert_eq!(*out[0].last().unwrap(), [102.0, 5.0]);
+    }
+
+    #[test]
+    fn real_gaps_still_break_the_stroke() {
+        assert!(in_shadow(1.0).len() > 1);
+    }
 }
