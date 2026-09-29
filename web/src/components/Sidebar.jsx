@@ -262,6 +262,13 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               Terrain drawn as engraved lines. Pan or zoom the map; the view is
               redrawn when you stop.
             </p>
+            <p className="text-[11px] leading-relaxed opacity-50">
+              An online demo of{' '}
+              <a className="link" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
+              a terrain engine written in Rust, also available as a command-line
+              tool and as Python and Node libraries. Here the same engine runs in
+              your browser, compiled to WebAssembly.
+            </p>
           </header>
 
           <div className="flex items-baseline gap-3 font-mono text-[10px]">
