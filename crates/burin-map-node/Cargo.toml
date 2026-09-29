@@ -1,7 +1,8 @@
 [package]
 name = "burin-map-node"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
 publish = false
 
 [lib]
@@ -12,9 +13,9 @@ default = ["gpu"]
 gpu = ["burin-map/gpu"]
 
 [dependencies]
-burin-map = { path = "../burin-map" }
+burin-map = { workspace = true }
 serde_json = "1"
-burin-map-core = { path = "../burin-map-core" }
+burin-map-core = { workspace = true }
 napi = { version = "3", default-features = false, features = ["napi4"] }
 napi-derive = "3"
 

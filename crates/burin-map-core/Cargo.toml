@@ -1,7 +1,8 @@
 [package]
 name = "burin-map-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
 description = "Drawing engine of burin-map: pen-and-ink terrain lines from an elevation grid"
 publish = false
 

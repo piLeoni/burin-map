@@ -10,6 +10,18 @@ members = [
 default-members = ["crates/burin-map-core", "crates/burin-map"]
 resolver = "2"
 
+# One version for every crate, and for the Python and Node packages too:
+# maturin reads it from burin-map-py, and the CI checks node/package.json.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/piLeoni/burin-map"
+
+# crates.io needs a version next to each path, or it refuses the upload.
+[workspace.dependencies]
+burin-map-core = { path = "crates/burin-map-core", version = "0.1.0" }
+burin-map = { path = "crates/burin-map", version = "0.1.0" }
+
 [profile.release]
 opt-level = 3
 lto = true
