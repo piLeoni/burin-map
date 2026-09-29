@@ -21,6 +21,19 @@ function isUserGesture(e) {
   return !!(e && e.originalEvent)
 }
 
+/** How much to zoom, in zoom levels, for the frame to fill the map at latitude `lat`; 0 without a frame. */
+function zoomToFit(map, frame, lat) {
+  const g = groundKm(frame)
+  if (!g) return 0
+  const el = map.getContainer()
+  const kmPerPx = groundWidthAt(lat, map.getZoom(), 1)
+  const k = Math.min(
+    (el.clientWidth - 2 * FIT_PAD) / (g[0] / kmPerPx),
+    (el.clientHeight - 2 * FIT_PAD) / (g[1] / kmPerPx),
+  )
+  return k > 0 ? Math.log2(k) : 0
+}
+
 export default function MapView({ batches, water, onStatus, onDrawing, drawing }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -181,10 +194,11 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
     setMapView({ center: [c.lng, c.lat], zoom: map.getZoom() })
   }, [setMapView])
 
+  // One jump: centred first at a low zoom, the map would clamp the centre to its edges.
   const applyCamera = useCallback((cam) => {
     const map = mapRef.current
     if (!map || !cam?.center) return
-    map.jumpTo({ center: cam.center })
+    map.jumpTo({ center: cam.center, zoom: map.getZoom() + zoomToFit(map, frameRef.current, cam.center[1]) })
   }, [])
 
   const scheduleConvert = useCallback(
@@ -314,18 +328,12 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
   /** Zoom so the frame fits the map: out when it spills over, and also in when `grow`. */
   const fitFrame = useCallback((grow) => {
     const map = mapRef.current
-    const g = groundKm(frameRef.current)
-    if (!map || !g || !readyRef.current) return
-    const el = map.getContainer()
-    const kmPerPx = groundWidthAt(map.getCenter().lat, map.getZoom(), 1)
-    const k = Math.min(
-      (el.clientWidth - 2 * FIT_PAD) / (g[0] / kmPerPx),
-      (el.clientHeight - 2 * FIT_PAD) / (g[1] / kmPerPx),
-    )
-    if (!(k > 0) || (k >= 1 && !grow) || Math.abs(Math.log2(k)) < 0.02) return
+    if (!map || !readyRef.current) return
+    const dz = zoomToFit(map, frameRef.current, map.getCenter().lat)
+    if ((dz >= 0 && !grow) || Math.abs(dz) < 0.02) return
     genRef.current += 1
     onDrawing(null)
-    map.jumpTo({ zoom: map.getZoom() + Math.log2(k) })
+    map.jumpTo({ zoom: map.getZoom() + dz })
     persistView()
     scheduleConvert()
   }, [onDrawing, persistView, scheduleConvert])

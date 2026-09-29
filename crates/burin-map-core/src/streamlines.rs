@@ -357,6 +357,48 @@ const STRIPE_MARGIN_PX: f32 = 16.0;
 /// spacing asks. That is the one visible fingerprint of this scheme, and it
 /// is why the stripe should be as wide as the pixels allow.
 pub fn trace_stripes(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
+    // Stripes are cut across the flow, so few lines cross a seam: where
+    // lines mostly run east-west, the grid is traced on its side.
+    if runs_across(f) {
+        let t = transpose(f);
+        return trace_columns(&t, st, stripe)
+            .into_iter()
+            .map(|l| l.into_iter().map(|p| [p[1], p[0]]).collect())
+            .collect();
+    }
+    trace_columns(f, st, stripe)
+}
+
+/// Whether the walkable field mostly points east-west.
+fn runs_across(f: &Fields) -> bool {
+    let (mut x, mut y) = (0.0f64, 0.0f64);
+    for i in 0..f.w * f.h {
+        if f.walkable[i] {
+            x += f.tx[i].abs() as f64;
+            y += f.ty[i].abs() as f64;
+        }
+    }
+    x > y
+}
+
+/// `f` with rows and columns swapped.
+fn transpose(f: &Fields) -> Fields {
+    let (w, h) = (f.w, f.h);
+    let swap = |v: &[f32]| -> Vec<f32> { (0..w * h).map(|k| v[(k % h) * w + k / h]).collect() };
+    Fields {
+        w: h,
+        h: w,
+        tx: swap(&f.ty),
+        ty: swap(&f.tx),
+        input: swap(&f.input),
+        walkable: (0..w * h)
+            .map(|k| f.walkable[(k % h) * w + k / h])
+            .collect(),
+        space: swap(&f.space),
+    }
+}
+
+fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
     let (w, h) = (f.w, f.h);
     if w < 5 || h < 5 || stripe < 8 {
         return Vec::new();
@@ -382,7 +424,100 @@ pub fn trace_stripes(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
             })
             .collect()
     };
-    parts.into_iter().flatten().collect()
+    let seams: Vec<f32> = (1..n).map(|s| (s * stripe) as f32).collect();
+    join_at_seams(
+        parts.into_iter().flatten().collect(),
+        &seams,
+        st.space.max(3.0),
+    )
+}
+
+/// A line's end at a seam: which end, where, the way it faces, and whether
+/// it is on the seam's left.
+type SeamEnd = (usize, [f32; 2], [f32; 2], bool);
+
+/// Strands cut by a stripe edge, joined up again: an end that runs into a
+/// seam meets the nearest end within `reach` px that leaves the other side
+/// the same way. A line waved or dashed afterwards then shows no seam.
+fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
+    if seams.is_empty() {
+        return lines;
+    }
+    // Ends: index 2 * line, +1 for the tail. Each at a seam, facing it.
+    let mut at_seam: Vec<Vec<SeamEnd>> = vec![Vec::new(); seams.len()];
+    for (i, l) in lines.iter().enumerate() {
+        if l.len() < 2 {
+            continue;
+        }
+        for tail in [false, true] {
+            let (p, q) = if tail {
+                (l[l.len() - 1], l[l.len() - 2])
+            } else {
+                (l[0], l[1])
+            };
+            let (dx, dy) = (p[0] - q[0], p[1] - q[1]);
+            let m = dx.hypot(dy).max(1e-6);
+            let out = [dx / m, dy / m];
+            for (k, &x) in seams.iter().enumerate() {
+                // Its side is the way it heads: a strand may stop a step
+                // past the seam.
+                let left = out[0] > 0.0;
+                if (p[0] - x).abs() <= 3.0 && out[0].abs() > 0.2 {
+                    at_seam[k].push((2 * i + tail as usize, p, out, left));
+                }
+            }
+        }
+    }
+    let mut pairs = Vec::new();
+    for ends in &at_seam {
+        for a in ends.iter().filter(|e| e.3) {
+            for b in ends.iter().filter(|e| !e.3) {
+                let d = (a.1[0] - b.1[0]).hypot(a.1[1] - b.1[1]);
+                if d <= reach && a.2[0] * -b.2[0] + a.2[1] * -b.2[1] > 0.5 {
+                    pairs.push((d, a.0, b.0));
+                }
+            }
+        }
+    }
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut partner = vec![usize::MAX; lines.len() * 2];
+    for (_, a, b) in pairs {
+        if partner[a] == usize::MAX && partner[b] == usize::MAX && a / 2 != b / 2 {
+            partner[a] = b;
+            partner[b] = a;
+        }
+    }
+
+    let mut used = vec![false; lines.len()];
+    let mut out = Vec::with_capacity(lines.len());
+    // Chains start at a free end; what is left are loops, cut anywhere.
+    let starts = (0..lines.len() * 2)
+        .filter(|&e| partner[e] == usize::MAX)
+        .chain(0..lines.len() * 2);
+    for start in starts {
+        if used[start / 2] {
+            continue;
+        }
+        let mut chain: Line = Vec::new();
+        let mut enter = start;
+        loop {
+            let i = enter / 2;
+            used[i] = true;
+            let from_tail = enter % 2 == 1;
+            if from_tail {
+                chain.extend(lines[i].iter().rev());
+            } else {
+                chain.extend(lines[i].iter());
+            }
+            let exit = if from_tail { 2 * i } else { 2 * i + 1 };
+            match partner[exit] {
+                p if p != usize::MAX && !used[p / 2] => enter = p,
+                _ => break,
+            }
+        }
+        out.push(chain);
+    }
+    out
 }
 
 /// `f` narrowed to columns `x0..x1` plus `pad` columns each side, whose

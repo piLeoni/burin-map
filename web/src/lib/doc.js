@@ -94,7 +94,7 @@ export function docToNote(doc) {
 
   // Water: its settings, then its batches, `;`-separated. A batch leads with
   // how it follows (`shore` or `map`), which is what tells the two apart,
-  // then what it draws when that is wave marks (`arcs`, `dashes`, `waves`). A
+  // then what it draws when that is not lines (`ripples`, `dots`). A
   // drawn shoreline with a style of its own is `l` and its number of lines,
   // then that style.
   const w = doc.water
@@ -202,7 +202,7 @@ export function noteToDoc(note) {
   return doc
 }
 
-/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` and `arcs` / `dashes` / `waves` for water. */
+/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` and `ripples` / `dots` for water. */
 function readBatch(seg) {
   let angle = 0
   let name
@@ -220,7 +220,7 @@ function readBatch(seg) {
       follow = tok
       continue
     }
-    if (tok === 'arcs' || tok === 'dashes' || tok === 'waves') {
+    if (tok === 'ripples' || tok === 'dots') {
       draw = tok
       continue
     }

@@ -322,13 +322,18 @@ tone that shading gives on land is the distance from the shore, so `*_dark`
 applies near the coast and `*_light` further out. On the
 command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
 
-A water batch can also scatter wave marks over the open sea instead of lines:
-`draw: arcs` (low staggered arcs, as on old charts), `dashes` (short staggered
-dashes, as engravers drew the sea) or `waves` (short wavy lines). Each mark is
-a small group `water_size` px long (default 26), about `space` px apart
-(default 70), gathered in patches by `water_patches` (0 evenly, 1 a few
-patches), no nearer the shore than `water_start`. `follow: map` with
-`angle: 90` keeps them level, as on a chart. See [SYNTAX.md](SYNTAX.md#wave-marks).
+A water batch can also cover the open sea with something other than lines:
+`draw: ripples` (broken rows of hand-drawn waves, as in Olaus Magnus' Carta
+Marina) or `dots` (stippling, closer near the coast, as on Ortelius' maps).
+`water_patches` gathers either in patches (0 evenly, 1 a few patches).
+See [SYNTAX.md](SYNTAX.md#ripples-and-dots).
+
+Any line can wave as if drawn by hand: `mod_wave` px to either side, about
+once every `mod_wave_size` px, on land, water or the shoreline. With
+`mod_wave_zone: 1` neighbouring lines wave together and keep an even spacing.
+[`examples/ocean-currents.json5`](examples/ocean-currents.json5) uses it for
+dense, swirling currents over the sea. See
+[SYNTAX.md](SYNTAX.md#hand-drawn-waves).
 
 The shoreline takes the land's modifiers too. Instead of `true`, give it
 `lines` and a `style`:

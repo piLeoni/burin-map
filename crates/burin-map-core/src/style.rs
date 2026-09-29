@@ -107,6 +107,10 @@ style! {
     mod: mod_breaks ("mb"): f32 = 0.15, "chance of a small break in an otherwise solid line";
     mod: mod_wobble ("mw"): f32 = 20.0, "how far lines wander off course on flat ground, in degrees";
     mod: mod_wobble_size ("mws"): f32 = 12.0, "length of each wander, in px";
+    mod: mod_wave ("mwv"): f32 = 0.0, "how far each line swings to either side as it waves along its path, in px; 0 off";
+    mod: mod_wave_size ("mwvs"): f32 = 16.0, "length of each of those waves, in px; it drifts along the line, as by hand";
+    mod: mod_wave_zone ("mwz"): f32 = 0.0, "how much neighbouring lines wave together, so parallel lines keep their spacing: 0 each its own way, 1 all as one";
+    mod: mod_wave_even ("mwe"): f32 = 0.0, "how evenly the lines wave, in step with their neighbours along the flow, like an engraved pattern: 0 as by hand, 1 perfectly even";
     mod: mod_smooth ("ms"): f32 = 6.0, "smoothing of the terrain the lines follow; higher gives broader curves";
 
     input: input_flat ("if"): f32 = 0.25, "shading input given to flat ground, 0 to 1";
@@ -134,8 +138,9 @@ style! {
     water: water_start ("wst"): f32 = 2.0, "gap between the shore and the first line, in px";
     water: water_reach ("wr"): f32 = 60.0, "how far out from the shore the lines go, in px";
     water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
-    water: water_size ("ws"): f32 = 14.0, "length of each wave mark, in px (draw arcs, dashes or waves)";
-    water: water_patches ("wp"): f32 = 0.0, "how much wave marks gather in scattered patches: 0 evenly everywhere, 1 a few patches";
+    water: water_size ("ws"): f32 = 14.0, "length of each ripple stroke or dot, in px (draw ripples or dots)";
+    water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches";
+    water: water_fray ("wfr"): f32 = 0.0, "how far out from water_start, in px, lines break up into shorter dashes and dots as they near the shore, with a ragged edge; 0 a clean edge";
 }
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
@@ -247,7 +252,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 38);
+        assert_eq!(Style::PARAMS.len(), 43);
     }
 
     #[test]

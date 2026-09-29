@@ -62,7 +62,7 @@ export const styleAtom = atom(
   },
 )
 
-const WAVE_MARKS = ['arcs', 'dashes', 'waves']
+const WAVE_MARKS = ['ripples', 'dots']
 
 /**
  * The document's water block, or null for none: `{ classes?, shoreline?, source?,

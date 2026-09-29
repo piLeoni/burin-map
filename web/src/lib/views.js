@@ -87,16 +87,17 @@ function paramByName(schema, name) {
 const ANGLE_NOTE = 'default 0'
 
 /**
- * Where a style is: `land`, a `water` batch, one that draws `waves` marks, or
- * the `shoreline`. Each has its own defaults, and leaves out what means
- * nothing there.
- * @typedef {'land' | 'water' | 'waves' | 'shoreline'} Kind
+ * Where a style is: `land`, a `water` batch that draws lines, `ripples` or
+ * `dots`, or the `shoreline`. Each has its own defaults, and leaves out what
+ * means nothing there.
+ * @typedef {'land' | 'water' | 'ripples' | 'dots' | 'shoreline'} Kind
  */
 
 /** A parameter's default in a style of that kind. */
 function defaultOf(p, kind) {
   if (kind === 'water') return p.water_default ?? p.default
-  if (kind === 'waves') return p.waves_default ?? p.default
+  if (kind === 'ripples') return p.ripples_default ?? p.default
+  if (kind === 'dots') return p.dots_default ?? p.default
   if (kind === 'shoreline') return p.shoreline_default ?? p.default
   return p.default
 }
@@ -108,12 +109,19 @@ function defaultNote(p, kind = 'land') {
 /** What the shoreline uses: no tracer and no terrain, just a line to dash and bend. */
 const SHORELINE_PARAMS = new Set([
   'space', 'dash_light', 'dash_dark', 'dash_period', 'dash_cutoff', 'mod_jitter', 'mod_breaks',
-  'mod_wobble', 'mod_wobble_size', 'mod_smooth', 'batch_stroke', 'batch_seed', 'water_reach', 'water_fade',
+  'mod_wobble', 'mod_wobble_size', 'mod_smooth', 'mod_wave', 'mod_wave_size', 'mod_wave_zone', 'batch_stroke', 'batch_seed',
+  'water_reach', 'water_fade',
 ])
 
-/** What wave marks use: where they go, their size, and a hand-drawn turn; no tracer, no dashes. */
-const WAVES_PARAMS = new Set([
-  'space', 'space_light', 'space_dark', 'mod_jitter', 'mod_wobble', 'mod_wobble_size', 'mod_smooth',
+/** What ripples use: rows, their strokes and ink, the swell and the hand's wave; no tracer. */
+const RIPPLES_PARAMS = new Set([
+  'space', 'dash_light', 'dash_dark', 'mod_wobble', 'mod_wobble_size', 'mod_wave', 'mod_wave_size', 'mod_wave_zone', 'mod_smooth',
+  'batch_stroke', 'batch_seed', 'water_start', 'water_reach', 'water_fade', 'water_size', 'water_patches',
+])
+
+/** What dots use: how far apart, how big, and where; no tracer, no dashes. */
+const DOTS_PARAMS = new Set([
+  'space', 'space_light', 'space_dark', 'mod_jitter',
   'batch_stroke', 'batch_seed', 'water_start', 'water_reach', 'water_fade', 'water_size', 'water_patches',
 ])
 
@@ -123,7 +131,8 @@ const WATER_SKIPS = new Set(['space_steep', 'space_steep_gamma', 'batch_floor', 
 /** Parameters that mean nothing there: terrain shading on water, water settings on land. */
 function skipsParam(p, kind) {
   if (kind === 'shoreline') return !SHORELINE_PARAMS.has(p.name)
-  if (kind === 'waves') return !WAVES_PARAMS.has(p.name)
+  if (kind === 'ripples') return !RIPPLES_PARAMS.has(p.name)
+  if (kind === 'dots') return !DOTS_PARAMS.has(p.name)
   if (kind === 'water') {
     return (p.group === 'input' && p.name !== 'input_flat') || p.group === 'sun' || WATER_SKIPS.has(p.name)
   }
@@ -131,10 +140,10 @@ function skipsParam(p, kind) {
 }
 
 const WATER_CLASSES = ['ocean', 'lake', 'river', 'dock', 'pond', 'swimming_pool']
-const WATER_DRAWS = ['lines', 'arcs', 'dashes', 'waves']
+const WATER_DRAWS = ['lines', 'ripples', 'dots']
 
 /** A water batch's kind of style, from what it draws. */
-const drawKind = (b) => (b.draw && b.draw !== 'lines' ? 'waves' : 'water')
+const drawKind = (b) => (b.draw === 'ripples' || b.draw === 'dots' ? b.draw : 'water')
 const WATER_HELP = {
   water: 'sea, lakes and rivers from OpenStreetMap; also decides where the land is',
   classes: `which water: ${WATER_CLASSES.join(', ')}`,
@@ -142,7 +151,7 @@ const WATER_HELP = {
   lines: 'how many: the shore, then more out to sea, `space` px apart',
   source: 'TileJSON URL or {z}/{x}/{y} template; default OpenFreeMap',
   follow: 'shore: along the coast; map: one direction over the whole map',
-  draw: 'lines fill the water; arcs, dashes or waves scatter wave marks on the open sea',
+  draw: 'lines fill the water; ripples draw broken rows of hand-drawn waves; dots stipple it',
   angle: 'follow shore: 0 along the coast, 90 straight out; follow map: degrees from north',
 }
 
@@ -162,7 +171,7 @@ function generatedAfter(schema, path) {
     if (parts[1] === 'batches' && parts.length === 4) return [WATER_HELP[parts[3]]]
     if (parts[1] === 'batches' && parts[3] === 'style' && parts.length === 5) {
       const p = paramByName(schema, parts[4])
-      if (p) return [defaultNote(p, 'water'), defaultNote(p, 'waves')]
+      if (p) return [defaultNote(p, 'water'), defaultNote(p, 'ripples'), defaultNote(p, 'dots')]
     }
     if (parts[1] === 'shoreline' && parts[2] === 'lines') return [WATER_HELP.lines]
     if (parts[1] === 'shoreline' && parts[2] === 'style' && parts.length === 4) {

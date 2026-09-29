@@ -30,12 +30,11 @@ pub enum Draw {
     /// Lines that fill the water, as on land.
     #[default]
     Lines,
-    /// Small arcs scattered on the open sea, like the waves of old charts.
-    Arcs,
-    /// Short dashes in little staggered groups, as engravers drew the sea.
-    Dashes,
-    /// Short wavy lines.
-    Waves,
+    /// Rows of strokes, staggered and broken, bending together with the
+    /// swell and waving as by hand: the sea of Olaus Magnus' Carta Marina.
+    Ripples,
+    /// Stippling, denser towards the coast, as on Ortelius' maps.
+    Dots,
 }
 
 /// One drawing pass on water.
@@ -46,8 +45,8 @@ pub struct WaterBatch {
     pub follow: Follow,
     pub angle: f32,
     pub draw: Draw,
-    /// Missing parameters take [`Style::water`]'s values, or with wave marks
-    /// [`Style::waves`]', not the land's.
+    /// Missing parameters take [`Style::drawn`]'s values for what the batch
+    /// draws, not the land's.
     pub style: Style,
 }
 
@@ -58,7 +57,7 @@ impl Default for WaterBatch {
             follow: Follow::Shore,
             angle: 0.0,
             draw: Draw::Lines,
-            style: Style::water(),
+            style: Style::drawn(Draw::Lines),
         }
     }
 }
@@ -86,11 +85,7 @@ impl<'de> Deserialize<'de> for WaterBatch {
             }
         }
         let g = Given::deserialize(d)?;
-        let mut style = if g.draw == Draw::Lines {
-            Style::water()
-        } else {
-            Style::waves()
-        };
+        let mut style = Style::drawn(g.draw);
         for (name, v) in g.style {
             // Unknown names are ignored, as they are in land styles.
             style.set(&name, v);
@@ -121,20 +116,35 @@ impl Style {
         }
     }
 
-    /// Defaults for wave marks: small groups about 70 px apart, gathered in
-    /// patches over the open sea from 20 px out, each a little different in
-    /// size and turn.
-    pub fn waves() -> Style {
-        Style {
-            space: 70.0,
-            water_size: 26.0,
-            water_patches: 0.6,
-            space_light: 1.0,
-            space_dark: 1.0,
-            mod_wobble: 0.0,
-            mod_smooth: 8.0,
-            water_start: 20.0,
-            ..Style::water()
+    /// Defaults for a water batch that draws `draw`.
+    pub fn drawn(draw: Draw) -> Style {
+        match draw {
+            Draw::Lines => Style::water(),
+            // Rows 9 px apart of strokes about 140 px long, waving gently by
+            // hand over the whole sea, a little fuller near the coast.
+            Draw::Ripples => Style {
+                space: 9.0,
+                water_size: 140.0,
+                dash_light: 0.6,
+                dash_dark: 0.9,
+                mod_wobble: 18.0,
+                mod_wobble_size: 150.0,
+                mod_wave: 1.5,
+                mod_wave_size: 40.0,
+                water_start: 4.0,
+                water_reach: 300.0,
+                ..Style::water()
+            },
+            // A dot every 5 px, closer at the coast, sparser 250 px out.
+            Draw::Dots => Style {
+                space: 5.0,
+                space_dark: 0.45,
+                space_light: 1.3,
+                water_size: 1.2,
+                water_start: 3.0,
+                water_reach: 250.0,
+                ..Style::water()
+            },
         }
     }
 }
@@ -323,12 +333,12 @@ fn directions(
     }
 }
 
-/// Wave marks scattered over the water: evenly, `space` px apart (times
-/// `space_dark` at `water_start`, easing to `space_light` over
+/// Dots scattered over the water: evenly, `space` px apart
+/// (times `space_dark` at `water_start`, easing to `space_light` over
 /// `water_reach`), never nearer the shore than `water_start`. Each is
-/// `water_size` px long, turned as the batch follows, varied by `mod_jitter`
-/// and bent by `mod_wobble`; `water_patches` gathers them in patches. Solid:
-/// no dashes.
+/// `water_size` px across, turned as the batch follows, varied by
+/// `mod_jitter` and bent by `mod_wobble`; `water_patches` gathers them in
+/// patches. Solid: no dashes.
 pub fn wave_marks(
     coverage: &[f32],
     dist: &[f32],
@@ -396,22 +406,7 @@ pub fn wave_marks(
     // Patches: smooth noise over cells a few marks wide; the more
     // `water_patches`, the higher the bar a candidate's noise must clear.
     let patches = st.water_patches.clamp(0.0, 1.0);
-    let lump = hi * 4.0;
-    let (nw, nh) = (
-        (w as f32 / lump) as usize + 2,
-        (h as f32 / lump) as usize + 2,
-    );
-    let lattice: Vec<f32> = (0..nw * nh).map(|_| rng.f64() as f32).collect();
-    let noise = |p: [f32; 2]| {
-        let (x, y) = (p[0] / lump, p[1] / lump);
-        let (i, j) = (x as usize, y as usize);
-        let s = |f: f32| f * f * (3.0 - 2.0 * f);
-        let (fx, fy) = (s(x - i as f32), s(y - j as f32));
-        let v = |a: usize, b: usize| lattice[(b.min(nh - 1)) * nw + a.min(nw - 1)];
-        let top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx;
-        let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
-        top + (bottom - top) * fy
-    };
+    let noise = noise_field(w, h, hi * 4.0, &mut rng);
 
     let mut marks = Vec::new();
     for p in cands {
@@ -459,37 +454,267 @@ pub fn wave_marks(
     marks
 }
 
-/// One mark `size` px long, centred on the origin, along +x, its crests
-/// towards -y: a small group of low arcs, dashes or wavy lines, stacked and
-/// staggered as engravers drew the sea.
+/// One mark `size` px across, centred on the origin, along +x.
 fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
-    use std::f32::consts::{PI, TAU};
-    let run = |n: usize, f: &dyn Fn(f32) -> [f32; 2]| -> crate::Line {
-        (0..=n).map(|k| f(k as f32 / n as f32)).collect()
-    };
-    // From `a` to `b` along x at height `y`, all in marks.
-    let arc = |a: f32, b: f32, y: f32| {
-        run(12, &|t| {
-            [(a + (b - a) * t) * size, (y - 0.09 * (PI * t).sin()) * size]
-        })
-    };
-    let dash = |a: f32, b: f32, y: f32| vec![[a * size, y * size], [b * size, y * size]];
-    let wave = |a: f32, b: f32, y: f32| {
-        run(24, &|t| {
-            let x = a + (b - a) * t;
-            [x * size, (y + 0.035 * (TAU * 2.0 * x).sin()) * size]
-        })
-    };
     match draw {
-        Draw::Lines => Vec::new(),
-        Draw::Arcs => vec![arc(-0.5, 0.2, -0.1), arc(-0.15, 0.5, 0.1)],
-        Draw::Dashes => vec![
-            dash(-0.3, 0.3, -0.14),
-            dash(-0.5, -0.05, 0.0),
-            dash(0.08, 0.45, 0.0),
-            dash(-0.2, 0.25, 0.14),
-        ],
-        Draw::Waves => vec![wave(-0.5, 0.35, -0.08), wave(-0.25, 0.5, 0.08)],
+        Draw::Lines | Draw::Ripples => Vec::new(),
+        Draw::Dots => vec![vec![[-size / 2.0, 0.0], [size / 2.0, 0.0]]],
+    }
+}
+
+/// Rows `space` px apart, broken into strokes about `water_size` px long:
+/// ink `dash_dark` at `water_start`, easing to `dash_light` over
+/// `water_reach`. The rows run at `angle` from north, or along the shore,
+/// bend together by `mod_wobble` over `mod_wobble_size` px like a swell, and
+/// each waves by `mod_wave` as by hand; `water_patches` gathers them in
+/// patches.
+pub fn ripples(
+    coverage: &[f32],
+    dist: &[f32],
+    w: usize,
+    h: usize,
+    b: &WaterBatch,
+) -> Vec<crate::Line> {
+    let st = &b.style;
+    let top = dist
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite())
+        .fold(0.0f32, f32::max)
+        + 1.0;
+    let d: Vec<f32> = dist
+        .par_iter()
+        .map(|&d| if d.is_finite() { d } else { top })
+        .collect();
+    let at = |p: [f32; 2]| -> Option<usize> {
+        let (x, y) = (p[0].round(), p[1].round());
+        (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
+            .then(|| y as usize * w + x as usize)
+    };
+    let gap = st.space.max(1.5);
+    let stroke = st.water_size.max(4.0);
+
+    // The rows before they ripple: straight across the map, or the
+    // distance's contours out from the shore.
+    let rows: Vec<crate::Line> = match b.follow {
+        Follow::Map => {
+            let (sa, ca) = b.angle.to_radians().sin_cos();
+            let (u, n) = ([sa, -ca], [ca, sa]);
+            let corners = [
+                [0.0, 0.0],
+                [w as f32, 0.0],
+                [0.0, h as f32],
+                [w as f32, h as f32],
+            ];
+            let along = |p: &[f32; 2], v: [f32; 2]| p[0] * v[0] + p[1] * v[1];
+            let lo = |v| corners.iter().map(|p| along(p, v)).fold(f32::MAX, f32::min);
+            let hi = |v| corners.iter().map(|p| along(p, v)).fold(f32::MIN, f32::max);
+            let (u0, u1, n0, n1) = (lo(u), hi(u), lo(n), hi(n));
+            let count = ((n1 - n0) / gap).ceil() as usize + 1;
+            let steps = (u1 - u0).ceil() as usize + 1;
+            (0..count)
+                .map(|k| {
+                    let o = n0 + k as f32 * gap;
+                    (0..steps)
+                        .map(|j| {
+                            let s = u0 + j as f32;
+                            [s * u[0] + o * n[0], s * u[1] + o * n[1]]
+                        })
+                        .collect()
+                })
+                .collect()
+        }
+        Follow::Shore => {
+            let count = ((st.water_reach / gap).ceil() as usize).clamp(1, 400);
+            (0..count)
+                .into_par_iter()
+                .flat_map_iter(|k| {
+                    let level = st.water_start + k as f32 * gap + 0.013;
+                    let coverage = d
+                        .iter()
+                        .map(|&d| (0.5 + d - level).clamp(0.0, 1.0))
+                        .collect();
+                    watermask::Mask {
+                        width: w,
+                        height: h,
+                        coverage,
+                    }
+                    .outlines()
+                    .into_iter()
+                    .map(|l| resample(&smooth(&l, st.mod_smooth), 1.0))
+                })
+                .collect()
+        }
+    };
+
+    let mut rng = Rng::new(st.batch_seed.wrapping_add(0x21FF));
+    let lump = (st.mod_wobble_size.max(8.0), gap * 30.0);
+    let swell = noise_field(w, h, lump.0, &mut rng);
+    let patches = st.water_patches.clamp(0.0, 1.0);
+    let patch = noise_field(w, h, lump.1, &mut rng);
+    let sway = st.mod_wobble_size.max(1.0) * st.mod_wobble.min(80.0).to_radians().tan() / 3.0;
+
+    // Bent by the swell, the same for neighbouring rows...
+    let swollen: Vec<crate::Line> = rows
+        .into_iter()
+        .filter(|row| row.len() >= 3)
+        .map(|row| {
+            (0..row.len())
+                .map(|i| {
+                    let (a, c) = (row[i.saturating_sub(1)], row[(i + 1).min(row.len() - 1)]);
+                    let (dx, dy) = (c[0] - a[0], c[1] - a[1]);
+                    let m = dx.hypot(dy).max(1e-6);
+                    let off = sway * (swell(row[i]) * 2.0 - 1.0);
+                    [row[i][0] - dy / m * off, row[i][1] + dx / m * off]
+                })
+                .collect()
+        })
+        .collect();
+    // ...then each waving on its own, as by hand.
+    let waved = crate::wave::undulate(swollen, st, st.batch_seed, None);
+
+    let mut out = Vec::new();
+    for row in waved {
+        // Broken into strokes, with gaps as the ink says.
+        let mut piece: crate::Line = Vec::new();
+        let mut inked = true;
+        let mut left = stroke * rng.uniform(0.0, 1.0) as f32;
+        for (k, &p) in row.iter().enumerate() {
+            if k > 0 {
+                left -= (p[0] - row[k - 1][0]).hypot(p[1] - row[k - 1][1]);
+            }
+            let here = at(p).filter(|&i| coverage[i] >= 0.5 && d[i] >= st.water_start);
+            if left <= 0.0 {
+                inked = !inked;
+                let ink = here.map_or(0.5, |i| {
+                    let t = tone(d[i], st);
+                    (st.dash_light + (st.dash_dark - st.dash_light) * t).clamp(0.02, 1.0)
+                });
+                let run = stroke * rng.uniform(0.5, 1.5) as f32;
+                left = if inked {
+                    run
+                } else {
+                    run * (1.0 - ink) / ink * rng.uniform(0.6, 1.4) as f32
+                };
+                if !inked && ink >= 0.999 {
+                    inked = true;
+                }
+            }
+            if inked && here.is_some() && patch(p) >= patches * 0.75 {
+                piece.push(p);
+            } else if piece.len() >= 2 {
+                out.push(std::mem::take(&mut piece));
+            } else {
+                piece.clear();
+            }
+        }
+        if piece.len() >= 2 {
+            out.push(piece);
+        }
+    }
+    out
+}
+
+/// `paths` breaking up as they near the shore: over `water_fray` px beyond
+/// `water_start` they thin into shorter and shorter dashes, then dots, and
+/// the edge where they give out wanders, so the lines do not stop along a
+/// clean contour. Unchanged with `water_fray` 0.
+pub fn fray(
+    paths: Vec<crate::Line>,
+    dist: &[f32],
+    w: usize,
+    h: usize,
+    st: &Style,
+) -> Vec<crate::Line> {
+    let band = st.water_fray;
+    if band <= 0.0 || w == 0 || h == 0 {
+        return paths;
+    }
+    let mut rng = Rng::new(st.batch_seed ^ 0xF4A7);
+    let wander = noise_field(w, h, band.max(8.0), &mut rng);
+    let d = |p: [f32; 2]| {
+        let (x, y) = (
+            p[0].clamp(0.0, (w - 1) as f32),
+            p[1].clamp(0.0, (h - 1) as f32),
+        );
+        dist[y as usize * w + x as usize].min(1e6)
+    };
+    // 0 where the lines give out, 1 where they are whole.
+    let whole = |p: [f32; 2]| (d(p) - st.water_start) / band + (wander(p) - 0.5) * 0.8;
+    let period = (st.space * 1.5).max(3.0);
+    paths
+        .into_par_iter()
+        .enumerate()
+        .flat_map_iter(|(i, l)| {
+            if l.len() < 2 || l.iter().all(|&p| whole(p) >= 1.0) {
+                return vec![l];
+            }
+            let mut rng = Rng::new(st.batch_seed ^ 0xF4A7 ^ (i as u64).wrapping_mul(0x9E37_79B9));
+            let p = resample(&l, 1.0);
+            let mut out = Vec::new();
+            let mut piece: crate::Line = Vec::new();
+            let (mut s, mut cell, mut ink) = (0.0f32, usize::MAX, (0.0f32, f32::MAX));
+            for (k, &q) in p.iter().enumerate() {
+                if k > 0 {
+                    s += (q[0] - p[k - 1][0]).hypot(q[1] - p[k - 1][1]);
+                }
+                // Each `period` px gets one dash, as long as the line is
+                // whole there; below a px it is a dot, or nothing.
+                let c = (s / period) as usize;
+                if c != cell {
+                    cell = c;
+                    let t = whole(q);
+                    ink = if t >= 1.0 {
+                        (0.0, f32::MAX)
+                    } else {
+                        let t = t.max(0.0);
+                        let mut len = period * t.powf(0.8) * rng.uniform(0.6, 1.4) as f32;
+                        if len < 1.0 {
+                            len = if rng.uniform(0.0, 1.0) < (t * 1.5) as f64 {
+                                1.0
+                            } else {
+                                0.0
+                            };
+                        }
+                        let len = len.min(period);
+                        let at = c as f32 * period + rng.uniform(0.0, (period - len) as f64) as f32;
+                        (at, at + len)
+                    };
+                }
+                if s >= ink.0 && s <= ink.1 {
+                    piece.push(q);
+                } else if !piece.is_empty() {
+                    if piece.len() == 1 {
+                        piece.push(q);
+                    }
+                    out.push(std::mem::take(&mut piece));
+                }
+            }
+            if piece.len() >= 2 {
+                out.push(piece);
+            }
+            out
+        })
+        .collect()
+}
+
+/// Smooth noise, 0…1, varying over about `cell` px.
+fn noise_field(w: usize, h: usize, cell: f32, rng: &mut Rng) -> impl Fn([f32; 2]) -> f32 {
+    let cell = cell.max(1.0);
+    let (nw, nh) = (
+        (w as f32 / cell) as usize + 3,
+        (h as f32 / cell) as usize + 3,
+    );
+    let lattice: Vec<f32> = (0..nw * nh).map(|_| rng.f64() as f32).collect();
+    move |p: [f32; 2]| {
+        let (x, y) = ((p[0] / cell).max(0.0), (p[1] / cell).max(0.0));
+        let (i, j) = (x as usize, y as usize);
+        let e = |f: f32| f * f * (3.0 - 2.0 * f);
+        let (fx, fy) = (e(x - i as f32), e(y - j as f32));
+        let v = |a: usize, b: usize| lattice[b.min(nh - 1) * nw + a.min(nw - 1)];
+        let top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx;
+        let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
+        top + (bottom - top) * fy
     }
 }
 
@@ -537,6 +762,8 @@ pub fn shoreline(
                     l
                 })
                 .collect();
+            let lines =
+                crate::wave::undulate(lines, st, st.batch_seed.wrapping_add(k as u64), None);
             (lines, tone)
         })
         .collect();
@@ -603,7 +830,7 @@ fn smooth(l: &crate::Line, r: f32) -> crate::Line {
 }
 
 /// Points every `step` px along `l`, its ends included.
-fn resample(l: &crate::Line, step: f32) -> crate::Line {
+pub(crate) fn resample(l: &crate::Line, step: f32) -> crate::Line {
     let mut out = vec![l[0]];
     let mut left = step;
     for s in l.windows(2) {
@@ -804,30 +1031,39 @@ mod tests {
     }
 
     #[test]
-    fn wave_marks_keep_to_the_open_sea() {
+    fn marks_and_ripples_keep_to_the_open_sea() {
         let (w, h) = (200, 200);
         let c = half(w, h);
         let (dist, _) = shore(&c, w, h);
-        for draw in [Draw::Arcs, Draw::Dashes, Draw::Waves] {
+        for (draw, style, least) in [
+            (Draw::Dots, serde_json::json!({}), 100),
+            (Draw::Ripples, serde_json::json!({}), 20),
+        ] {
             let b: WaterBatch = serde_json::from_value(
-                serde_json::json!({ "draw": draw, "style": { "space": 20 } }),
+                serde_json::json!({ "follow": "map", "angle": 90, "draw": draw, "style": style }),
             )
             .unwrap();
             assert_eq!(
-                b.style.water_start,
-                Style::waves().water_start,
-                "wave defaults"
+                b.style.dash_light,
+                Style::drawn(draw).dash_light,
+                "{draw:?} defaults"
             );
-            let marks = wave_marks(&c, &dist, w, h, &b);
-            assert!(marks.len() > 20, "{draw:?}: {}", marks.len());
+            let run = || {
+                if draw == Draw::Ripples {
+                    ripples(&c, &dist, w, h, &b)
+                } else {
+                    wave_marks(&c, &dist, w, h, &b)
+                }
+            };
+            let marks = run();
+            assert!(marks.len() >= least, "{draw:?}: {}", marks.len());
             for p in marks.iter().flatten() {
                 assert!(
-                    p[0] < 100.0 - b.style.water_start + 1.0,
+                    p[0] < 100.0 - b.style.water_start + 1.5,
                     "{draw:?} too near the shore: {p:?}"
                 );
             }
-            let again = wave_marks(&c, &dist, w, h, &b);
-            assert_eq!(marks, again, "the same seed, the same marks");
+            assert_eq!(marks, run(), "{draw:?}: the same seed, the same drawing");
         }
         let lines: WaterBatch = serde_json::from_str("{}").unwrap();
         assert_eq!(lines.draw, Draw::Lines);

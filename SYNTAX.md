@@ -95,6 +95,10 @@ batches:
 |  | `mod_breaks` | 0.15 |  |
 |  | `mod_wobble` | 20 | yes |
 |  | `mod_wobble_size` | 12 | yes |
+|  | `mod_wave` | 0 |  |
+|  | `mod_wave_size` | 16 |  |
+|  | `mod_wave_zone` | 0 |  |
+|  | `mod_wave_even` | 0 |  |
 |  | `mod_smooth` | 6 | yes |
 | Input | `input_flat` | 0.25 | yes |
 |  | `input_gain` | 3 | yes |
@@ -133,6 +137,16 @@ batches:
 
 So one sun for the whole map needs setting only once, in the first batch, and a different sun on one pass is still possible. The same holds on the command line, section by section after each `--batch`.
 
+### Hand-drawn waves
+
+`mod_wave` makes every line swing from side to side along its path, as a hand draws it: `mod_wave` px to either side, about once every `mod_wave_size` px. Both drift along the way. It works on land, on water and on the shoreline, and is off (0) by default.
+
+- `mod_wave_zone: 0`: each line waves its own way, so no two lines wave alike.
+- `mod_wave_zone: 1`: neighbouring lines wave together, so parallel lines keep an even spacing. It needs lines well under `mod_wave_size` / 4 px apart.
+- `mod_wave_even: 1`: every line waves evenly and in step with its neighbours along the flow, each an offset copy of the next, as in an engraved pattern. Only on traced lines (land batches and water `lines`), which have a flow to keep step with.
+
+On land it reads best when light: `mod_wave: 0.6, mod_wave_size: 40`. Stronger waves on close lines look cross-hatched.
+
 ---
 
 ## 3. Water
@@ -166,7 +180,7 @@ With a `water` block, the water is downloaded from OpenStreetMap and decides whe
 |---|---|---|
 | `name` | a label, optional | |
 | `follow` | `shore`: concentric lines along the coast; `map`: one direction over the whole map | `shore` |
-| `draw` | `lines` fill the water; `arcs`, `dashes` or `waves` scatter wave marks on the open sea, see [Wave marks](#wave-marks) | `lines` |
+| `draw` | `lines` fill the water; `ripples` draw broken rows of hand-drawn waves; `dots` stipple it; see [Ripples and dots](#ripples-and-dots) | `lines` |
 | `angle` | with `shore`, 0 runs along the coast and 90 straight out to sea; with `map`, degrees clockwise from north | 0 |
 | `style` | parameters, see below | |
 
@@ -190,6 +204,10 @@ There is no seabed: nothing about depth is downloaded. On water, the "tone" that
 | | `mod_breaks` | 0.15 | |
 | | `mod_wobble` | 0 | |
 | | `mod_wobble_size` | 12 | |
+| | `mod_wave` | 0 | see [Hand-drawn waves](#hand-drawn-waves) |
+| | `mod_wave_size` | 16 | |
+| | `mod_wave_zone` | 0 | |
+| | `mod_wave_even` | 0 | |
 | | `mod_smooth` | 3 | |
 | Input | `input_flat` | 0.25 | the tone below which `dash_drop` works |
 | Engine | `engine_step` | 1 | |
@@ -201,76 +219,90 @@ There is no seabed: nothing about depth is downloaded. On water, the "tone" that
 | Water | `water_start` | 2 | gap between the shore and the first line, px |
 | | `water_reach` | 60 | how far out the lines go, px; lower means fewer lines |
 | | `water_fade` | 1 | how they fade out: above 1 sooner, below 1 later |
+| | `water_fray` | 0 | how far out from `water_start`, px, the lines break up into shorter dashes and dots towards the shore, with a ragged edge; 0 a clean edge |
 
 Left out, as they mean nothing on water: `space_steep`, `space_steep_gamma`, `batch_floor`, the `sun_*` group and the rest of the `input_*` group.
 
-### Wave marks
+### Currents
 
-With `draw: arcs`, `dashes` or `waves`, a batch scatters small groups of marks over the open sea, gathered in patches, instead of filling it with lines:
-
-| `draw` | Each mark |
-|---|---|
-| `arcs` | two low, staggered arcs, like the waves of old charts |
-| `dashes` | four short dashes in staggered rows, as engravers drew the sea |
-| `waves` | two short wavy lines, one over the other |
+`follow: map` lines with a strong `mod_wobble` turn into swirling currents; `mod_wave` with `mod_wave_zone: 1` makes them wave together. `water_start` keeps them clear of the concentric lines along the coast: set it a few px beyond where those end (`water_start` + `water_reach` of the coast batch). Beautiful on screen, very long to plot. See `examples/ocean-currents.json5`.
 
 ```yaml
 water:
   batches:
-    - follow: map          # all at `angle` from north; shore: along the nearest coast
-      angle: 90            # 90: level, like waves on a chart
-      draw: waves
+    - follow: shore        # concentric lines along the coast, out to 23 px
+      style: { space: 3, water_start: 3, water_reach: 20 }
+    - follow: map
+      angle: 90
       style:
-        space: 70          # about this far apart
-        water_size: 26     # each this long
-        water_patches: 0.6 # gathered in patches: 0 evenly everywhere, 1 a few patches
+        space: 5
+        space_light: 1
+        space_dark: 1
+        water_start: 27    # clear of the coast lines
+        water_reach: 4000
+        dash_light: 0.85
+        mod_wobble: 70     # the flow turns up to 70 degrees
+        mod_wobble_size: 60
+        mod_wave: 2.5
+        mod_wave_size: 60
+        mod_wave_zone: 1   # neighbours wave together
 ```
 
-Marks never come closer than `space` to each other, nor nearer the shore than `water_start`; `water_patches` leaves the sea between patches empty. `follow: map` with `angle: 90` keeps them level, as on a chart; `follow: shore` turns them with the coast. Several batches can be combined: lines near the coast and marks further out, or two kinds of mark.
+### Ripples and dots
+
+With `draw: ripples` or `dots`, a batch covers the open sea with something other than traced lines:
+
+| `draw` | What it draws |
+|---|---|
+| `ripples` | rows `space` px apart, broken into strokes about `water_size` px long, bent together by a swell and waving by hand, as in Olaus Magnus' Carta Marina |
+| `dots` | stippling, closer near the coast, as on Ortelius' maps |
+
+```yaml
+water:
+  batches:
+    - follow: map          # rows at `angle` from north; shore: along the coast
+      angle: 90
+      draw: ripples
+```
+
+`follow: map` with `angle: 90` keeps ripple rows level; `follow: shore` runs them along the coast. `water_patches` gathers either kind in patches, leaving open sea in between. Several batches can be combined: lines near the coast and ripples further out.
+
+Ripples use:
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Space | `space` | 70 | distance between marks, px |
-| | `space_dark` | 1 | spacing multiplier at `water_start` |
-| | `space_light` | 1 | spacing multiplier from `water_reach` further out; with `space_dark` below it, marks crowd towards the coast |
-| Mod | `mod_jitter` | 0.45 | how much size and turn vary from mark to mark |
-| | `mod_wobble` | 0 | hand-drawn wander, degrees |
-| | `mod_wobble_size` | 12 | length of each wander, px |
-| | `mod_smooth` | 8 | how smoothly the marks turn with the coast (`follow: shore`) |
+| Space | `space` | 9 | gap between rows, px |
+| Dash | `dash_dark` | 0.9 | how much of a row is inked at `water_start` |
+| | `dash_light` | 0.6 | how much is inked from `water_reach` further out |
+| Mod | `mod_wobble` | 18 | how much the swell bends the rows, degrees |
+| | `mod_wobble_size` | 150 | length of each swell, px |
+| | `mod_wave` | 1.5 | hand-drawn wave on each stroke, px |
+| | `mod_wave_size` | 40 | length of each wave, px |
+| | `mod_wave_zone` | 0 | how much neighbouring rows wave together |
+| | `mod_smooth` | 3 | rounds off rows along the coast (`follow: shore`) |
 | Batch | `batch_stroke` | 1.2 | line width |
-| | `batch_seed` | 1 | random seed: another scattering |
-| Water | `water_start` | 20 | no marks nearer the shore than this, px |
-| | `water_reach` | 60 | distance over which the spacing eases from `space_dark` to `space_light`, px |
+| | `batch_seed` | 1 | random seed |
+| Water | `water_start` | 4 | no ripples nearer the shore than this, px |
+| | `water_reach` | 300 | distance over which the ink eases from `dash_dark` to `dash_light`, px |
 | | `water_fade` | 1 | how it eases |
-| | `water_size` | 26 | length of each mark, px |
-| | `water_patches` | 0.6 | how much marks gather in patches: 0 evenly everywhere, 1 a few patches |
+| | `water_size` | 140 | length of each stroke, px |
+| | `water_patches` | 0 | how much ripples gather in patches: 0 evenly everywhere, 1 a few patches |
 
----|---|---|---|
-| Space | `space` | 4 | |
-| | `space_light` | 1.8 | |
-| | `space_dark` | 0.8 | |
-| | `space_steep` | 0.4 | |
-| | `space_steep_gamma` | 1 | |
-| Dash | `dash_light` | 0.25 | |
-| | `dash_dark` | 1 | |
-| | `dash_period` | 2.2 | |
-| | `dash_cutoff` | 0.03 | |
-| | `dash_drop` | 0.6 | |
-| Mod | `mod_jitter` | 0.45 | |
-| | `mod_breaks` | 0.15 | |
-| | `mod_wobble` | 0 | |
-| | `mod_wobble_size` | 12 | |
-| | `mod_smooth` | 3 | |
-| Engine | `engine_step` | 1 | |
-| | `engine_min` | 4 | |
-| | `engine_stop` | 0.5 | |
-| | `engine_fill` | 0.8 | |
-| Batch | `batch_floor` | 0 | |
-| | `batch_stroke` | 1.2 | |
-| | `batch_seed` | 1 | |
-| Water | `water_start` | 2 | gap between the shore and the first line, px |
-| | `water_reach` | 60 | how far out the lines go, px; lower means fewer lines |
-| | `water_fade` | 1 | how they fade out: above 1 sooner, below 1 later |
+Dots use:
+
+| Group | Parameter | Default | What it does |
+|---|---|---|---|
+| Space | `space` | 5 | distance between dots, px |
+| | `space_dark` | 0.45 | spacing multiplier at `water_start` |
+| | `space_light` | 1.3 | spacing multiplier from `water_reach` further out |
+| Mod | `mod_jitter` | 0.45 | how much dot size varies |
+| Batch | `batch_stroke` | 1.2 | line width |
+| | `batch_seed` | 1 | random seed |
+| Water | `water_start` | 3 | no dots nearer the shore than this, px |
+| | `water_reach` | 250 | distance over which the spacing eases from `space_dark` to `space_light`, px |
+| | `water_fade` | 1 | how it eases |
+| | `water_size` | 1.2 | length of each dot, px |
+| | `water_patches` | 0 | how much dots gather in patches |
 
 ---
 
@@ -314,6 +346,9 @@ Only those that mean something on a line that is already drawn.
 | | `mod_breaks` | 0 | chance of a small break in the line |
 | | `mod_wobble` | 0 | hand-drawn wander, degrees |
 | | `mod_wobble_size` | 12 | length of each wander, px |
+| | `mod_wave` | 0 | hand-drawn wave, px; see [Hand-drawn waves](#hand-drawn-waves) |
+| | `mod_wave_size` | 16 | length of each wave, px |
+| | `mod_wave_zone` | 0 | how much the lines wave together |
 | | `mod_smooth` | 0 | rounds off the pixel steps, px |
 | Batch | `batch_stroke` | 1.2 | the shoreline's own line width |
 | | `batch_seed` | 1 | random seed |
@@ -352,4 +387,4 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
 - **Water**:
   - before the first `;` comes the shoreline: `l2,s4` is 2 lines, 4 px apart (`noshore` turns it off, `c…` picks the classes);
   - then one batch after each `;`: `shore,a0,wst10,wr30,s7`.
-  - a batch that draws wave marks says so after `shore` / `map`: `map,arcs,a70,s50`.
+  - a batch that draws ripples or dots says so after `shore` / `map`: `map,ripples,a90`.

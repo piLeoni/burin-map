@@ -97,7 +97,7 @@ const wet = {
     batches: [
       { name: 'coast; waves', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
-      { follow: 'shore', draw: 'arcs', angle: 10, style: { space: 50, water_size: 18 } },
+      { follow: 'shore', draw: 'dots', angle: 10, style: { space: 50, water_size: 18 } },
     ],
     shoreline: false,
     classes: ['ocean', 'lake'],
@@ -150,20 +150,23 @@ const rustShorts = {
   space: 's', space_light: 'sl', space_dark: 'sd', space_steep: 'ss',
   space_steep_gamma: 'ssg', dash_light: 'dl', dash_dark: 'dd', dash_period: 'dp',
   dash_cutoff: 'dc', dash_drop: 'ddrop', mod_jitter: 'mj', mod_breaks: 'mb',
-  mod_wobble: 'mw', mod_wobble_size: 'mws', mod_smooth: 'ms', input_flat: 'if',
+  mod_wobble: 'mw', mod_wobble_size: 'mws', mod_smooth: 'ms', mod_wave: 'mwv',
+  mod_wave_size: 'mwvs', mod_wave_zone: 'mwz',
+  mod_wave_even: 'mwe', input_flat: 'if',
   input_gain: 'ig', input_dark_gamma: 'idg', input_light_gain: 'ilg',
   input_light_floor: 'ilf', input_blur: 'ib', input_broad_blur: 'ibb',
   input_broad: 'ibr', sun_azimuth: 'sa', sun_altitude: 'salt', sun_exag: 'sx',
   engine_step: 'es', engine_min: 'em', engine_stop: 'esp', engine_fill: 'ef',
   batch_floor: 'bf', batch_stroke: 'bs', batch_seed: 'bseed',
   water_start: 'wst', water_reach: 'wr', water_fade: 'wf', water_size: 'ws', water_patches: 'wp',
+  water_fray: 'wfr',
 }
 for (const [full, short] of Object.entries(rustShorts)) {
   if (PARAM_SHORTS[full] !== short) missing.push(`drift: ${full} should be "${short}", got "${PARAM_SHORTS[full]}"`)
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 38) missing.push(`expected 38 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 43) missing.push(`expected 43 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`
@@ -250,7 +253,7 @@ const schema = {
     .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
   groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
 }
-if (schema.params.length !== 38) missing.push(`views: read ${schema.params.length} params from style.rs`)
+if (schema.params.length !== 43) missing.push(`views: read ${schema.params.length} params from style.rs`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const model = {
   area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
@@ -264,7 +267,8 @@ const model = {
     batches: [
       { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
-      { follow: 'map', draw: 'waves', angle: 80, style: { water_size: 20 } },
+      { follow: 'map', draw: 'dots', angle: 80, style: { water_size: 20 } },
+      { follow: 'map', draw: 'ripples', angle: 90, style: { mod_wave: 2 } },
     ],
   },
   notes: {
@@ -301,18 +305,21 @@ for (const kind of kinds) {
   }
 }
 
-// Wave marks list only what they use, at their own defaults.
+// Dots and ripples list only what they use, at their own defaults.
 {
-  // The engine's list gives each parameter its wave default; this one is read from style.rs.
-  const withWaves = { ...schema, params: schema.params.map((p) => (p.name === 'space' ? { ...p, waves_default: 70 } : p)) }
-  const yaml = V.renderView('yaml', model, withWaves)
-  const marks = yaml.slice(yaml.indexOf('draw: waves'))
-  if (!marks.includes('# space: 70')) missing.push('views: wave marks default to space 70')
-  if (marks.includes('dash_light') || marks.includes('engine_step')) missing.push('views: wave marks list dashes or the tracer')
-  const lines = yaml.slice(yaml.indexOf('\nwater:'), yaml.indexOf('draw: waves'))
+  // The engine's list gives each parameter its default per draw; this one is read from style.rs.
+  const withDraws = { ...schema, params: schema.params.map((p) => (p.name === 'space' ? { ...p, dots_default: 5, ripples_default: 9 } : p)) }
+  const yaml = V.renderView('yaml', model, withDraws)
+  const dots = yaml.slice(yaml.indexOf('draw: dots'), yaml.indexOf('draw: ripples'))
+  if (!dots.includes('# space: 5')) missing.push('views: dots default to space 5')
+  if (dots.includes('dash_light') || dots.includes('engine_step') || dots.includes('mod_wave')) missing.push('views: dots list dashes, the tracer or the wave')
+  const ripples = yaml.slice(yaml.indexOf('draw: ripples'))
+  if (!ripples.includes('# space: 9')) missing.push('views: ripples default to space 9')
+  if (!ripples.includes('mod_wave_size') || ripples.includes('engine_step')) missing.push('views: ripples list the wave, not the tracer')
+  const lines = yaml.slice(yaml.indexOf('\nwater:'), yaml.indexOf('draw: dots'))
   if (lines.includes('water_size')) missing.push('views: water lines should not list water_size')
   let threw = false
-  try { V.parseView('yaml', yaml.replace('draw: waves', 'draw: foam'), schema) } catch { threw = true }
+  try { V.parseView('yaml', yaml.replace('draw: dots', 'draw: foam'), schema) } catch { threw = true }
   if (!threw) missing.push('views: an unknown draw should be an error')
 }
 

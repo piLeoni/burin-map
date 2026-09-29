@@ -26,6 +26,10 @@ export const PARAM_SHORTS = {
   mod_wobble: 'mw',
   mod_wobble_size: 'mws',
   mod_smooth: 'ms',
+  mod_wave: 'mwv',
+  mod_wave_size: 'mwvs',
+  mod_wave_zone: 'mwz',
+  mod_wave_even: 'mwe',
   input_flat: 'if',
   input_gain: 'ig',
   input_dark_gamma: 'idg',
@@ -49,6 +53,7 @@ export const PARAM_SHORTS = {
   water_fade: 'wf',
   water_size: 'ws',
   water_patches: 'wp',
+  water_fray: 'wfr',
 }
 
 /** short → full_name. */

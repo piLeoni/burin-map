@@ -21,6 +21,7 @@ mod rng;
 mod streamlines;
 mod style;
 pub mod water;
+mod wave;
 
 pub use dashes::{dash_lines, dash_lines_by};
 pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Fields};
@@ -262,7 +263,7 @@ fn trace_land(fields: &[Fields], batches: &[Batch], now: fn() -> f64) -> Traced 
             let g = of[i];
             let bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space);
             let t1 = now();
-            let (lines, paths, t) = trace_batch(&bf, &st, now);
+            let (lines, paths, t) = trace_batch(&bf, &st, false, now);
             (lines, (st.batch_stroke, paths), [t1 - t0, t[0], t[1], t[2]])
         })
         .collect();
@@ -274,29 +275,39 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
     let t0 = now();
     let (dist, outlines) = water::shore(wl.coverage, w, h);
     let t1 = now();
+    let seeded = |i: usize, b: &WaterBatch| {
+        let mut b = b.clone();
+        b.style.batch_seed = b
+            .style
+            .batch_seed
+            .wrapping_add(0x5EA ^ (i as u64 * 0x9E37_79B9));
+        b
+    };
     let parts: Vec<Part> = wl
         .batches
         .par_iter()
         .enumerate()
         .map(|(i, b)| {
-            let mut st = b.style.clone();
-            st.batch_seed = st.batch_seed.wrapping_add(0x5EA ^ (i as u64 * 0x9E37_79B9));
+            let st = seeded(i, b).style;
             let t0 = now();
             if b.draw != water::Draw::Lines {
-                let b = water::WaterBatch {
-                    style: st.clone(),
-                    ..b.clone()
+                let b = seeded(i, b);
+                let (marks, ms) = match b.draw {
+                    water::Draw::Ripples => {
+                        (water::ripples(wl.coverage, &dist, w, h, &b), now() - t0)
+                    }
+                    _ => (water::wave_marks(wl.coverage, &dist, w, h, &b), now() - t0),
                 };
-                let marks = plot_order(water::wave_marks(wl.coverage, &dist, w, h, &b));
                 return (
                     Vec::new(),
-                    (st.batch_stroke, marks),
-                    [now() - t0, 0.0, 0.0, 0.0],
+                    (st.batch_stroke, plot_order(marks)),
+                    [ms, 0.0, 0.0, 0.0],
                 );
             }
             let f = water::water_fields(wl.coverage, &dist, w, h, b);
             let t1 = now();
-            let (lines, paths, t) = trace_batch(&f, &st, now);
+            let (lines, paths, t) = trace_batch(&f, &st, true, now);
+            let paths = water::fray(paths, &dist, w, h, &st);
             (lines, (st.batch_stroke, paths), [t1 - t0, t[0], t[1], t[2]])
         })
         .collect();
@@ -313,9 +324,29 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
 }
 
 /// Trace, order and dash one batch on its own fields; ms for each of the three.
-fn trace_batch(f: &Fields, st: &Style, now: fn() -> f64) -> (Vec<Line>, Vec<Line>, [f64; 3]) {
+/// `whole` traces it in one piece rather than in stripes: slower on big
+/// grids, but with no seam at all.
+fn trace_batch(
+    f: &Fields,
+    st: &Style,
+    whole: bool,
+    now: fn() -> f64,
+) -> (Vec<Line>, Vec<Line>, [f64; 3]) {
     let t0 = now();
-    let traced = trace_stripes(f, st, crate::STRIPE);
+    let phase = (st.mod_wave > 0.0 && st.mod_wave_even > 0.0)
+        .then(|| wave::Phase::from_flow(&f.tx, &f.ty, f.w, f.h));
+    // Even waves show the faintest seam, so such a batch is traced whole.
+    let stripe = if whole || phase.is_some() {
+        f.w.max(f.h) as i32
+    } else {
+        crate::STRIPE
+    };
+    let traced = wave::undulate(
+        trace_stripes(f, st, stripe),
+        st,
+        st.batch_seed,
+        phase.as_ref(),
+    );
     let t1 = now();
     let lines = plot_order(traced);
     let t2 = now();
