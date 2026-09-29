@@ -113,11 +113,21 @@ pub fn draw_batches_auto(
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`) with the
 /// first batch's style.
 pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
+    draw_fields_timed(f, batches, || 0.0).0
+}
+
+/// Milliseconds per phase of a draw, in the order they ran. Phases that run
+/// once per batch carry the batch index in their label.
+pub type Timings = Vec<(String, f64)>;
+
+/// [`draw_fields`], timing each phase with `now` (milliseconds). The clock is
+/// passed in because `std::time::Instant` panics on wasm32.
+pub fn draw_fields_timed(f: &Fields, batches: &[Batch], now: fn() -> f64) -> (Drawing, Timings) {
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (f.w, f.h);
     let base_space = batches[0].style.space;
 
-    let parts: Vec<(Vec<Line>, Vec<Line>)> = {
+    let parts: Vec<(Vec<Line>, Vec<Line>, [f64; 4])> = {
         use rayon::prelude::*;
         batches
             .par_iter()
@@ -125,29 +135,42 @@ pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
             .map(|(i, b)| {
                 let mut st = b.style.clone();
                 st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
+                let t0 = now();
                 let bf = batch_fields(f, b, base_space);
-                let lines = plot_order(trace_stripes(&bf, &st, crate::STRIPE));
+                let t1 = now();
+                let traced = trace_stripes(&bf, &st, crate::STRIPE);
+                let t2 = now();
+                let lines = plot_order(traced);
+                let t3 = now();
                 let paths = dash_lines(&lines, &f.input, width, height, &st);
-                (lines, paths)
+                let t4 = now();
+                (lines, paths, [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
             })
             .collect()
     };
 
+    let mut timings = Timings::new();
     let mut lines = Vec::new();
     let mut paths = Vec::new();
-    for (l, p) in parts {
+    for (i, (l, p, t)) in parts.into_iter().enumerate() {
+        for (name, ms) in ["fields", "trace", "order lines", "dashes"].iter().zip(t) {
+            timings.push((format!("batch {i} {name}"), ms));
+        }
         lines.extend(l);
         paths.extend(p);
     }
     if !paths.is_empty() {
+        let t = now();
         paths = plot_order(paths);
+        timings.push(("order dashes".into(), now() - t));
     }
-    Drawing {
+    let d = Drawing {
         width,
         height,
         paths,
         lines,
-    }
+    };
+    (d, timings)
 }
 
 impl Drawing {

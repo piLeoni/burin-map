@@ -6,6 +6,7 @@ import { buildDem } from '../lib/dem'
 import { drawBatches } from '../lib/burin'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg } from '../lib/crop'
+import { logTimings, timingsOn } from '../lib/timings'
 import { mapViewAtom, cameraRequestAtom, frameAtom, forceCpu } from '../state'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -97,8 +98,11 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     }
 
     try {
+      const t0 = performance.now()
       const dem = await buildDem(bounds, outW, outH, progress)
       if (my !== genRef.current || movingRef.current) return
+      const { width: demW, height: demH } = dem
+      const tDem = performance.now()
 
       progress('Drawing…')
       const result = await drawBatches(dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current, {
@@ -107,7 +111,30 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
         deg_per_px_lon: (bounds.east - bounds.west) / outW,
         deg_per_px_lat: (bounds.north - bounds.south) / outH,
       }, null, { gpu: !forceCpu })
+      const tBack = performance.now()
+      const received = performance.timeOrigin + tBack
       if (my !== genRef.current || movingRef.current) return
+      if (timingsOn) {
+        // Two frames later the new SVG has been painted.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const tShown = performance.now()
+          const device = typeof result.gpu === 'string' ? `GPU ${result.gpu}`
+            : result.gpu === false ? 'CPU (no WebGPU)' : 'CPU (forced)'
+          logTimings(
+            `burin-map · ${demW}×${demH} px · ${list.length} batch${list.length > 1 ? 'es' : ''}`
+              + ` · ${result.threads} thread${result.threads > 1 ? 's' : ''} · ${device}`
+              + ` · ${result.dashes} paths · svg ${(result.svg.length / 1e6).toFixed(1)} MB`,
+            [
+              ['page: elevation tiles', tDem - t0],
+              ...result.timings,
+              ['worker → page', received - result.sent],
+              ['page: shown on screen', tShown - tBack],
+              ['total', tShown - t0],
+            ],
+            list.length > 1 ? ['batches run in parallel, so their rows overlap in time'] : [],
+          )
+        }))
+      }
 
       onDrawing({
         svg: result.svg,

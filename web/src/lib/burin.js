@@ -89,7 +89,8 @@ function drawWorker() {
  * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
  * @param {{ gpu?: boolean }} [opts] gpu: terrain fields on WebGPU, when available
  * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number,
- *   gpu: string | false | null }>} gpu: adapter used, false if asked for but unavailable, null if not asked
+ *   gpu: string | false | null, timings: Array<[string, number]>, sent: number }>} gpu: adapter used, false if
+ *   asked for but unavailable, null if not asked; timings: ms per phase in the worker; sent: epoch ms at postMessage
  */
 export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opts) {
   const list = Array.isArray(batches) ? batches : []

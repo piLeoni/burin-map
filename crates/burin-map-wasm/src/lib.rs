@@ -89,6 +89,7 @@ pub struct Drawing {
     n_lines: u32,
     n_dashes: u32,
     ms: f64,
+    timings: burin_map_core::Timings,
     svg: String,
     /// Pixel → lon/lat, when geography was provided.
     nw_lon: f64,
@@ -126,6 +127,14 @@ impl Drawing {
     #[wasm_bindgen(getter)]
     pub fn ms(&self) -> f64 {
         self.ms
+    }
+    /// `[label, ms]` for each phase of the draw, in the order they ran.
+    #[wasm_bindgen(getter)]
+    pub fn timings(&self) -> js_sys::Array {
+        self.timings
+            .iter()
+            .map(|(label, ms)| js_sys::Array::of2(&label.into(), &(*ms).into()))
+            .collect()
     }
     #[wasm_bindgen(getter)]
     pub fn svg(&self) -> String {
@@ -228,6 +237,7 @@ pub fn draw(
         n_lines: d.lines.len() as u32,
         n_dashes: d.paths.len() as u32,
         ms,
+        timings: Vec::new(),
         svg,
         nw_lon: geo.nw_lon,
         nw_lat: geo.nw_lat,
@@ -236,8 +246,22 @@ pub fn draw(
     })
 }
 
+/// `performance.now()` of the calling thread. Each rayon thread is its own
+/// Web Worker with its own time origin, so only differences taken on one
+/// thread mean anything.
 fn now_ms() -> f64 {
-    js_sys::Date::now()
+    let global = js_sys::global();
+    Reflect::get(&global, &"performance".into())
+        .ok()
+        .and_then(|perf| {
+            let now = Reflect::get(&perf, &"now".into()).ok()?;
+            now.dyn_into::<js_sys::Function>()
+                .ok()?
+                .call0(&perf)
+                .ok()?
+                .as_f64()
+        })
+        .unwrap_or_else(js_sys::Date::now)
 }
 
 fn read_double(o: &JsValue, key: &str, default: f64) -> f64 {
@@ -291,8 +315,11 @@ pub fn draw_batches(
     }
     let batches = parse_batches(json)?;
     let t0 = now_ms();
-    let d = burin_map_core::draw_batches(elev, w, h, px_m, &batches);
-    Ok(finish(d, &batches, now_ms() - t0, geo, mm_per_px))
+    let f = burin_map_core::build_fields(elev, w, h, px_m, &batches[0].style);
+    let mut timings = vec![("terrain fields (CPU)".to_string(), now_ms() - t0)];
+    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, now_ms);
+    timings.extend(t);
+    Ok(finish(d, &batches, now_ms() - t0, timings, geo, mm_per_px))
 }
 
 fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
@@ -351,21 +378,26 @@ pub async fn draw_batches_gpu(
         .ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
     let t0 = now_ms();
     let f = gpu.build_fields(&elev, w, h, px_m, &batches[0].style).await;
-    let d = burin_map_core::draw_fields(&f, &batches);
-    Ok(finish(d, &batches, now_ms() - t0, &geo, mm_per_px))
+    let mut timings = vec![("terrain fields (GPU)".to_string(), now_ms() - t0)];
+    let (d, t) = burin_map_core::draw_fields_timed(&f, &batches, now_ms);
+    timings.extend(t);
+    Ok(finish(d, &batches, now_ms() - t0, timings, &geo, mm_per_px))
 }
 
 fn finish(
     d: burin_map_core::Drawing,
     batches: &[Batch],
     ms: f64,
+    mut timings: burin_map_core::Timings,
     geo: &JsValue,
     mm_per_px: Option<f32>,
 ) -> Drawing {
     let (width, height) = (d.width as u32, d.height as u32);
+    let t = now_ms();
     let (pts, ends) = pack(&d.paths);
     let stroke = batches.first().map(|b| b.style.batch_stroke).unwrap_or(1.2);
     let svg = d.to_svg(stroke, mm_per_px);
+    timings.push(("svg".into(), now_ms() - t));
     let geo = read_geo(geo);
     Drawing {
         width,
@@ -375,6 +407,7 @@ fn finish(
         n_lines: d.lines.len() as u32,
         n_dashes: d.paths.len() as u32,
         ms,
+        timings,
         svg,
         nw_lon: geo.nw_lon,
         nw_lat: geo.nw_lat,

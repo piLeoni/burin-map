@@ -51,14 +51,29 @@ function loadGpu(m) {
 self.onmessage = async ({ data }) => {
   const { id, elev, width, height, pxM, json, geo, mmPerPx } = data
   try {
+    const timings = []
+    let t = performance.now()
+    const lap = (label) => {
+      const now = performance.now()
+      timings.push([label, now - t])
+      t = now
+    }
     const { m, threads } = await load()
+    lap('worker: engine ready')
     const adapter = data.gpu ? await loadGpu(m) : null
+    if (data.gpu) lap('worker: WebGPU ready')
     const d = adapter != null
       ? await m.draw_batches_gpu(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
       : m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined)
+    timings.push(...d.timings)
+    t = performance.now()
+    const svg = d.svg
+    lap('worker: read svg')
+    const geojson = d.geojson
+    lap('worker: build geojson')
     const result = {
-      svg: d.svg, geojson: d.geojson, lines: d.lines, dashes: d.dashes, ms: d.ms, threads,
-      gpu: data.gpu ? (adapter ?? false) : null,
+      svg, geojson, lines: d.lines, dashes: d.dashes, ms: d.ms, threads, timings,
+      gpu: data.gpu ? (adapter ?? false) : null, sent: performance.timeOrigin + performance.now(),
     }
     d.free()
     self.postMessage({ id, ok: true, result })
