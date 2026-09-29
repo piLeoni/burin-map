@@ -97,6 +97,7 @@ const wet = {
     batches: [
       { name: 'coast; waves', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
+      { follow: 'shore', draw: 'arcs', angle: 10, style: { space: 50, water_size: 18 } },
     ],
     shoreline: false,
     classes: ['ocean', 'lake'],
@@ -155,14 +156,14 @@ const rustShorts = {
   input_broad: 'ibr', sun_azimuth: 'sa', sun_altitude: 'salt', sun_exag: 'sx',
   engine_step: 'es', engine_min: 'em', engine_stop: 'esp', engine_fill: 'ef',
   batch_floor: 'bf', batch_stroke: 'bs', batch_seed: 'bseed',
-  water_start: 'wst', water_reach: 'wr', water_fade: 'wf',
+  water_start: 'wst', water_reach: 'wr', water_fade: 'wf', water_size: 'ws',
 }
 for (const [full, short] of Object.entries(rustShorts)) {
   if (PARAM_SHORTS[full] !== short) missing.push(`drift: ${full} should be "${short}", got "${PARAM_SHORTS[full]}"`)
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 36) missing.push(`expected 36 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 37) missing.push(`expected 37 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`
@@ -249,7 +250,7 @@ const schema = {
     .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
   groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
 }
-if (schema.params.length !== 36) missing.push(`views: read ${schema.params.length} params from style.rs`)
+if (schema.params.length !== 37) missing.push(`views: read ${schema.params.length} params from style.rs`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const model = {
   area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
@@ -263,6 +264,7 @@ const model = {
     batches: [
       { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
+      { follow: 'map', draw: 'waves', angle: 80, style: { water_size: 20 } },
     ],
   },
   notes: {
@@ -297,6 +299,21 @@ for (const kind of kinds) {
   for (const p of ['space_steep', 'batch_floor', 'sun_azimuth', 'input_gain']) {
     if (wet.includes(`${p}:`)) missing.push(`views: water should not list ${p}`)
   }
+}
+
+// Wave marks list only what they use, at their own defaults.
+{
+  // The engine's list gives each parameter its wave default; this one is read from style.rs.
+  const withWaves = { ...schema, params: schema.params.map((p) => (p.name === 'space' ? { ...p, waves_default: 60 } : p)) }
+  const yaml = V.renderView('yaml', model, withWaves)
+  const marks = yaml.slice(yaml.indexOf('draw: waves'))
+  if (!marks.includes('# space: 60')) missing.push('views: wave marks default to space 60')
+  if (marks.includes('dash_light') || marks.includes('engine_step')) missing.push('views: wave marks list dashes or the tracer')
+  const lines = yaml.slice(yaml.indexOf('\nwater:'), yaml.indexOf('draw: waves'))
+  if (lines.includes('water_size')) missing.push('views: water lines should not list water_size')
+  let threw = false
+  try { V.parseView('yaml', yaml.replace('draw: waves', 'draw: foam'), schema) } catch { threw = true }
+  if (!threw) missing.push('views: an unknown draw should be an error')
 }
 
 // A later land batch shows the terrain it takes from the one above, not the default.

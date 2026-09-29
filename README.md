@@ -322,6 +322,13 @@ tone that shading gives on land is the distance from the shore, so `*_dark`
 applies near the coast and `*_light` further out. On the
 command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
 
+A water batch can also scatter wave marks over the open sea instead of lines:
+`draw: arcs` (small arcs, as on old charts), `dashes` (short staggered dashes,
+as engravers drew the sea) or `waves` (short wavy lines). They sit about
+`space` px apart (default 60), each `water_size` px long (default 16), no
+nearer the shore than `water_start`, turned along the coast or at one angle as
+`follow` says. See [SYNTAX.md](SYNTAX.md#wave-marks).
+
 The shoreline takes the land's modifiers too. Instead of `true`, give it
 `lines` and a `style`:
 

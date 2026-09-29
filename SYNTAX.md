@@ -145,6 +145,7 @@ water:
   batches:
     - name: "optional"
       follow: shore
+      draw: lines
       angle: 0
       style:
         water_reach: 60
@@ -165,6 +166,7 @@ With a `water` block, the water is downloaded from OpenStreetMap and decides whe
 |---|---|---|
 | `name` | a label, optional | |
 | `follow` | `shore`: concentric lines along the coast; `map`: one direction over the whole map | `shore` |
+| `draw` | `lines` fill the water; `arcs`, `dashes` or `waves` scatter wave marks on the open sea, see [Wave marks](#wave-marks) | `lines` |
 | `angle` | with `shore`, 0 runs along the coast and 90 straight out to sea; with `map`, degrees clockwise from north | 0 |
 | `style` | parameters, see below | |
 
@@ -201,6 +203,44 @@ There is no seabed: nothing about depth is downloaded. On water, the "tone" that
 | | `water_fade` | 1 | how they fade out: above 1 sooner, below 1 later |
 
 Left out, as they mean nothing on water: `space_steep`, `space_steep_gamma`, `batch_floor`, the `sun_*` group and the rest of the `input_*` group.
+
+### Wave marks
+
+With `draw: arcs`, `dashes` or `waves`, a batch scatters small marks over the open sea instead of filling it with lines:
+
+| `draw` | Each mark |
+|---|---|
+| `arcs` | a small arc, like the waves of old charts |
+| `dashes` | three short dashes in a staggered group, as engravers drew the sea |
+| `waves` | a short wavy line |
+
+```yaml
+water:
+  batches:
+    - follow: shore        # marks lie along the nearest coast; map: all at `angle` from north
+      draw: arcs
+      style:
+        space: 60          # about this far apart
+        water_size: 16     # each this long
+```
+
+The marks sit evenly, never closer than `space`, and never nearer the shore than `water_start`. Several batches can be combined: lines near the coast and marks further out, or two kinds of mark.
+
+| Group | Parameter | Default | What it does |
+|---|---|---|---|
+| Space | `space` | 60 | distance between marks, px |
+| | `space_dark` | 1 | spacing multiplier at `water_start` |
+| | `space_light` | 1 | spacing multiplier from `water_reach` further out; with `space_dark` below it, marks crowd towards the coast |
+| Mod | `mod_jitter` | 0.45 | how much size and turn vary from mark to mark |
+| | `mod_wobble` | 0 | hand-drawn wander, degrees |
+| | `mod_wobble_size` | 12 | length of each wander, px |
+| | `mod_smooth` | 8 | how smoothly the marks turn with the coast (`follow: shore`) |
+| Batch | `batch_stroke` | 1.2 | line width |
+| | `batch_seed` | 1 | random seed: another scattering |
+| Water | `water_start` | 20 | no marks nearer the shore than this, px |
+| | `water_reach` | 60 | distance over which the spacing eases from `space_dark` to `space_light`, px |
+| | `water_fade` | 1 | how it eases |
+| | `water_size` | 16 | length of each mark, px |
 
 ---|---|---|---|
 | Space | `space` | 4 | |
@@ -309,3 +349,4 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
 - **Water**:
   - before the first `;` comes the shoreline: `l2,s4` is 2 lines, 4 px apart (`noshore` turns it off, `c…` picks the classes);
   - then one batch after each `;`: `shore,a0,wst10,wr30,s7`.
+  - a batch that draws wave marks says so after `shore` / `map`: `map,arcs,a70,s50`.

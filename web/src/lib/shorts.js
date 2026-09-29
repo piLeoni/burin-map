@@ -47,6 +47,7 @@ export const PARAM_SHORTS = {
   water_start: 'wst',
   water_reach: 'wr',
   water_fade: 'wf',
+  water_size: 'ws',
 }
 
 /** short → full_name. */

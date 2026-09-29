@@ -13,7 +13,7 @@ export default function App() {
   const water = useAtomValue(waterAtom)
   const waterKey = JSON.stringify(water && {
     ...water,
-    batches: water.batches.map(({ follow, angle, style }) => ({ follow, angle, style })),
+    batches: water.batches.map(({ name: _name, ...drawn }) => drawn),
   })
   const wet = useMemo(() => JSON.parse(waterKey), [waterKey])
   const status = useAtomValue(statusAtom)

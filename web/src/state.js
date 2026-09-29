@@ -62,9 +62,12 @@ export const styleAtom = atom(
   },
 )
 
+const WAVE_MARKS = ['arcs', 'dashes', 'waves']
+
 /**
  * The document's water block, or null for none: `{ classes?, shoreline?, source?,
- * batches: [{ name?, follow, angle, style }] }`. Shaped by `normalizeWater`,
+ * batches: [{ name?, follow, draw?, angle, style }] }`, `draw` only when it is
+ * wave marks. Shaped by `normalizeWater`,
  * which also takes the older name `shore` still in saved documents.
  * @param {unknown} value
  */
@@ -89,6 +92,7 @@ export function normalizeWater(value) {
     .map((b) => ({
       ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
       follow: b.follow === 'map' ? 'map' : 'shore',
+      ...(WAVE_MARKS.includes(b.draw) ? { draw: b.draw } : {}),
       angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
       style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
     }))

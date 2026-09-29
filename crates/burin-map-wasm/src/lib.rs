@@ -29,13 +29,15 @@ fn style_from(obj: &JsValue) -> Result<Style, JsValue> {
     Ok(st)
 }
 
-/// (name, default, water_default, shoreline_default, help, group) for every style
-/// parameter — drives the web UI. `water_default` is the value in water
-/// batches, `shoreline_default` on the shoreline.
+/// (name, default, water_default, waves_default, shoreline_default, help, group)
+/// for every style parameter — drives the web UI. `water_default` is the value
+/// in water batches, `waves_default` in those that draw wave marks,
+/// `shoreline_default` on the shoreline.
 #[wasm_bindgen]
 pub fn style_params() -> Result<JsValue, JsValue> {
     let d = Style::default();
     let wd = Style::water();
+    let vd = Style::waves();
     let sd = Style::shoreline();
     let arr = js_sys::Array::new();
     for p in Style::PARAMS {
@@ -50,6 +52,11 @@ pub fn style_params() -> Result<JsValue, JsValue> {
             &o,
             &"water_default".into(),
             &(wd.get(p.name).unwrap() as f32 as f64).into(),
+        )?;
+        Reflect::set(
+            &o,
+            &"waves_default".into(),
+            &(vd.get(p.name).unwrap() as f32 as f64).into(),
         )?;
         Reflect::set(
             &o,

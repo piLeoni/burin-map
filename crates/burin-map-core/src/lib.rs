@@ -30,7 +30,7 @@ pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
     Param, Style, GROUPS,
 };
-pub use water::{Follow, Shoreline, WaterBatch, WaterLayer};
+pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
 
 /// Stripe width used by the drawing engine, in px. See `streamlines::trace_stripes`.
 pub const STRIPE: i32 = 512;
@@ -282,6 +282,18 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
             let mut st = b.style.clone();
             st.batch_seed = st.batch_seed.wrapping_add(0x5EA ^ (i as u64 * 0x9E37_79B9));
             let t0 = now();
+            if b.draw != water::Draw::Lines {
+                let b = water::WaterBatch {
+                    style: st.clone(),
+                    ..b.clone()
+                };
+                let marks = plot_order(water::wave_marks(wl.coverage, &dist, w, h, &b));
+                return (
+                    Vec::new(),
+                    (st.batch_stroke, marks),
+                    [now() - t0, 0.0, 0.0, 0.0],
+                );
+            }
             let f = water::water_fields(wl.coverage, &dist, w, h, b);
             let t1 = now();
             let (lines, paths, t) = trace_batch(&f, &st, now);

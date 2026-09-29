@@ -134,6 +134,7 @@ style! {
     water: water_start ("wst"): f32 = 2.0, "gap between the shore and the first line, in px";
     water: water_reach ("wr"): f32 = 60.0, "how far out from the shore the lines go, in px";
     water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
+    water: water_size ("ws"): f32 = 14.0, "length of each wave mark, in px (draw arcs, dashes or waves)";
 }
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
@@ -245,7 +246,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 36);
+        assert_eq!(Style::PARAMS.len(), 37);
     }
 
     #[test]

@@ -23,16 +23,31 @@ pub enum Follow {
     Map,
 }
 
+/// What a water batch draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Draw {
+    /// Lines that fill the water, as on land.
+    #[default]
+    Lines,
+    /// Small arcs scattered on the open sea, like the waves of old charts.
+    Arcs,
+    /// Short dashes in little staggered groups, as engravers drew the sea.
+    Dashes,
+    /// Short wavy lines.
+    Waves,
+}
+
 /// One drawing pass on water.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WaterBatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub follow: Follow,
     pub angle: f32,
-    /// Missing parameters take [`Style::water`]'s values, not the land's.
-    #[serde(deserialize_with = "water_style")]
+    pub draw: Draw,
+    /// Missing parameters take [`Style::water`]'s values, or with wave marks
+    /// [`Style::waves`]', not the land's.
     pub style: Style,
 }
 
@@ -42,8 +57,51 @@ impl Default for WaterBatch {
             name: None,
             follow: Follow::Shore,
             angle: 0.0,
+            draw: Draw::Lines,
             style: Style::water(),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for WaterBatch {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(default)]
+        struct Given {
+            name: Option<String>,
+            follow: Follow,
+            angle: f32,
+            draw: Draw,
+            style: std::collections::BTreeMap<String, f64>,
+        }
+        impl Default for Given {
+            fn default() -> Self {
+                Given {
+                    name: None,
+                    follow: Follow::Shore,
+                    angle: 0.0,
+                    draw: Draw::Lines,
+                    style: Default::default(),
+                }
+            }
+        }
+        let g = Given::deserialize(d)?;
+        let mut style = if g.draw == Draw::Lines {
+            Style::water()
+        } else {
+            Style::waves()
+        };
+        for (name, v) in g.style {
+            // Unknown names are ignored, as they are in land styles.
+            style.set(&name, v);
+        }
+        Ok(WaterBatch {
+            name: g.name,
+            follow: g.follow,
+            angle: g.angle,
+            draw: g.draw,
+            style,
+        })
     }
 }
 
@@ -62,6 +120,21 @@ impl Style {
             ..Style::default()
         }
     }
+
+    /// Defaults for wave marks: one every 60 px or so, evenly over the open
+    /// sea from 20 px out, each a little different in size and turn.
+    pub fn waves() -> Style {
+        Style {
+            space: 60.0,
+            water_size: 16.0,
+            space_light: 1.0,
+            space_dark: 1.0,
+            mod_wobble: 0.0,
+            mod_smooth: 8.0,
+            water_start: 20.0,
+            ..Style::water()
+        }
+    }
 }
 
 fn style_over<'de, D: Deserializer<'de>>(d: D, mut st: Style) -> Result<Style, D::Error> {
@@ -71,10 +144,6 @@ fn style_over<'de, D: Deserializer<'de>>(d: D, mut st: Style) -> Result<Style, D
         st.set(&name, v);
     }
     Ok(st)
-}
-
-fn water_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
-    style_over(d, Style::water())
 }
 
 fn shore_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
@@ -180,42 +249,13 @@ pub fn water_fields(coverage: &[f32], dist: &[f32], w: usize, h: usize, b: &Wate
     let far = (st.water_start + st.water_reach) * 2.0 + 1.0;
     let d: Vec<f32> = dist.par_iter().map(|&d| d.min(far)).collect();
 
-    let (mut tx, mut ty) = match b.follow {
-        Follow::Shore => {
-            let (gy, gx) = gradient(&blur(&d, w, h, st.mod_smooth), w, h, 1.0);
-            let (sa, ca) = b.angle.to_radians().sin_cos();
-            gx.par_iter()
-                .zip(&gy)
-                .map(|(&gx, &gy)| {
-                    let m = gx.hypot(gy);
-                    if m < 1e-6 {
-                        return (0.0, 0.0);
-                    }
-                    let (u, v) = (-gy / m, gx / m);
-                    (u * ca - v * sa, u * sa + v * ca)
-                })
-                .unzip()
-        }
-        Follow::Map => {
-            // Image y points south, so north is -y.
-            let (sa, ca) = b.angle.to_radians().sin_cos();
-            (vec![sa; w * h], vec![-ca; w * h])
-        }
-    };
+    let (mut tx, mut ty) = directions(&d, w, h, b, (0.0, 0.0));
     wobble(&mut tx, &mut ty, w, h, st, |_| 1.0);
 
-    let reach = st.water_reach.max(1e-3);
     let input: Vec<f32> = d
         .par_iter()
         .zip(coverage)
-        .map(|(&d, &c)| {
-            if c < 0.5 || d < st.water_start {
-                return 0.0;
-            }
-            (1.0 - (d - st.water_start) / reach)
-                .clamp(0.0, 1.0)
-                .powf(st.water_fade.max(1e-3))
-        })
+        .map(|(&d, &c)| if c < 0.5 { 0.0 } else { tone(d, st) })
         .collect();
     let loosen: Vec<f32> = input
         .par_iter()
@@ -237,6 +277,190 @@ pub fn water_fields(coverage: &[f32], dist: &[f32], w: usize, h: usize, b: &Wate
         input,
         walkable,
         space,
+    }
+}
+
+/// 1 at `water_start` px from the shore, fading to 0 `water_reach` px further
+/// out; 0 nearer the shore than `water_start`.
+fn tone(d: f32, st: &Style) -> f32 {
+    if d < st.water_start {
+        return 0.0;
+    }
+    (1.0 - (d - st.water_start) / st.water_reach.max(1e-3))
+        .clamp(0.0, 1.0)
+        .powf(st.water_fade.max(1e-3))
+}
+
+/// The direction a batch follows at every pixel: along the shore turned by
+/// `angle`, or `angle` from north. `none` where the shore gives no direction.
+fn directions(
+    d: &[f32],
+    w: usize,
+    h: usize,
+    b: &WaterBatch,
+    none: (f32, f32),
+) -> (Vec<f32>, Vec<f32>) {
+    let (sa, ca) = b.angle.to_radians().sin_cos();
+    match b.follow {
+        Follow::Shore => {
+            let (gy, gx) = gradient(&blur(d, w, h, b.style.mod_smooth), w, h, 1.0);
+            gx.par_iter()
+                .zip(&gy)
+                .map(|(&gx, &gy)| {
+                    let m = gx.hypot(gy);
+                    if m < 1e-6 {
+                        return none;
+                    }
+                    let (u, v) = (-gy / m, gx / m);
+                    (u * ca - v * sa, u * sa + v * ca)
+                })
+                .unzip()
+        }
+        // Image y points south, so north is -y.
+        Follow::Map => (vec![sa; w * h], vec![-ca; w * h]),
+    }
+}
+
+/// Wave marks scattered over the water: evenly, `space` px apart (times
+/// `space_dark` at `water_start`, easing to `space_light` over
+/// `water_reach`), never nearer the shore than `water_start`. Each is
+/// `water_size` px long, turned as the batch follows, varied by `mod_jitter`
+/// and bent by `mod_wobble`. Solid: no dashes.
+pub fn wave_marks(
+    coverage: &[f32],
+    dist: &[f32],
+    w: usize,
+    h: usize,
+    b: &WaterBatch,
+) -> Vec<crate::Line> {
+    let st = &b.style;
+    // Far out, or with no shore at all, the distance is huge or infinite; a
+    // finite ceiling keeps the gradient clean where there is one.
+    let top = dist
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite())
+        .fold(0.0f32, f32::max)
+        + 1.0;
+    let d: Vec<f32> = dist
+        .par_iter()
+        .map(|&d| if d.is_finite() { d } else { top })
+        .collect();
+    let (sa, ca) = b.angle.to_radians().sin_cos();
+    let (tx, ty) = directions(&d, w, h, b, (sa, -ca));
+
+    let at = |p: [f32; 2]| -> Option<usize> {
+        let (x, y) = (p[0].round(), p[1].round());
+        (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
+            .then(|| y as usize * w + x as usize)
+    };
+    let open = |p: [f32; 2]| at(p).is_some_and(|i| coverage[i] >= 0.5 && d[i] >= st.water_start);
+    let spacing = |i: usize| {
+        let t = tone(d[i], st);
+        st.space.max(1.0) * (st.space_light + (st.space_dark - st.space_light) * t).clamp(0.05, 4.0)
+    };
+    let lo = st.space.max(1.0) * st.space_light.min(st.space_dark).clamp(0.05, 4.0);
+    let hi = st.space.max(1.0) * st.space_light.max(st.space_dark).clamp(0.05, 4.0);
+
+    // Dart throwing: jittered candidates in random order, each kept when no
+    // kept mark lies within its spacing.
+    let mut rng = Rng::new(st.batch_seed.wrapping_add(0x3A7E));
+    let pitch = (lo * 0.5).max(2.0);
+    let (cols, rows) = (
+        (w as f32 / pitch).ceil() as usize,
+        (h as f32 / pitch).ceil() as usize,
+    );
+    let mut cands: Vec<[f32; 2]> = (0..cols * rows)
+        .map(|k| {
+            let (cx, cy) = ((k % cols) as f32, (k / cols) as f32);
+            [
+                (cx + rng.f64() as f32) * pitch,
+                (cy + rng.f64() as f32) * pitch,
+            ]
+        })
+        .collect();
+    for i in (1..cands.len()).rev() {
+        let j = (rng.f64() * (i + 1) as f64) as usize;
+        cands.swap(i, j.min(i));
+    }
+    let cell = hi.max(1.0);
+    let (gw, gh) = (
+        (w as f32 / cell).ceil() as usize + 1,
+        (h as f32 / cell).ceil() as usize + 1,
+    );
+    let mut grid: Vec<Vec<[f32; 2]>> = vec![Vec::new(); gw * gh];
+
+    let mut marks = Vec::new();
+    for p in cands {
+        let Some(i) = at(p) else { continue };
+        if !open(p) {
+            continue;
+        }
+        let r = spacing(i);
+        let (gx, gy) = ((p[0] / cell) as usize, (p[1] / cell) as usize);
+        let near = (gy.saturating_sub(1)..(gy + 2).min(gh)).any(|y| {
+            (gx.saturating_sub(1)..(gx + 2).min(gw)).any(|x| {
+                grid[y * gw + x]
+                    .iter()
+                    .any(|q| (q[0] - p[0]).hypot(q[1] - p[1]) < r)
+            })
+        });
+        if near {
+            continue;
+        }
+        let jitter = st.mod_jitter.clamp(0.0, 1.0);
+        let size = st.water_size.max(1.0) * (1.0 + jitter * rng.uniform(-0.5, 0.5) as f32);
+        let turn = (jitter * 20.0 * rng.uniform(-1.0, 1.0) as f32).to_radians();
+        let (s, c) = turn.sin_cos();
+        let (u, v) = (tx[i] * c - ty[i] * s, tx[i] * s + ty[i] * c);
+        let m = u.hypot(v).max(1e-6);
+        let (u, v) = (u / m, v / m);
+        let shape = mark(b.draw, size);
+        let placed: Vec<crate::Line> = shape
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .map(|q| [p[0] + q[0] * u - q[1] * v, p[1] + q[0] * v + q[1] * u])
+                    .collect()
+            })
+            .collect();
+        if !placed.iter().flatten().all(|&q| open(q)) {
+            continue;
+        }
+        grid[gy * gw + gx].push(p);
+        for mut l in placed {
+            wander(&mut l, st, &mut rng);
+            marks.push(l);
+        }
+    }
+    marks
+}
+
+/// One mark `size` px long, centred on the origin, along +x.
+fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
+    let run = |n: usize, f: &dyn Fn(f32) -> [f32; 2]| -> crate::Line {
+        (0..=n).map(|k| f(k as f32 / n as f32)).collect()
+    };
+    let dash = |a: f32, b: f32, y: f32| vec![[a * size, y * size], [b * size, y * size]];
+    match draw {
+        Draw::Lines => Vec::new(),
+        Draw::Arcs => vec![run(10, &|t| {
+            [
+                (t - 0.5) * size,
+                -0.28 * size * (std::f32::consts::PI * t).sin(),
+            ]
+        })],
+        Draw::Dashes => vec![
+            dash(-0.25, 0.25, -0.16),
+            dash(-0.5, -0.06, 0.16),
+            dash(0.06, 0.5, 0.16),
+        ],
+        Draw::Waves => vec![run(18, &|t| {
+            [
+                (t - 0.5) * size,
+                0.12 * size * (std::f32::consts::TAU * 1.5 * t).sin(),
+            ]
+        })],
     }
 }
 
@@ -548,6 +772,37 @@ mod tests {
         let json = |shoreline| serde_json::to_string(&Doc { shoreline }).unwrap();
         assert_eq!(json(Some(Shoreline::default())), r#"{"shoreline":true}"#);
         assert_eq!(json(None), r#"{"shoreline":false}"#);
+    }
+
+    #[test]
+    fn wave_marks_keep_to_the_open_sea() {
+        let (w, h) = (200, 200);
+        let c = half(w, h);
+        let (dist, _) = shore(&c, w, h);
+        for draw in [Draw::Arcs, Draw::Dashes, Draw::Waves] {
+            let b: WaterBatch = serde_json::from_value(
+                serde_json::json!({ "draw": draw, "style": { "space": 20 } }),
+            )
+            .unwrap();
+            assert_eq!(
+                b.style.water_start,
+                Style::waves().water_start,
+                "wave defaults"
+            );
+            let marks = wave_marks(&c, &dist, w, h, &b);
+            assert!(marks.len() > 20, "{draw:?}: {}", marks.len());
+            for p in marks.iter().flatten() {
+                assert!(
+                    p[0] < 100.0 - b.style.water_start + 1.0,
+                    "{draw:?} too near the shore: {p:?}"
+                );
+            }
+            let again = wave_marks(&c, &dist, w, h, &b);
+            assert_eq!(marks, again, "the same seed, the same marks");
+        }
+        let lines: WaterBatch = serde_json::from_str("{}").unwrap();
+        assert_eq!(lines.draw, Draw::Lines);
+        assert_eq!(lines.style, Style::water());
     }
 
     #[test]

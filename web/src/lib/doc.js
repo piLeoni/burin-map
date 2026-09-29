@@ -93,7 +93,8 @@ export function docToNote(doc) {
   if (!doc.water) return note
 
   // Water: its settings, then its batches, `;`-separated. A batch leads with
-  // how it follows (`shore` or `map`), which is what tells the two apart. A
+  // how it follows (`shore` or `map`), which is what tells the two apart,
+  // then what it draws when that is wave marks (`arcs`, `dashes`, `waves`). A
   // drawn shoreline with a style of its own is `l` and its number of lines,
   // then that style.
   const w = doc.water
@@ -102,7 +103,7 @@ export function docToNote(doc) {
   if (w.classes) head.push(`c${w.classes.join('+')}`)
   if (w.source) head.push(`src${escapeNote(w.source)}`)
   if (w.shoreline && typeof w.shoreline === 'object') head.push(batchNote({ style: w.shoreline.style }, [`l${w.shoreline.lines ?? 1}`]))
-  const wet = w.batches.map((b) => batchNote(b, [b.follow ?? 'shore', `a${num(b.angle ?? 0)}`]))
+  const wet = w.batches.map((b) => batchNote(b, [b.follow ?? 'shore', ...(b.draw ? [b.draw] : []), `a${num(b.angle ?? 0)}`]))
   return `${note}|${[head.join(','), ...wet].join(';')}`
 }
 
@@ -201,11 +202,12 @@ export function noteToDoc(note) {
   return doc
 }
 
-/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` for water. */
+/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` and `arcs` / `dashes` / `waves` for water. */
 function readBatch(seg) {
   let angle = 0
   let name
   let follow
+  let draw
   const style = {}
   for (const tok of seg.split(',')) {
     if (!tok) continue
@@ -218,11 +220,15 @@ function readBatch(seg) {
       follow = tok
       continue
     }
+    if (tok === 'arcs' || tok === 'dashes' || tok === 'waves') {
+      draw = tok
+      continue
+    }
     const { key, value } = readNumber(tok, ANGLE_AND_STYLE, 'style')
     if (key === 'angle') angle = value
     else style[key] = value
   }
-  const b = follow ? { follow, angle, style } : { angle, style }
+  const b = follow ? { follow, ...(draw ? { draw } : {}), angle, style } : { angle, style }
   return name ? { name, ...b } : b
 }
 

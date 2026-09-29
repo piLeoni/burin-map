@@ -23,7 +23,7 @@ pub mod tmerc;
 pub mod water;
 
 pub use burin_map_core::{
-    Batch, Drawing, Follow, GeoTransform, Line, Shoreline, Style, WaterBatch,
+    Batch, Draw, Drawing, Follow, GeoTransform, Line, Shoreline, Style, WaterBatch,
 };
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use document::{AreaDoc, Document, LandDoc, WaterDoc};
