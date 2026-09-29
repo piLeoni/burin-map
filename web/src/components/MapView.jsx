@@ -5,7 +5,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { buildDem } from '../lib/dem'
 import { drawBatches } from '../lib/burin'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
-import { cropGeojson, cropSvg } from '../lib/crop'
+import { cropGeojson, cropSvg, strokeOf } from '../lib/crop'
 import { logTimings, timingsOn } from '../lib/timings'
 import { mapViewAtom, cameraRequestAtom, frameAtom, forceCpu } from '../state'
 
@@ -54,7 +54,6 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
   const [busy, setBusy] = useState(false)
   const [busyMsg, setBusyMsg] = useState('')
   const [downloadOpen, setDownloadOpen] = useState(false)
-  const svgOverlayRef = useRef(null)
   const frameRef = useRef(frame)
   frameRef.current = frame
 
@@ -327,23 +326,6 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
     fitFrame(!justOpened)
   }, [downloadOpen, groundKey, fitFrame, setFrame])
 
-  // While Download is open the lines on screen take the pen width they will have on paper.
-  useEffect(() => {
-    const g = svgOverlayRef.current?.querySelector('svg > g[stroke-width]')
-    const map = mapRef.current
-    if (!g || !map || !drawing?.view) return
-    if (!g.dataset.stroke) g.dataset.stroke = g.getAttribute('stroke-width')
-    const ground = groundKm(frame)
-    if (!downloadOpen || !ground || !(frame.scale > 0) || !(frame.pen_width > 0)) {
-      g.setAttribute('stroke-width', g.dataset.stroke)
-      return
-    }
-    const kmPerCssPx = groundWidthAt(map.getCenter().lat, map.getZoom(), 1)
-    const pxPerKm = drawing.view.outW / drawing.view.cssW / kmPerCssPx
-    const mmPerPx = 1e6 / frame.scale / pxPerKm
-    g.setAttribute('stroke-width', (frame.pen_width / mmPerPx).toPrecision(3))
-  }, [downloadOpen, frame, drawing])
-
   /** The frame on the drawing: `rect` in drawing px, `box` in degrees, `paper` in mm. */
   const frameCut = () => {
     const map = mapRef.current
@@ -371,7 +353,13 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
 
   const exportSvg = () => {
     const cut = frameCut()
-    return cut ? cropSvg(drawing.svg, cut.rect, cut.paper, frame.pen_width) : null
+    return cut ? cropSvg(drawing.svg, cut.rect, cut.paper) : null
+  }
+  /** How thick the drawing's lines come out on paper at the frame's scale, mm. */
+  const lineMm = () => {
+    const cut = downloadOpen && drawing?.svg ? frameCut() : null
+    const stroke = cut ? strokeOf(drawing.svg) : null
+    return stroke ? (stroke * cut.paper[0]) / (cut.rect[2] - cut.rect[0]) : null
   }
   const exportGeojson = () => {
     const cut = frameCut()
@@ -405,7 +393,6 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
 
       {drawing?.svg && !busy && (
         <div
-          ref={svgOverlayRef}
           className="burin-svg-overlay pointer-events-none absolute inset-0 z-[1] bg-white"
           dangerouslySetInnerHTML={{ __html: drawing.svg }}
         />
@@ -433,6 +420,7 @@ export default function MapView({ batches, onStatus, onDrawing, drawing }) {
           setFrame={setFrame}
           exportSvg={exportSvg}
           exportGeojson={exportGeojson}
+          lineMm={lineMm()}
         />
       </div>
     </div>
@@ -524,7 +512,7 @@ function FlagRow({ flag, children }) {
   )
 }
 
-function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg, exportGeojson }) {
+function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg, exportGeojson, lineMm }) {
   useEffect(() => {
     if (!open) return
     const on = (e) => { if (e.key === 'Escape') onOpenChange(false) }
@@ -620,6 +608,7 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
               {frame.mode === 'land'
                 ? `paper ${sig3(paper[0])} × ${sig3(paper[1])} mm`
                 : `ground ${sig3(ground[0])} × ${sig3(ground[1])} km`}
+              {lineMm > 0 && ` · lines ${sig3(lineMm)} mm`}
             </p>
           )}
 

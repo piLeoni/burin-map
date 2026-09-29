@@ -63,15 +63,21 @@ function svgPaths(svg) {
 
 const num = (x) => String(Math.round(x * 100) / 100)
 
+/** The stroke width of a drawing's SVG, in drawing px, or null. */
+export function strokeOf(svg) {
+  const m = /stroke-width="([\d.]+)"/.exec(svg.slice(0, 1000))
+  return m ? Number(m[1]) : null
+}
+
 /**
- * The part of `svg` inside `rect` (drawing px), sized `paperMm` on paper
- * with lines `penMm` thick.
+ * The part of `svg` inside `rect` (drawing px), sized `paperMm` on paper.
+ * Lines keep the drawing's own stroke, so the export looks like the screen.
  */
-export function cropSvg(svg, rect, paperMm, penMm) {
+export function cropSvg(svg, rect, paperMm) {
   const [x0, y0, x1, y1] = rect
   const w = x1 - x0
   const h = y1 - y0
-  const stroke = (penMm * w) / paperMm[0]
+  const stroke = strokeOf(svg) ?? 1.2
   let body = ''
   for (const p of svgPaths(svg)) {
     for (const piece of clipPolyline(p, rect)) {
