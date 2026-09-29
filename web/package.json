@@ -11,6 +11,7 @@
     "test:render": "vite build --config vite.ssr-test.config.js --ssr scripts/render-test.mjs --outDir .ssr-test --logLevel error && node .ssr-test/render-test.js"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@monaco-editor/react": "^4.7.0",
     "jotai": "^3.0.0",
     "mapbox-gl": "^3.31.0",

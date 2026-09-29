@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
+import { EDITOR_THEME, defineEditorTheme, editorFont, registerCliLanguage } from '../lib/editorTheme'
 import { loadBurin } from '../lib/burin'
 import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
@@ -345,18 +346,25 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               <Editor
                 height="100%"
                 language={VIEWS[view].language}
-                theme="vs"
+                theme={EDITOR_THEME}
                 value={shown}
                 onChange={(v) => { setDraft(v ?? ''); setError('') }}
                 beforeMount={(monaco) => {
                   monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({ validate: false })
+                  registerCliLanguage(monaco)
+                  defineEditorTheme(monaco)
                 }}
                 onMount={(editor, monaco) => {
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => applyDraftRef.current())
+                  // Monaco measures glyphs once; a web font that lands later
+                  // would leave the cursor out of step with the text.
+                  document.fonts.ready.then(() => monaco.editor.remeasureFonts())
                 }}
                 options={{
                   minimap: { enabled: false },
+                  fontFamily: editorFont(),
                   fontSize: 11,
+                  bracketPairColorization: { enabled: false },
                   lineNumbersMinChars: 3,
                   scrollBeyondLastLine: false,
                   wordWrap: 'on',

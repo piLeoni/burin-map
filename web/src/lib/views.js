@@ -27,7 +27,7 @@ import { SHORT_PARAMS } from './shorts.js'
 export const VIEWS = {
   yaml: { label: 'YAML', ext: 'yaml', language: 'yaml', mime: 'application/yaml' },
   json5: { label: 'JSON5', ext: 'json5', language: 'json', mime: 'application/json5' },
-  cli: { label: 'CLI', ext: 'sh', language: 'shell', mime: 'text/x-shellscript' },
+  cli: { label: 'CLI', ext: 'sh', language: 'burin-cli', mime: 'text/x-shellscript' },
 }
 
 const AREA_KEYS = ['place', 'at', 'bounds', 'size_km', 'size_mm', 'scale', 'pen_mm']

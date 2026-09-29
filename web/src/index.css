@@ -3,6 +3,17 @@
   themes: wireframe --default;
 }
 
+/* One monospace for everything monospace: labels, buttons and the editor,
+   which reads this variable when it mounts. */
+@theme {
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+.btn {
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
 html,
 body,
 #root {
