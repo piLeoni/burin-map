@@ -331,3 +331,99 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
     }
     lines
 }
+
+/* ------------------------------------------------------------------ */
+/*  Striped tracing                                                    */
+/* ------------------------------------------------------------------ */
+
+/// How much of the neighbouring stripe a tracer may read while deciding where
+/// its own lines stop. It only mirrors `engine_stop`'s reach, so a line can
+/// come as close to the boundary as the rule allows.
+const STRIPE_MARGIN_PX: f32 = 16.0;
+
+/// Evenly spaced streamlines, traced in parallel stripes.
+///
+/// `trace_streamlines` already runs a whole line per thread, but it produces
+/// one set of lines. Here the plane is cut into vertical stripes, each traced
+/// on its own with the same rule over the same fields. What a stripe cannot
+/// see is its neighbours' lines, so it may only *walk* its own stripe — the
+/// padding it reads has its walkable flag cleared, and the seeding grid works
+/// on the same field. Strands stop at the stripe edge, where the neighbour
+/// picks them up: the same clean cut a dash makes, so joins are seamless.
+///
+/// The seam costs a little density: a stripe cannot notice that the far side
+/// of its own boundary is already inked, so the first line inside the edge
+/// starts from the edge itself and the two sides are a hair closer than the
+/// spacing asks. That is the one visible fingerprint of this scheme, and it
+/// is why the stripe should be as wide as the pixels allow.
+pub fn trace_stripes(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
+    let (w, h) = (f.w, f.h);
+    if w < 5 || h < 5 || stripe < 8 {
+        return Vec::new();
+    }
+    let n = (w as i32 + stripe - 1) / stripe;
+    let parts: Vec<Vec<Line>> = {
+        use rayon::prelude::*;
+        (0..n)
+            .into_par_iter()
+            .map(|s| {
+                let x0 = s * stripe;
+                let x1 = (x0 + stripe).min(w as i32);
+                // Each stripe shuffles its seeds with its own seed, so
+                // neighbours do not repeat the same pattern side by side.
+                let mut st = st.clone();
+                st.batch_seed = st.batch_seed.wrapping_add(0x9E37_79B9 * (s as u64 + 1));
+                let sub = slice_columns(f, x0, x1, STRIPE_MARGIN_PX);
+                let dx = (x0 as f32 - STRIPE_MARGIN_PX).max(0.0);
+                trace_streamlines(&sub, &st)
+                    .into_iter()
+                    .map(|l| l.into_iter().map(|p| [p[0] + dx, p[1]]).collect())
+                    .collect()
+            })
+            .collect()
+    };
+    parts.into_iter().flatten().collect()
+}
+
+/// `f` narrowed to columns `x0..x1` plus `pad` columns each side, whose
+/// `walkable` flags are cleared so the tracer reads outside but stays inside.
+fn slice_columns(f: &Fields, x0: i32, x1: i32, pad: f32) -> Fields {
+    let (w, h) = (f.w, f.h);
+    let lo = (x0 as f32 - pad).max(0.0) as usize;
+    let hi = ((x1 as f32 + pad).round() as usize).min(w);
+    let nw = hi - lo;
+    let mut out = Fields {
+        w: nw,
+        h,
+        tx: Vec::with_capacity(nw * h),
+        ty: Vec::with_capacity(nw * h),
+        input: Vec::with_capacity(nw * h),
+        walkable: Vec::with_capacity(nw * h),
+        space: Vec::with_capacity(nw * h),
+    };
+    for y in 0..h {
+        let row = y * w;
+        let (a, b) = (row + lo, row + hi);
+        out.tx.extend_from_slice(&f.tx[a..b]);
+        out.ty.extend_from_slice(&f.ty[a..b]);
+        out.input.extend_from_slice(&f.input[a..b]);
+        out.walkable.extend_from_slice(&f.walkable[a..b]);
+        out.space.extend_from_slice(&f.space[a..b]);
+    }
+    // The padding belongs to the neighbour: read it, but do not draw in it.
+    let inner = (x0 - lo as i32).max(0) as usize;
+    let inner_end = {
+        let x1 = x1 as usize;
+        (x1.saturating_sub(lo)).min(nw)
+    };
+    for y in 0..h {
+        let row = y * nw;
+        for x in 0..inner.min(nw) {
+            out.walkable[row + x] = false;
+        }
+        for x in inner_end..nw {
+            out.walkable[row + x] = false;
+        }
+    }
+    out
+}

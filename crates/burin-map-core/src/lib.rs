@@ -24,10 +24,13 @@ mod style;
 pub use dashes::dash_lines;
 pub use fields::{batch_fields, build_fields, Fields};
 pub use order::{pen_up_travel, plot_order};
-pub use streamlines::{trace_streamlines, Line};
+pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     from_json_batches, from_json_style, to_json_batches, to_json_style, Batch, Param, Style, GROUPS,
 };
+
+/// Stripe width used by the drawing engine, in px. See `streamlines::trace_stripes`.
+pub const STRIPE: i32 = 512;
 
 /// Maps pixel coordinates back to geographic lon/lat. Pixel (0,0) is the
 /// north-west corner of the elevation grid; y grows southward.
@@ -123,7 +126,7 @@ pub fn draw_fields(f: &Fields, batches: &[Batch]) -> Drawing {
                 let mut st = b.style.clone();
                 st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
                 let bf = batch_fields(f, b, base_space);
-                let lines = plot_order(trace_streamlines(&bf, &st));
+                let lines = plot_order(trace_stripes(&bf, &st, crate::STRIPE));
                 let paths = dash_lines(&lines, &f.input, width, height, &st);
                 (lines, paths)
             })
