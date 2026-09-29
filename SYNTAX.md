@@ -206,29 +206,31 @@ Left out, as they mean nothing on water: `space_steep`, `space_steep_gamma`, `ba
 
 ### Wave marks
 
-With `draw: arcs`, `dashes` or `waves`, a batch scatters small marks over the open sea instead of filling it with lines:
+With `draw: arcs`, `dashes` or `waves`, a batch scatters small groups of marks over the open sea, gathered in patches, instead of filling it with lines:
 
 | `draw` | Each mark |
 |---|---|
-| `arcs` | a small arc, like the waves of old charts |
-| `dashes` | three short dashes in a staggered group, as engravers drew the sea |
-| `waves` | a short wavy line |
+| `arcs` | two low, staggered arcs, like the waves of old charts |
+| `dashes` | four short dashes in staggered rows, as engravers drew the sea |
+| `waves` | two short wavy lines, one over the other |
 
 ```yaml
 water:
   batches:
-    - follow: shore        # marks lie along the nearest coast; map: all at `angle` from north
-      draw: arcs
+    - follow: map          # all at `angle` from north; shore: along the nearest coast
+      angle: 90            # 90: level, like waves on a chart
+      draw: waves
       style:
-        space: 60          # about this far apart
-        water_size: 16     # each this long
+        space: 70          # about this far apart
+        water_size: 26     # each this long
+        water_patches: 0.6 # gathered in patches: 0 evenly everywhere, 1 a few patches
 ```
 
-The marks sit evenly, never closer than `space`, and never nearer the shore than `water_start`. Several batches can be combined: lines near the coast and marks further out, or two kinds of mark.
+Marks never come closer than `space` to each other, nor nearer the shore than `water_start`; `water_patches` leaves the sea between patches empty. `follow: map` with `angle: 90` keeps them level, as on a chart; `follow: shore` turns them with the coast. Several batches can be combined: lines near the coast and marks further out, or two kinds of mark.
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Space | `space` | 60 | distance between marks, px |
+| Space | `space` | 70 | distance between marks, px |
 | | `space_dark` | 1 | spacing multiplier at `water_start` |
 | | `space_light` | 1 | spacing multiplier from `water_reach` further out; with `space_dark` below it, marks crowd towards the coast |
 | Mod | `mod_jitter` | 0.45 | how much size and turn vary from mark to mark |
@@ -240,7 +242,8 @@ The marks sit evenly, never closer than `space`, and never nearer the shore than
 | Water | `water_start` | 20 | no marks nearer the shore than this, px |
 | | `water_reach` | 60 | distance over which the spacing eases from `space_dark` to `space_light`, px |
 | | `water_fade` | 1 | how it eases |
-| | `water_size` | 16 | length of each mark, px |
+| | `water_size` | 26 | length of each mark, px |
+| | `water_patches` | 0.6 | how much marks gather in patches: 0 evenly everywhere, 1 a few patches |
 
 ---|---|---|---|
 | Space | `space` | 4 | |

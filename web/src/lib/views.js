@@ -114,11 +114,11 @@ const SHORELINE_PARAMS = new Set([
 /** What wave marks use: where they go, their size, and a hand-drawn turn; no tracer, no dashes. */
 const WAVES_PARAMS = new Set([
   'space', 'space_light', 'space_dark', 'mod_jitter', 'mod_wobble', 'mod_wobble_size', 'mod_smooth',
-  'batch_stroke', 'batch_seed', 'water_start', 'water_reach', 'water_fade', 'water_size',
+  'batch_stroke', 'batch_seed', 'water_start', 'water_reach', 'water_fade', 'water_size', 'water_patches',
 ])
 
 /** What water has no use for: its tone is the distance from the shore, not terrain. */
-const WATER_SKIPS = new Set(['space_steep', 'space_steep_gamma', 'batch_floor', 'water_size'])
+const WATER_SKIPS = new Set(['space_steep', 'space_steep_gamma', 'batch_floor', 'water_size', 'water_patches'])
 
 /** Parameters that mean nothing there: terrain shading on water, water settings on land. */
 function skipsParam(p, kind) {

@@ -121,12 +121,14 @@ impl Style {
         }
     }
 
-    /// Defaults for wave marks: one every 60 px or so, evenly over the open
-    /// sea from 20 px out, each a little different in size and turn.
+    /// Defaults for wave marks: small groups about 70 px apart, gathered in
+    /// patches over the open sea from 20 px out, each a little different in
+    /// size and turn.
     pub fn waves() -> Style {
         Style {
-            space: 60.0,
-            water_size: 16.0,
+            space: 70.0,
+            water_size: 26.0,
+            water_patches: 0.6,
             space_light: 1.0,
             space_dark: 1.0,
             mod_wobble: 0.0,
@@ -325,7 +327,8 @@ fn directions(
 /// `space_dark` at `water_start`, easing to `space_light` over
 /// `water_reach`), never nearer the shore than `water_start`. Each is
 /// `water_size` px long, turned as the batch follows, varied by `mod_jitter`
-/// and bent by `mod_wobble`. Solid: no dashes.
+/// and bent by `mod_wobble`; `water_patches` gathers them in patches. Solid:
+/// no dashes.
 pub fn wave_marks(
     coverage: &[f32],
     dist: &[f32],
@@ -390,10 +393,30 @@ pub fn wave_marks(
     );
     let mut grid: Vec<Vec<[f32; 2]>> = vec![Vec::new(); gw * gh];
 
+    // Patches: smooth noise over cells a few marks wide; the more
+    // `water_patches`, the higher the bar a candidate's noise must clear.
+    let patches = st.water_patches.clamp(0.0, 1.0);
+    let lump = hi * 4.0;
+    let (nw, nh) = (
+        (w as f32 / lump) as usize + 2,
+        (h as f32 / lump) as usize + 2,
+    );
+    let lattice: Vec<f32> = (0..nw * nh).map(|_| rng.f64() as f32).collect();
+    let noise = |p: [f32; 2]| {
+        let (x, y) = (p[0] / lump, p[1] / lump);
+        let (i, j) = (x as usize, y as usize);
+        let s = |f: f32| f * f * (3.0 - 2.0 * f);
+        let (fx, fy) = (s(x - i as f32), s(y - j as f32));
+        let v = |a: usize, b: usize| lattice[(b.min(nh - 1)) * nw + a.min(nw - 1)];
+        let top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx;
+        let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
+        top + (bottom - top) * fy
+    };
+
     let mut marks = Vec::new();
     for p in cands {
         let Some(i) = at(p) else { continue };
-        if !open(p) {
+        if !open(p) || noise(p) < patches * 0.75 {
             continue;
         }
         let r = spacing(i);
@@ -436,31 +459,37 @@ pub fn wave_marks(
     marks
 }
 
-/// One mark `size` px long, centred on the origin, along +x.
+/// One mark `size` px long, centred on the origin, along +x, its crests
+/// towards -y: a small group of low arcs, dashes or wavy lines, stacked and
+/// staggered as engravers drew the sea.
 fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
+    use std::f32::consts::{PI, TAU};
     let run = |n: usize, f: &dyn Fn(f32) -> [f32; 2]| -> crate::Line {
         (0..=n).map(|k| f(k as f32 / n as f32)).collect()
     };
+    // From `a` to `b` along x at height `y`, all in marks.
+    let arc = |a: f32, b: f32, y: f32| {
+        run(12, &|t| {
+            [(a + (b - a) * t) * size, (y - 0.09 * (PI * t).sin()) * size]
+        })
+    };
     let dash = |a: f32, b: f32, y: f32| vec![[a * size, y * size], [b * size, y * size]];
+    let wave = |a: f32, b: f32, y: f32| {
+        run(24, &|t| {
+            let x = a + (b - a) * t;
+            [x * size, (y + 0.035 * (TAU * 2.0 * x).sin()) * size]
+        })
+    };
     match draw {
         Draw::Lines => Vec::new(),
-        Draw::Arcs => vec![run(10, &|t| {
-            [
-                (t - 0.5) * size,
-                -0.28 * size * (std::f32::consts::PI * t).sin(),
-            ]
-        })],
+        Draw::Arcs => vec![arc(-0.5, 0.2, -0.1), arc(-0.15, 0.5, 0.1)],
         Draw::Dashes => vec![
-            dash(-0.25, 0.25, -0.16),
-            dash(-0.5, -0.06, 0.16),
-            dash(0.06, 0.5, 0.16),
+            dash(-0.3, 0.3, -0.14),
+            dash(-0.5, -0.05, 0.0),
+            dash(0.08, 0.45, 0.0),
+            dash(-0.2, 0.25, 0.14),
         ],
-        Draw::Waves => vec![run(18, &|t| {
-            [
-                (t - 0.5) * size,
-                0.12 * size * (std::f32::consts::TAU * 1.5 * t).sin(),
-            ]
-        })],
+        Draw::Waves => vec![wave(-0.5, 0.35, -0.08), wave(-0.25, 0.5, 0.08)],
     }
 }
 
