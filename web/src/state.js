@@ -114,6 +114,8 @@ function readWaterWhere(w) {
   const max = Number(/** @type {Record<string, unknown>} */ (w).depth_max)
   if (Number.isFinite(min)) out.depth_min = min
   if (Number.isFinite(max)) out.depth_max = max
+  const fade = Number(w.depth_fade)
+  if (Number.isFinite(fade) && fade > 0) out.depth_fade = fade
   return Object.keys(out).length ? out : null
 }
 

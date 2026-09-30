@@ -3,6 +3,8 @@ import { useAtom, useSetAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
 import { EDITOR_THEME, defineEditorTheme, editorFont, registerCliLanguage } from '../lib/editorTheme'
 import { loadBurin } from '../lib/burin'
+import { clearServiceWorkers } from '../lib/devCache'
+import { PRESETS } from '../lib/presets'
 import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import { VIEWS, detectView, parseView, renderView } from '../lib/views'
@@ -69,7 +71,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const [schema, setSchema] = useState(null)   // { params, groups } from the engine
   const [batches, setBatches] = useAtom(styleAtom)
   const [water, setWater] = useAtom(waterAtom)
-  const [, setBathymetry] = useAtom(bathymetryAtom)
+  const [bathymetry, setBathymetry] = useAtom(bathymetryAtom)
   const [notes, setNotes] = useAtom(notesAtom)
   const [kind, setKind] = useAtom(viewKindAtom)
   const [mapView] = useAtom(mapViewAtom)
@@ -79,6 +81,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(null)   // { text, error? }
   const fileRef = useRef(null)
+  const presetMenuRef = useRef(null)
   const noticeTimer = useRef(0)
   const applyDraftRef = useRef(() => {})
 
@@ -141,7 +144,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   }, [setBatches, setCameraRequest])
 
   // ---------- the text ----------
-  const model = { area: areaFromFrame(frame, mapView?.center), batches: list, water, notes: notes ?? {} }
+  const model = { area: areaFromFrame(frame, mapView?.center), batches: list, water, bathymetry, notes: notes ?? {} }
   const liveText = schema && list.length > 0 ? renderView(view, model, schema) : ''
   const shown = draft ?? liveText
   const dirty = draft != null && draft !== liveText
@@ -180,12 +183,13 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     setKind(next)
   }
 
-  const reset = () => {
-    setBatches(FRESH)
-    setWater(null)
-    setNotes({})
+  const loadPreset = (p) => {
+    presetMenuRef.current?.removeAttribute('open')
+    const doc = structuredClone(p.doc)
+    load({ batches: doc.batches, water: doc.water ?? null, bathymetry: doc.bathymetry ?? null, notes: {} })
     setDraft(null)
     setError('')
+    flash(`Loaded ${p.label}`)
   }
 
   // ---------- files, clipboard, link ----------
@@ -245,6 +249,15 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema])
 
+  useEffect(() => {
+    const close = (e) => {
+      const menu = presetMenuRef.current
+      if (menu?.open && !menu.contains(e.target)) menu.removeAttribute('open')
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [])
+
   const tool = 'btn btn-xs border-base-content/25 whitespace-nowrap'
 
   return (
@@ -263,7 +276,19 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         {/* Fixed top: title, stats, toolbar */}
         <div className="flex shrink-0 flex-col gap-3.5 px-5 pt-5 pb-4">
           <header className="flex flex-col gap-2">
-            <h1 className="hidden font-mono text-2xl font-bold tracking-tight lg:block">BurinMap</h1>
+            <div className="flex items-center justify-between gap-2">
+              <h1 className="hidden font-mono text-2xl font-bold tracking-tight lg:block">BurinMap</h1>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs ml-auto whitespace-nowrap opacity-40 hover:opacity-100"
+                  title="Dev only: remove service workers and their caches, then reload, so the latest WASM is used. The document is kept."
+                  onClick={() => clearServiceWorkers()}
+                >
+                  Clear cache
+                </button>
+              )}
+            </div>
             <p className="text-[11px] leading-relaxed opacity-50">
               Terrain drawn as engraved lines. Pan or zoom the map; the view is
               redrawn when you stop. An online demo of{' '}
@@ -288,7 +313,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
           </div>
 
           <div className="flex flex-col gap-2 border-t border-base-content/15 pt-4">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
               <div role="tablist" className="join">
                 {Object.entries(VIEWS).map(([id, v]) => (
                   <button
@@ -303,9 +328,6 @@ export default function Sidebar({ open, onClose, status, drawing }) {
                   </button>
                 ))}
               </div>
-              <button type="button" className="btn btn-ghost btn-xs whitespace-nowrap opacity-60 hover:opacity-100" onClick={reset}>
-                Reset to defaults
-              </button>
             </div>
             <div className="grid grid-cols-4 gap-1.5">
               <button type="button" className={tool} title="Open a YAML, JSON, JSON5 or .sh file" disabled={!schema} onClick={() => fileRef.current?.click()}>
@@ -314,9 +336,21 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               <button type="button" className={tool} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
                 Download
               </button>
-              <button type="button" className={tool} title="Copy the text in the editor" disabled={!shown} onClick={() => copy(shown, VIEWS[view].label)}>
-                Copy
-              </button>
+              <details ref={presetMenuRef} className="dropdown dropdown-end">
+                <summary className={`${tool} w-full list-none ${schema ? '' : 'btn-disabled'}`} title="Replace the style with a ready-made one; the map stays where it is">
+                  Load ▾
+                </summary>
+                <ul className="menu dropdown-content z-20 mt-1 w-64 rounded-box border border-base-content/25 bg-base-100 p-1 shadow">
+                  {PRESETS.map((p) => (
+                    <li key={p.id}>
+                      <button type="button" className="flex flex-col items-start gap-0" onClick={() => loadPreset(p)}>
+                        <span className="font-mono text-[11px] font-bold">{p.label}</span>
+                        <span className="text-[10px] opacity-50">{p.blurb}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
               <button type="button" className={tool} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
                 Link
               </button>
@@ -351,7 +385,21 @@ export default function Sidebar({ open, onClose, status, drawing }) {
             </div>
             {error && <p className="font-mono text-[10px] leading-snug break-words text-error">{error}</p>}
           </div>
-          <div className={`min-h-0 flex-1 overflow-hidden rounded-lg border ${dirty ? 'border-base-content' : 'border-base-content/25'}`}>
+          <div className={`relative min-h-0 flex-1 overflow-hidden rounded-lg border ${dirty ? 'border-base-content' : 'border-base-content/25'}`}>
+            {shown && (
+              <button
+                type="button"
+                aria-label={`Copy ${VIEWS[view].label}`}
+                title={`Copy the ${VIEWS[view].label}`}
+                className="btn btn-square btn-xs absolute top-1.5 right-4 z-10 border-base-content/25 bg-base-100/90 opacity-60 hover:opacity-100"
+                onClick={() => copy(shown, VIEWS[view].label)}
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="12" height="12" rx="2" />
+                  <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+                </svg>
+              </button>
+            )}
             {schema ? (
               <Editor
                 height="100%"

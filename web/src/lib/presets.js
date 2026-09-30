@@ -1,0 +1,70 @@
+/**
+ * Styles offered by the Load menu. Each is a document without an area, so
+ * loading one keeps the map where it is.
+ */
+export const PRESETS = [
+  {
+    id: 'contours',
+    label: 'Contours',
+    blurb: 'contour lines, lit and shaded',
+    doc: { batches: [{ angle: 0, style: {} }] },
+  },
+  {
+    id: 'downhill',
+    label: 'Downhill',
+    blurb: 'lines at 90°, running down the slope like water',
+    doc: { batches: [{ angle: 90, style: {} }] },
+  },
+  {
+    id: 'dotted-sea',
+    label: 'Dotted sea',
+    blurb: 'contours, and the sea stippled, denser at the coast',
+    doc: {
+      batches: [{ angle: 0, style: {} }],
+      water: {
+        shoreline: { lines: 1, style: {} },
+        batches: [{ follow: 'shore', draw: 'dots', angle: 0, style: {} }],
+      },
+    },
+  },
+  {
+    id: 'engraved-sea',
+    label: 'Engraved sea',
+    blurb: 'coast lines, then a sea of evenly waving currents',
+    doc: {
+      batches: [
+        { angle: 0, style: { space_light: 1.8, space_dark: 0.6, space_steep: 0.3, dash_light: 0.1 } },
+      ],
+      water: {
+        shoreline: { lines: 2, style: { space: 1.5 } },
+        batches: [
+          { follow: 'shore', angle: 0, style: { space: 3, water_start: 3, water_reach: 20 } },
+          {
+            follow: 'map',
+            angle: 90,
+            style: {
+              space: 4,
+              space_light: 1,
+              space_dark: 1,
+              water_start: 26,
+              water_reach: 4000,
+              water_fade: 0.2,
+              water_fray: 40,
+              dash_light: 0.95,
+              dash_dark: 1,
+              dash_period: 9,
+              dash_drop: 0,
+              mod_jitter: 0.3,
+              mod_wobble: 45,
+              mod_wobble_size: 120,
+              mod_smooth: 3,
+              mod_wave: 2.5,
+              mod_wave_size: 30,
+              mod_wave_even: 1,
+            },
+          },
+        ],
+      },
+    },
+  },
+]

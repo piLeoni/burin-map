@@ -302,6 +302,21 @@ function yamlValue(v) {
   return yamlStringify(String(v)).trim()
 }
 
+const WHERE_KEYS = ['depth_min', 'depth_max', 'depth_fade']
+const BATHYMETRY_KEYS = ['source', 'url']
+
+/** A small block on one line, `{ a: 1, b: x }`, or null when empty; `json` quotes the keys. */
+function flowBlock(obj, keys, json) {
+  const parts = keys
+    .filter((k) => obj?.[k] != null)
+    .map((k) => {
+      const v = obj[k]
+      const text = typeof v === 'number' ? num(v) : json ? JSON.stringify(String(v)) : yamlValue(v)
+      return `${json ? JSON.stringify(k) : k}: ${text}`
+    })
+  return parts.length ? `{ ${parts.join(', ')} }` : null
+}
+
 function renderYaml(model, schema) {
   const n = model.notes ?? {}
   const rows = []
@@ -339,6 +354,12 @@ function renderYaml(model, schema) {
     styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'land', inherited[i])
   })
 
+  const bathy = flowBlock(model.bathymetry, BATHYMETRY_KEYS, false)
+  if (bathy) {
+    aboveRows(rows, n.bathymetry, 0)
+    rows.push(code(0, `bathymetry: ${bathy}`, n.bathymetry?.after))
+  }
+
   const w = model.water
   if (w) {
     aboveRows(rows, n.water, 0)
@@ -371,6 +392,8 @@ function renderYaml(model, schema) {
       head.push(['follow', b.follow, WATER_HELP.follow])
       head.push(['draw', b.draw ?? 'lines', WATER_HELP.draw])
       head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
+      const where = flowBlock(b.where, WHERE_KEYS, false)
+      if (where) head.push(['where', where, undefined])
       head.forEach(([k, v, help], j) => {
         const path = `${base}.${k}`
         aboveRows(rows, n[path], j === 0 ? 4 : 6)
@@ -501,6 +524,12 @@ function renderJson5(model, schema) {
   })
   rows.push(code(2, '],'))
 
+  const bathy = flowBlock(model.bathymetry, BATHYMETRY_KEYS, true)
+  if (bathy) {
+    aboveRows(rows, n.bathymetry, 2)
+    rows.push(code(2, `"bathymetry": ${bathy},`, n.bathymetry?.after))
+  }
+
   const w = model.water
   if (w) {
     aboveRows(rows, n.water, 2)
@@ -538,6 +567,8 @@ function renderJson5(model, schema) {
       field('follow', JSON.stringify(b.follow), WATER_HELP.follow)
       field('draw', JSON.stringify(b.draw ?? 'lines'), WATER_HELP.draw)
       field('angle', num(b.angle ?? 0), ANGLE_NOTE)
+      const where = flowBlock(b.where, WHERE_KEYS, true)
+      if (where) field('where', where)
       aboveRows(rows, n[`${base}.style`], 8)
       rows.push(code(8, '"style": {', n[`${base}.style`]?.after))
       styleRows(rows, b.style, base, schema, n, 10, (k, v) => `"${k}": ${num(v)},`, drawKind(b))
@@ -1030,7 +1061,9 @@ function readWaterWhere(w, which) {
   if (w == null) return null
   if (typeof w !== 'object' || Array.isArray(w)) throw new Error(`where in ${which} must be a block with depth_min and/or depth_max`)
   for (const k of Object.keys(w)) {
-    if (k !== 'depth_min' && k !== 'depth_max') throw new Error(`Unknown setting "${k}" in ${which}.where`)
+    if (k !== 'depth_min' && k !== 'depth_max' && k !== 'depth_fade') {
+      throw new Error(`Unknown setting "${k}" in ${which}.where`)
+    }
   }
   const out = {}
   if (w.depth_min != null) {
@@ -1042,6 +1075,11 @@ function readWaterWhere(w, which) {
     const v = Number(w.depth_max)
     if (!Number.isFinite(v)) throw new Error(`depth_max in ${which} must be a number (metres)`)
     out.depth_max = v
+  }
+  if (w.depth_fade != null) {
+    const v = Number(w.depth_fade)
+    if (!Number.isFinite(v) || v <= 0) throw new Error(`depth_fade in ${which} must be a positive number (metres)`)
+    out.depth_fade = v
   }
   return Object.keys(out).length ? out : null
 }
