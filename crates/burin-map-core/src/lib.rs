@@ -37,7 +37,7 @@ pub use pen::Pen;
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
-    Param, Style, GROUPS,
+    Ground, Param, Style, GROUPS,
 };
 pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
 
@@ -100,26 +100,57 @@ pub fn draw_batches(
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
 
+    let sea = sea_coverage(elev, None, batches);
     let fields: Vec<Fields> = terrain_groups(batches)
         .0
         .iter()
-        .map(|&i| build_fields(elev, width, height, px_m, &batches[i].style))
+        .map(|&i| {
+            let cov = ground_coverage(&batches[i], None, sea.as_deref());
+            build_fields_with(elev, width, height, px_m, &batches[i].style, cov)
+        })
         .collect();
     draw_fields(&fields, batches, elev)
 }
 
+/// The mask `ground: sea` batches build their fields with: water where the
+/// coverage says so, or below sea level without one, standing in for land.
+/// `None` when no batch draws the seabed.
+pub fn sea_coverage(elev: &[f32], water: Option<&[f32]>, batches: &[Batch]) -> Option<Vec<f32>> {
+    if batches.iter().all(|b| b.ground.is_land()) {
+        return None;
+    }
+    Some(match water {
+        Some(c) => c.iter().map(|&c| 1.0 - c).collect(),
+        None => elev.iter().map(|&e| (e > 0.5) as u8 as f32).collect(),
+    })
+}
+
+/// The coverage a batch's fields are built with: the water's for the land,
+/// `sea` (from [`sea_coverage`]) for the seabed.
+pub fn ground_coverage<'a>(
+    b: &Batch,
+    water: Option<&'a [f32]>,
+    sea: Option<&'a [f32]>,
+) -> Option<&'a [f32]> {
+    if b.ground.is_land() {
+        water
+    } else {
+        sea
+    }
+}
+
 /// Batches that share terrain fields: the first batch of each distinct set of
-/// terrain parameters, and for every batch the index of its set in that list.
+/// terrain parameters and ground, and for every batch the index of its set in
+/// that list.
 pub fn terrain_groups(batches: &[Batch]) -> (Vec<usize>, Vec<usize>) {
     let mut firsts: Vec<usize> = Vec::new();
     let of = batches
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            match firsts
-                .iter()
-                .position(|&j| batches[j].style.same_terrain(&b.style))
-            {
+            match firsts.iter().position(|&j| {
+                batches[j].ground == b.ground && batches[j].style.same_terrain(&b.style)
+            }) {
                 Some(g) => g,
                 None => {
                     firsts.push(i);
@@ -147,10 +178,14 @@ pub fn draw_batches_auto(
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
         assert!(!batches.is_empty(), "need at least one batch");
+        let sea = sea_coverage(elev, None, batches);
         let fields: Vec<Fields> = terrain_groups(batches)
             .0
             .iter()
-            .map(|&i| g.build_fields_blocking(elev, width, height, px_m, &batches[i].style))
+            .map(|&i| {
+                let cov = ground_coverage(&batches[i], None, sea.as_deref());
+                g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, cov)
+            })
             .collect();
         return draw_fields(&fields, batches, elev);
     }
@@ -170,20 +205,25 @@ pub fn draw_batches_auto_with(
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
     let coverage = water.map(|w| w.coverage);
+    let sea = sea_coverage(elev, coverage, batches);
     let firsts = terrain_groups(batches).0;
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
         let fields: Vec<Fields> = firsts
             .iter()
             .map(|&i| {
-                g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, coverage)
+                let cov = ground_coverage(&batches[i], coverage, sea.as_deref());
+                g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, cov)
             })
             .collect();
         return draw_fields_timed(&fields, batches, water, elev, || 0.0).0;
     }
     let fields: Vec<Fields> = firsts
         .iter()
-        .map(|&i| build_fields_with(elev, width, height, px_m, &batches[i].style, coverage))
+        .map(|&i| {
+            let cov = ground_coverage(&batches[i], coverage, sea.as_deref());
+            build_fields_with(elev, width, height, px_m, &batches[i].style, cov)
+        })
         .collect();
     draw_fields_timed(&fields, batches, water, elev, || 0.0).0
 }
@@ -766,6 +806,7 @@ mod tests {
                     color: None,
                     color_expr: None,
                     angle: 90.0,
+                    ground: Ground::Land,
                     style: st90,
                 },
             ],
@@ -788,6 +829,7 @@ mod tests {
             color: None,
             color_expr: None,
             angle: 90.0,
+            ground: Ground::Land,
             style: Style {
                 sun_azimuth: az,
                 ..Style::default()

@@ -13,7 +13,7 @@ import { PARAM_SHORTS, SHORT_PARAMS } from './shorts.js'
 /** Keep only finite numbers, so we never emit null/NaN into JSON. */
 function numericStyle(style) {
   return Object.fromEntries(
-    Object.entries(style).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
+    Object.entries(style ?? {}).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
   )
 }
 
@@ -88,7 +88,7 @@ export function docToNote(doc) {
     else areaParts.push(`${short}${num(v)}`)
   }
 
-  const batchParts = doc.batches.map((b) => batchNote(b, [`a${num(b.angle ?? 0)}`]))
+  const batchParts = doc.batches.map((b) => batchNote(b, [...(b.ground === 'sea' ? ['sea'] : []), `a${num(b.angle ?? 0)}`]))
   const note = `${areaParts.join(',')}|${batchParts.join(';')}`
   if (!doc.water) return note
 
@@ -202,10 +202,14 @@ export function noteToDoc(note) {
   return doc
 }
 
-/** One batch: `a` its angle, `n` its name, the style by short names; `shore` / `map` and `ripples` / `dots` for water. */
+/**
+ * One batch: `a` its angle, `n` its name, the style by short names; `sea` for a land batch drawn on the
+ * seabed; `shore` / `map` and `ripples` / `dots` for water.
+ */
 function readBatch(seg) {
   let angle = 0
   let name
+  let ground
   let follow
   let draw
   const style = {}
@@ -214,6 +218,10 @@ function readBatch(seg) {
     // No style short starts with `n`, so an `n…` token is always the name.
     if (tok[0] === 'n') {
       name = decodeURIComponent(tok.slice(1))
+      continue
+    }
+    if (tok === 'sea') {
+      ground = tok
       continue
     }
     if (tok === 'shore' || tok === 'map') {
@@ -228,7 +236,7 @@ function readBatch(seg) {
     if (key === 'angle') angle = value
     else style[key] = value
   }
-  const b = follow ? { follow, ...(draw ? { draw } : {}), angle, style } : { angle, style }
+  const b = follow ? { follow, ...(draw ? { draw } : {}), angle, style } : { angle, ...(ground ? { ground } : {}), style }
   return name ? { name, ...b } : b
 }
 

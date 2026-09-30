@@ -85,6 +85,7 @@ function paramByName(schema, name) {
 }
 
 const ANGLE_NOTE = 'default 0'
+const GROUND_NOTE = 'land (default) or sea: sea draws the seabed like land, and nothing on land'
 
 /**
  * Where a style is: `land`, a `water` batch that draws lines, `ripples` or
@@ -169,6 +170,7 @@ function generatedAfter(schema, path) {
   const parts = path.split('.')
   if (parts[0] === 'area' && parts.length === 2) return [AREA_HELP[parts[1]]]
   if (parts[0] === 'batches' && parts[2] === 'angle') return [ANGLE_NOTE, ANGLE_HELP]
+  if (parts[0] === 'batches' && parts[2] === 'ground') return [GROUND_NOTE]
   if (parts[0] === 'batches' && parts[2] === 'style' && parts.length === 4) {
     const p = paramByName(schema, parts[3])
     if (p) return [defaultNote(p), p.help, `${p.help} (default ${num(p.default)})`]
@@ -344,6 +346,7 @@ function renderYaml(model, schema) {
     if (b.name) head.push(['name', yamlValue(b.name), undefined])
     head.push(...inkHead(b))
     head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
+    if (b.ground === 'sea') head.push(['ground', 'sea', GROUND_NOTE])
     head.forEach(([k, v, help], j) => {
       const path = `${base}.${k}`
       aboveRows(rows, n[path], j === 0 ? 2 : 4)
@@ -516,6 +519,10 @@ function renderJson5(model, schema) {
     }
     aboveRows(rows, n[`${base}.angle`], 6)
     rows.push(code(6, `"angle": ${num(b.angle ?? 0)},`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
+    if (b.ground === 'sea') {
+      aboveRows(rows, n[`${base}.ground`], 6)
+      rows.push(code(6, '"ground": "sea",', n[`${base}.ground`]?.after ?? GROUND_NOTE))
+    }
     aboveRows(rows, n[`${base}.style`], 6)
     rows.push(code(6, '"style": {', n[`${base}.style`]?.after))
     styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'land', inherited[i])
@@ -1118,9 +1125,12 @@ function toModel(value, notes, schema) {
     const which = `batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'layer', 'color', 'color_expr', 'angle', 'style'].includes(k)) {
-        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, angle and style`)
+      if (!['name', 'layer', 'color', 'color_expr', 'angle', 'ground', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, angle, ground and style`)
       }
+    }
+    if (b.ground != null && b.ground !== 'land' && b.ground !== 'sea') {
+      throw new Error(`ground in ${which} is land or sea`)
     }
     const angle = b.angle == null ? 0 : Number(b.angle)
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
@@ -1128,6 +1138,7 @@ function toModel(value, notes, schema) {
     const name = typeof b.name === 'string' && b.name.trim() ? b.name : b.name != null ? String(b.name) : ''
     const batch = {
       angle,
+      ...(b.ground === 'sea' ? { ground: 'sea' } : {}),
       style,
       ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
       ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),

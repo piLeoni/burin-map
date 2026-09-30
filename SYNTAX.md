@@ -78,9 +78,22 @@ batches:
 | `color` | stroke colour as `#rgb` or `#rrggbb`; black when omitted |
 | `color_expr` | colour from a small expression; see [Colour expressions](#colour-expressions) |
 | `angle` | 0 follows the contour lines, 90 runs straight downhill |
+| `ground` | `land` (default) or `sea`: `sea` draws the seabed instead, and nothing on land |
 | `style` | parameters, see below; those left out keep their defaults, except the terrain ones (see [Terrain carries over](#terrain-carries-over)) |
 
 `name` is only for you; `layer` is what plotters and SVG editors group by.
+
+`ground: sea` turns the map inside out: the batch traces the seabed's depth like hills, and land is left blank. The water outline decides where the sea is, so give the document a `water` block (a `shoreline` and no water batches draws just the coast); without one, sea is wherever the elevation is at or below 0.5 m. The depth comes from the same elevation tiles, which carry bathymetry in the web app (Terrarium); the command line's SRTM data has none, so there the seabed is flat.
+
+```yaml
+batches:
+  - angle: 0
+    ground: sea
+    style: { space: 5, space_light: 3, input_blur: 8 }
+water:
+  shoreline: { lines: 1 }
+  batches: []
+```
 
 ### Colour expressions
 
@@ -471,7 +484,7 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
 #d=at44.3035,9.2145,ts14x10|a0|l2,s4;shore,a0,wst10,wr30,s7
 ```
 
-- **Land**: `a0`, one batch at angle 0.
+- **Land**: `a0`, one batch at angle 0; `sea,a0` is a batch with `ground: sea`.
 - **Water**:
   - before the first `;` comes the shoreline: `l2,s4` is 2 lines, 4 px apart (`noshore` turns it off, `c…` picks the classes);
   - then one batch after each `;`: `shore,a0,wst10,wr30,s7`.

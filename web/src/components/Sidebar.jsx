@@ -186,7 +186,12 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const loadPreset = (p) => {
     presetMenuRef.current?.removeAttribute('open')
     const doc = structuredClone(p.doc)
-    load({ batches: doc.batches, water: doc.water ?? null, bathymetry: doc.bathymetry ?? null, notes: {} })
+    try {
+      load({ area: doc.area, batches: doc.batches, water: doc.water ?? null, bathymetry: doc.bathymetry ?? null, notes: {} })
+    } catch (e) {
+      flash(`Can't load ${p.label}: ${e.message}`, true)
+      return
+    }
     setDraft(null)
     setError('')
     flash(`Loaded ${p.label}`)
@@ -336,8 +341,8 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               <button type="button" className={tool} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
                 Download
               </button>
-              <details ref={presetMenuRef} className="dropdown dropdown-end">
-                <summary className={`${tool} w-full list-none ${schema ? '' : 'btn-disabled'}`} title="Replace the style with a ready-made one; the map stays where it is">
+              <details ref={presetMenuRef} className="dropdown dropdown-end flex">
+                <summary className={`${tool} w-full list-none ${schema ? '' : 'btn-disabled'}`} title="Replace the style and the area with a ready-made one">
                   Load ▾
                 </summary>
                 <ul className="menu dropdown-content z-20 mt-1 w-64 rounded-box border border-base-content/25 bg-base-100 p-1 shadow">

@@ -38,6 +38,7 @@ export function normalizeBatches(value) {
         ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color } : {}),
         ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
         angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
+        ...(b.ground === 'sea' ? { ground: 'sea' } : {}),
         style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
       }))
   }

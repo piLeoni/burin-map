@@ -145,6 +145,22 @@ style! {
     water: water_depth_fray ("wdf"): f32 = 0.0, "metres band at a batch depth limit where lines break up into dashes and dots with a ragged edge; uses where.depth_max or depth_min; 0 a clean cut";
 }
 
+/// Which ground a land batch draws: the land, or the seabed under the water,
+/// traced like land from the negative heights there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Ground {
+    #[default]
+    Land,
+    Sea,
+}
+
+impl Ground {
+    pub fn is_land(&self) -> bool {
+        *self == Ground::Land
+    }
+}
+
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
 /// tangent (0 = along level curves, 90 = along the slope).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -164,6 +180,8 @@ pub struct Batch {
     pub color_expr: Option<String>,
     #[serde(default)]
     pub angle: f32,
+    #[serde(skip_serializing_if = "Ground::is_land")]
+    pub ground: Ground,
     pub style: Style,
 }
 
@@ -175,6 +193,7 @@ impl Batch {
             color: None,
             color_expr: None,
             angle: 0.0,
+            ground: Ground::Land,
             style,
         }
     }
@@ -235,6 +254,8 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         #[serde(default)]
         angle: f32,
         #[serde(default)]
+        ground: Ground,
+        #[serde(default)]
         style: std::collections::BTreeMap<String, f64>,
     }
     let given = Vec::<Given>::deserialize(d)?;
@@ -254,6 +275,7 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
             color: g.color,
             color_expr: g.color_expr,
             angle: g.angle,
+            ground: g.ground,
             style,
         });
     }
@@ -326,6 +348,7 @@ mod json_tests {
                 color: None,
                 color_expr: None,
                 angle: 90.0,
+                ground: Ground::Sea,
                 style: Style {
                     space: 6.0,
                     batch_floor: 0.4,

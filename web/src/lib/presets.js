@@ -1,39 +1,58 @@
-/**
- * Styles offered by the Load menu. Each is a document without an area, so
- * loading one keeps the map where it is.
- */
+const PENINSULA = { at: '37.66,-122.45', size_km: [36, 25] }
+
+/** Styles offered by the Load menu, each with the area it was made for. */
 export const PRESETS = [
   {
     id: 'contours',
     label: 'Contours',
     blurb: 'contour lines, lit and shaded',
-    doc: { batches: [{ angle: 0, style: {} }] },
+    doc: { area: PENINSULA, batches: [{ angle: 0, style: {} }] },
   },
   {
     id: 'downhill',
     label: 'Downhill',
-    blurb: 'lines at 90°, running down the slope like water',
-    doc: { batches: [{ angle: 90, style: {} }] },
-  },
-  {
-    id: 'dotted-sea',
-    label: 'Dotted sea',
-    blurb: 'contours, and the sea stippled, denser at the coast',
+    blurb: 'lines running down every slope, denser in shadow; a stippled sea',
     doc: {
-      batches: [{ angle: 0, style: {} }],
+      area: PENINSULA,
+      batches: [
+        {
+          angle: 90,
+          style: {
+            space: 3,
+            space_light: 3,
+            space_dark: 0.8,
+            space_steep: 0.15,
+            dash_light: 1,
+            dash_dark: 1,
+            dash_cutoff: 0,
+            dash_drop: 0,
+            mod_breaks: 0.03,
+            mod_smooth: 8,
+          },
+        },
+      ],
       water: {
-        shoreline: { lines: 1, style: {} },
-        batches: [{ follow: 'shore', draw: 'dots', angle: 0, style: {} }],
+        shoreline: { lines: 2, style: { space: 2 } },
+        batches: [
+          {
+            follow: 'shore',
+            draw: 'dots',
+            angle: 0,
+            style: { space: 10, space_light: 2.5, space_dark: 0.3, water_start: 3 },
+          },
+        ],
       },
     },
   },
   {
     id: 'engraved-sea',
     label: 'Engraved sea',
-    blurb: 'coast lines, then a sea of evenly waving currents',
+    blurb: 'crosshatched hills, coast lines, then a sea of evenly waving currents',
     doc: {
+      area: { at: '37.7,-122.62', size_km: [40, 28] },
       batches: [
         { angle: 0, style: { space_light: 1.8, space_dark: 0.6, space_steep: 0.3, dash_light: 0.1 } },
+        { angle: 90, style: { batch_floor: 0.55, dash_light: 0.6, space: 5 } },
       ],
       water: {
         shoreline: { lines: 2, style: { space: 1.5 } },
@@ -65,6 +84,35 @@ export const PRESETS = [
           },
         ],
       },
+    },
+  },
+  {
+    id: 'sea-depth',
+    label: 'Sea depth',
+    blurb: 'the seabed in contour lines, and nothing on land',
+    doc: {
+      area: { at: '37.6,-122.85', size_km: [90, 63] },
+      batches: [
+        {
+          angle: 0,
+          ground: 'sea',
+          style: {
+            space: 5,
+            space_light: 3,
+            space_dark: 0.9,
+            space_steep: 0.6,
+            dash_light: 1,
+            dash_dark: 1,
+            dash_cutoff: 0,
+            dash_drop: 0,
+            mod_breaks: 0.02,
+            mod_smooth: 8,
+            input_blur: 8,
+            input_broad: 0.8,
+          },
+        },
+      ],
+      water: { shoreline: { lines: 1 }, batches: [] },
     },
   },
 ]

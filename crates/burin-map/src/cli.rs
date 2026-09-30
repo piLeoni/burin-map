@@ -542,6 +542,7 @@ where
             color: None,
             color_expr: None,
             angle: *m.get_one::<f64>("batch-angle").unwrap() as f32,
+            ground: Default::default(),
             style: st,
         }]
     };
@@ -758,6 +759,7 @@ fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> 
         color: None,
         color_expr: None,
         angle: angle as f32,
+        ground: Default::default(),
         style: st,
     })
 }

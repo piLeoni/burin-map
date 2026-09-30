@@ -8,7 +8,7 @@ import { bathymetryAtom, drawingAtom, statusAtom, styleAtom, waterAtom } from '.
 export default function App() {
   const batches = useAtomValue(styleAtom)
   // Names are labels only; renaming a batch must not trigger a redraw.
-  const drawKey = JSON.stringify(batches.map(({ angle, style }) => ({ angle, style })))
+  const drawKey = JSON.stringify(batches.map(({ angle, ground, style }) => ({ angle, ground, style })))
   const drawn = useMemo(() => JSON.parse(drawKey), [drawKey])
   const water = useAtomValue(waterAtom)
   const waterKey = JSON.stringify(water && {

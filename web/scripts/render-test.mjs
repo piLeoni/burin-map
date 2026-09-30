@@ -58,7 +58,7 @@ await act(async () => {
 await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 
 const html = document.getElementById('root').innerHTML
-const checks = ['>YAML<', '>JSON5<', '>CLI<', 'Reset to defaults', 'Import', 'Download', 'Copy', 'Link', 'In step with the map']
+const checks = ['>YAML<', '>JSON5<', '>CLI<', 'Load ▾', 'Import', 'Download', 'Copy', 'Link', 'In step with the map']
 const missing = checks.filter((c) => !html.includes(c))
 if (html.includes('type="range"')) missing.push('the sliders should be gone')
 if (html.includes('Parameters')) missing.push('the Parameters tab should be gone')
@@ -253,7 +253,7 @@ const schema = {
     .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
   groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
 }
-if (schema.params.length !== 43) missing.push(`views: read ${schema.params.length} params from style.rs`)
+if (schema.params.length !== 45) missing.push(`views: read ${schema.params.length} params from style.rs`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const model = {
   area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
@@ -271,6 +271,7 @@ const model = {
       { follow: 'map', draw: 'ripples', angle: 90, style: { mod_wave: 2 } },
     ],
   },
+  bathymetry: null,
   notes: {
     '': { above: ['Zermatt, A4 at 1:25000', 'second line'] },
     'area.at': { after: 'the Matterhorn is south-west' },
@@ -293,6 +294,18 @@ for (const kind of kinds) {
     if (!same(again, kind === 'cli' || other === 'cli' ? dry : model)) missing.push(`views: ${kind} -> ${other} loses something`)
   }
   if (!text.includes('input_broad') && !text.includes('input-broad')) missing.push(`views: ${kind} should list unset parameters`)
+}
+
+// A seabed batch keeps its ground in the editor views and in a share link.
+{
+  const sea = { ...model, batches: [{ angle: 0, ground: 'sea', style: { space: 5 } }], notes: {} }
+  for (const kind of ['yaml', 'json5']) {
+    const back = V.parseView(kind, V.renderView(kind, sea, schema), schema)
+    if (!same(back.batches, sea.batches)) missing.push(`views: ${kind} loses ground ${JSON.stringify(back.batches)}`)
+  }
+  const D = await import('../src/lib/doc.js')
+  const linked = D.noteToDoc(D.docToNote({ ...sea, water: { shoreline: { lines: 1 }, batches: [] } }))
+  if (!same(linked.batches, sea.batches)) missing.push(`link loses ground ${JSON.stringify(linked.batches)}`)
 }
 
 // Water lists input_flat (its dashes use it) but no terrain-only parameters.

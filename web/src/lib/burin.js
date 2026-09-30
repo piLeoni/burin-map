@@ -102,6 +102,7 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opt
     ...(typeof b?.color === 'string' && b.color.trim() ? { color: b.color } : {}),
     ...(typeof b?.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
+    ...(b?.ground === 'sea' ? { ground: 'sea' } : {}),
     style: Object.fromEntries(
       Object.entries(b?.style ?? {}).filter(
         ([, v]) => v != null && typeof v === 'number' && Number.isFinite(v),

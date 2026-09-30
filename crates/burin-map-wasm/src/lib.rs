@@ -447,10 +447,14 @@ pub fn draw_batches(
     }
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
+    let sea = burin_map_core::sea_coverage(elev, coverage, &batches);
     let fields: Vec<_> = burin_map_core::terrain_groups(&batches)
         .0
         .iter()
-        .map(|&i| burin_map_core::build_fields_with(elev, w, h, px_m, &batches[i].style, coverage))
+        .map(|&i| {
+            let cov = burin_map_core::ground_coverage(&batches[i], coverage, sea.as_deref());
+            burin_map_core::build_fields_with(elev, w, h, px_m, &batches[i].style, cov)
+        })
         .collect();
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
     let layer = layer(&wet);
@@ -541,10 +545,12 @@ pub async fn draw_batches_gpu(
     }
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
+    let sea = burin_map_core::sea_coverage(&elev, coverage, &batches);
     let mut fields = Vec::new();
     for i in burin_map_core::terrain_groups(&batches).0 {
+        let cov = burin_map_core::ground_coverage(&batches[i], coverage, sea.as_deref());
         fields.push(
-            gpu.build_fields_with(&elev, w, h, px_m, &batches[i].style, coverage)
+            gpu.build_fields_with(&elev, w, h, px_m, &batches[i].style, cov)
                 .await,
         );
     }
