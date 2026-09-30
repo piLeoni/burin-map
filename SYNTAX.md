@@ -73,9 +73,44 @@ batches:
 
 | Field | What it does |
 |---|---|
-| `name` | a label, optional |
+| `name` | a label in the app, optional |
+| `layer` | SVG layer id on export (`<g id="…">`); optional |
+| `color` | stroke colour as `#rgb` or `#rrggbb`; black when omitted |
+| `color_expr` | colour from a small expression; see [Colour expressions](#colour-expressions) |
 | `angle` | 0 follows the contour lines, 90 runs straight downhill |
 | `style` | parameters, see below; those left out keep their defaults, except the terrain ones (see [Terrain carries over](#terrain-carries-over)) |
+
+`name` is only for you; `layer` is what plotters and SVG editors group by.
+
+### Colour expressions
+
+`color` and `color_expr` are on each batch (land or water), not in `style`, because colour is not a number like `space`.
+
+- `color: "#2a1810"` sets a fixed stroke colour for the whole batch.
+- `color_expr: "#336699"` works the same (a lone hex literal).
+- If both are set, `color` wins.
+- Any other `color_expr` is evaluated at each dash from the point where it sits (paths are grouped by resulting colour).
+
+| Name | On land | On water |
+|---|---|---|
+| `elev` | height at the point, metres | — |
+| `dist` | — | distance from the shore, px |
+| `tone` | shading input 0…1 (light/dark) | water tone from the field input |
+| `lerp(a, b, t)` | mix two colours; `t` 0…1 | same |
+| `clamp(x, lo, hi)` | scalar | same |
+| `+ - * /` | on scalars | same |
+
+Examples:
+
+```yaml
+batches:
+  - angle: 0
+    color_expr: 'lerp(#e8dcc8, #2a1810, tone)'   # contours lighter in sun, darker in shade
+  - angle: 90
+    color_expr: 'lerp(#c8e8ff, #1a3a5c, dist/120)'   # water lines (needs per-point eval)
+```
+
+Land batches with different colours stay separate in the SVG even when they share the same line width.
 
 ### Land parameters
 

@@ -42,6 +42,12 @@ pub enum Draw {
 pub struct WaterBatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_expr: Option<String>,
     pub follow: Follow,
     pub angle: f32,
     pub draw: Draw,
@@ -54,6 +60,9 @@ impl Default for WaterBatch {
     fn default() -> Self {
         WaterBatch {
             name: None,
+            layer: None,
+            color: None,
+            color_expr: None,
             follow: Follow::Shore,
             angle: 0.0,
             draw: Draw::Lines,
@@ -68,6 +77,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
         #[serde(default)]
         struct Given {
             name: Option<String>,
+            layer: Option<String>,
+            color: Option<String>,
+            color_expr: Option<String>,
             follow: Follow,
             angle: f32,
             draw: Draw,
@@ -77,6 +89,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
             fn default() -> Self {
                 Given {
                     name: None,
+                    layer: None,
+                    color: None,
+                    color_expr: None,
                     follow: Follow::Shore,
                     angle: 0.0,
                     draw: Draw::Lines,
@@ -92,6 +107,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
         }
         Ok(WaterBatch {
             name: g.name,
+            layer: g.layer,
+            color: g.color,
+            color_expr: g.color_expr,
             follow: g.follow,
             angle: g.angle,
             draw: g.draw,
@@ -171,6 +189,12 @@ fn shore_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
 #[serde(default)]
 pub struct Shoreline {
     pub lines: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_expr: Option<String>,
     /// Missing parameters take [`Style::shoreline`]'s values.
     #[serde(deserialize_with = "shore_style")]
     pub style: Style,
@@ -180,6 +204,9 @@ impl Default for Shoreline {
     fn default() -> Self {
         Shoreline {
             lines: 1,
+            layer: None,
+            color: None,
+            color_expr: None,
             style: Style::shoreline(),
         }
     }

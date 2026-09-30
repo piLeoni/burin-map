@@ -8,6 +8,7 @@
 //! → plotting order → input-driven dashes. Several batch passes (angles)
 //! run in parallel and are merged.
 
+mod color_expr;
 mod dashes;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 pub mod engine;
@@ -17,6 +18,7 @@ pub mod geojson;
 pub mod gpu;
 mod grid;
 mod order;
+mod pen;
 mod rng;
 mod streamlines;
 mod style;
@@ -26,6 +28,7 @@ mod wave;
 pub use dashes::{dash_lines, dash_lines_by};
 pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Fields};
 pub use order::{pen_up_travel, plot_order};
+pub use pen::Pen;
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
@@ -67,9 +70,9 @@ pub struct Drawing {
     pub paths: Vec<Line>,
     /// Streamlines before dashing, in drawing order.
     pub lines: Vec<Line>,
-    /// Line widths in px, as runs over `paths`: `(width, end)` covers the
-    /// paths from the previous run's end up to `end`. One run per pen.
-    pub strokes: Vec<(f32, usize)>,
+    /// Pens as runs over `paths`: each `(pen, end)` covers the paths from the
+    /// previous run's end up to `end`.
+    pub runs: Vec<(Pen, usize)>,
 }
 
 /// Draw with a single contour-parallel batch (the usual look).
@@ -97,7 +100,7 @@ pub fn draw_batches(
         .iter()
         .map(|&i| build_fields(elev, width, height, px_m, &batches[i].style))
         .collect();
-    draw_fields(&fields, batches)
+    draw_fields(&fields, batches, elev)
 }
 
 /// Batches that share terrain fields: the first batch of each distinct set of
@@ -144,7 +147,7 @@ pub fn draw_batches_auto(
             .iter()
             .map(|&i| g.build_fields_blocking(elev, width, height, px_m, &batches[i].style))
             .collect();
-        return draw_fields(&fields, batches);
+        return draw_fields(&fields, batches, elev);
     }
     draw_batches(elev, width, height, px_m, batches)
 }
@@ -171,19 +174,19 @@ pub fn draw_batches_auto_with(
                 g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, coverage)
             })
             .collect();
-        return draw_fields_timed(&fields, batches, water, || 0.0).0;
+        return draw_fields_timed(&fields, batches, water, elev, || 0.0).0;
     }
     let fields: Vec<Fields> = firsts
         .iter()
         .map(|&i| build_fields_with(elev, width, height, px_m, &batches[i].style, coverage))
         .collect();
-    draw_fields_timed(&fields, batches, water, || 0.0).0
+    draw_fields_timed(&fields, batches, water, elev, || 0.0).0
 }
 
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`): one per
 /// entry of [`terrain_groups`], from that batch's style.
-pub fn draw_fields(fields: &[Fields], batches: &[Batch]) -> Drawing {
-    draw_fields_timed(fields, batches, None, || 0.0).0
+pub fn draw_fields(fields: &[Fields], batches: &[Batch], elev: &[f32]) -> Drawing {
+    draw_fields_timed(fields, batches, None, elev, || 0.0).0
 }
 
 /// Milliseconds per phase of a draw, in the order they ran. Phases that run
@@ -192,7 +195,7 @@ pub type Timings = Vec<(String, f64)>;
 
 /// Streamlines of some batches, their dashes by line width, and the time
 /// each phase took.
-type Traced = (Vec<Line>, Vec<(f32, Vec<Line>)>, Timings);
+type Traced = (Vec<Line>, Vec<(Pen, Vec<Line>)>, Timings);
 
 /// [`draw_fields`], timing each phase with `now` (milliseconds), with water
 /// drawn alongside the land when there is some. The clock is passed in because
@@ -201,20 +204,22 @@ pub fn draw_fields_timed(
     fields: &[Fields],
     batches: &[Batch],
     water: Option<&WaterLayer>,
+    elev: &[f32],
     now: fn() -> f64,
 ) -> (Drawing, Timings) {
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (fields[0].w, fields[0].h);
+    assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     let ((mut lines, dry, mut timings), wet) = rayon::join(
-        || trace_land(fields, batches, now),
+        || trace_land(fields, batches, elev, now),
         || water.map(|wl| trace_water(wl, width, height, now)),
     );
-    let mut pens: Vec<(f32, Vec<Line>)> = Vec::new();
-    let mut add = |groups: Vec<(f32, Vec<Line>)>| {
-        for (stroke, p) in groups {
-            match pens.iter_mut().find(|(s, _)| *s == stroke) {
+    let mut pens: Vec<(Pen, Vec<Line>)> = Vec::new();
+    let mut add = |groups: Vec<(Pen, Vec<Line>)>| {
+        for (pen, p) in groups {
+            match pens.iter_mut().find(|(q, _)| *q == pen) {
                 Some((_, all)) => all.extend(p),
-                None => pens.push((stroke, p)),
+                None => pens.push((pen, p)),
             }
         }
     };
@@ -225,13 +230,12 @@ pub fn draw_fields_timed(
         timings.extend(t);
     }
     let mut paths = Vec::new();
-    let mut strokes = Vec::new();
+    let mut runs = Vec::new();
     if pens.iter().any(|(_, p)| !p.is_empty()) {
         let t = now();
-        // Each width is another pen, so each is plotted on its own.
-        for (stroke, p) in pens.into_iter().filter(|(_, p)| !p.is_empty()) {
+        for (pen, p) in pens.into_iter().filter(|(_, p)| !p.is_empty()) {
             paths.extend(plot_order(p));
-            strokes.push((stroke, paths.len()));
+            runs.push((pen, paths.len()));
         }
         timings.push(("order dashes".into(), now() - t));
     }
@@ -240,12 +244,12 @@ pub fn draw_fields_timed(
         height,
         paths,
         lines,
-        strokes,
+        runs,
     };
     (d, timings)
 }
 
-fn trace_land(fields: &[Fields], batches: &[Batch], now: fn() -> f64) -> Traced {
+fn trace_land(fields: &[Fields], batches: &[Batch], elev: &[f32], now: fn() -> f64) -> Traced {
     use rayon::prelude::*;
     let (firsts, of) = terrain_groups(batches);
     assert_eq!(
@@ -264,7 +268,22 @@ fn trace_land(fields: &[Fields], batches: &[Batch], now: fn() -> f64) -> Traced 
             let bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space);
             let t1 = now();
             let (lines, paths, t) = trace_batch(&bf, &st, false, now);
-            (lines, (st.batch_stroke, paths), [t1 - t0, t[0], t[1], t[2]])
+            let ctx = color_expr::ColorCtx {
+                w: bf.w,
+                h: bf.h,
+                elev: Some(elev),
+                tone: Some(&bf.input),
+                dist: None,
+            };
+            let ink = color_expr::colorize_paths(
+                paths,
+                st.batch_stroke,
+                b.layer.clone(),
+                b.color.as_deref(),
+                b.color_expr.as_deref(),
+                &ctx,
+            );
+            (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
         .collect();
     collect_parts(parts, "batch")
@@ -298,17 +317,33 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
                     }
                     _ => (water::wave_marks(wl.coverage, &dist, w, h, &b), now() - t0),
                 };
-                return (
-                    Vec::new(),
-                    (st.batch_stroke, plot_order(marks)),
-                    [ms, 0.0, 0.0, 0.0],
+                let f = water::water_fields(wl.coverage, &dist, w, h, &b);
+                let ctx = water_ctx(w, h, Some(&f.input), &dist);
+                let ink = color_expr::colorize_paths(
+                    plot_order(marks),
+                    st.batch_stroke,
+                    b.layer.clone(),
+                    b.color.as_deref(),
+                    b.color_expr.as_deref(),
+                    &ctx,
                 );
+                return (Vec::new(), ink, [ms, 0.0, 0.0, 0.0]);
             }
-            let f = water::water_fields(wl.coverage, &dist, w, h, b);
+            let b = seeded(i, b);
+            let f = water::water_fields(wl.coverage, &dist, w, h, &b);
             let t1 = now();
             let (lines, paths, t) = trace_batch(&f, &st, true, now);
             let paths = water::fray(paths, &dist, w, h, &st);
-            (lines, (st.batch_stroke, paths), [t1 - t0, t[0], t[1], t[2]])
+            let ctx = water_ctx(w, h, Some(&f.input), &dist);
+            let ink = color_expr::colorize_paths(
+                paths,
+                st.batch_stroke,
+                b.layer.clone(),
+                b.color.as_deref(),
+                b.color_expr.as_deref(),
+                &ctx,
+            );
+            (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
         .collect();
     let (mut lines, mut paths, mut timings) = collect_parts(parts, "water");
@@ -318,7 +353,24 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
         let (l, p) = water::shoreline(&outlines, &dist, w, h, sh);
         timings.push(("water shoreline".into(), now() - t));
         lines.extend(l);
-        paths.push((sh.style.batch_stroke, p));
+        let ctx = color_expr::ColorCtx {
+            w,
+            h,
+            elev: None,
+            tone: None,
+            dist: Some(&dist),
+        };
+        paths.extend(color_expr::colorize_paths(
+            p,
+            sh.style.batch_stroke,
+            sh
+                .layer
+                .clone()
+                .or_else(|| Some("shoreline".into())),
+            sh.color.as_deref(),
+            sh.color_expr.as_deref(),
+            &ctx,
+        ));
     }
     (lines, paths, timings)
 }
@@ -355,31 +407,46 @@ fn trace_batch(
     (lines, paths, [t1 - t0, t2 - t1, t3 - t2])
 }
 
-/// One batch: its streamlines, its dashes with their width, ms per phase.
-type Part = (Vec<Line>, (f32, Vec<Line>), [f64; 4]);
+/// One batch: streamlines, ink runs (pen + dashes), ms per phase.
+type Part = (Vec<Line>, Vec<(Pen, Vec<Line>)>, [f64; 4]);
+
+fn water_ctx<'a>(
+    w: usize,
+    h: usize,
+    tone: Option<&'a [f32]>,
+    dist: &'a [f32],
+) -> color_expr::ColorCtx<'a> {
+    color_expr::ColorCtx {
+        w,
+        h,
+        elev: None,
+        tone,
+        dist: Some(dist),
+    }
+}
 
 fn collect_parts(parts: Vec<Part>, kind: &str) -> Traced {
     let mut timings = Timings::new();
     let mut lines = Vec::new();
     let mut paths = Vec::new();
-    for (i, (l, p, t)) in parts.into_iter().enumerate() {
+    for (i, (l, ink, t)) in parts.into_iter().enumerate() {
         for (name, ms) in ["fields", "trace", "order lines", "dashes"].iter().zip(t) {
             timings.push((format!("{kind} {i} {name}"), ms));
         }
         lines.extend(l);
-        paths.push(p);
+        paths.extend(ink);
     }
     (lines, paths, timings)
 }
 
 impl Drawing {
-    /// The paths, in drawing order, each run with its line width in px.
-    pub fn pens(&self) -> impl Iterator<Item = (f32, &[Line])> {
+    /// The paths, in drawing order, each run with its pen.
+    pub fn pens(&self) -> impl Iterator<Item = (&Pen, &[Line])> {
         let mut start = 0;
-        self.strokes.iter().map(move |&(stroke, end)| {
-            let run = &self.paths[start..end];
-            start = end;
-            (stroke, run)
+        self.runs.iter().map(move |(pen, end)| {
+            let run = &self.paths[start..*end];
+            start = *end;
+            (pen, run)
         })
     }
 
@@ -397,11 +464,22 @@ impl Drawing {
             None => format!(r#"width="{w}" height="{h}""#),
         };
         let mut s = format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" {size} viewBox="0 0 {w} {h}"><g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">"##
+            r##"<svg xmlns="http://www.w3.org/2000/svg" {size} viewBox="0 0 {w} {h}"><g fill="none" stroke-linecap="round" stroke-linejoin="round">"##
         );
         s.push('\n');
-        for (stroke, run) in self.pens() {
-            let _ = writeln!(s, r#"<g stroke-width="{stroke}">"#);
+        for (pen, run) in self.pens() {
+            let layer = pen
+                .layer
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .map(svg_id)
+                .unwrap_or_default();
+            let _ = write!(
+                s,
+                r#"<g stroke="{}" stroke-width="{}"{layer}>"#,
+                pen.color, pen.stroke
+            );
+            s.push('\n');
             for p in run {
                 s.push_str("<path d=\"M");
                 for (i, q) in p.iter().enumerate() {
@@ -417,6 +495,20 @@ impl Drawing {
         s.push_str("</g></svg>\n");
         s
     }
+}
+
+fn svg_id(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!(r#" id="{safe}""#)
 }
 
 #[cfg(test)]
@@ -508,8 +600,8 @@ mod tests {
         }
         assert_eq!(cpu.walkable, gpu.walkable, "walkable");
 
-        let dc = draw_fields(std::slice::from_ref(&cpu), &[Batch::along(st.clone())]);
-        let dg = draw_fields(std::slice::from_ref(&gpu), &[Batch::along(st)]);
+        let dc = draw_fields(std::slice::from_ref(&cpu), &[Batch::along(st.clone())], &e);
+        let dg = draw_fields(std::slice::from_ref(&gpu), &[Batch::along(st)], &e);
         let ratio = dg.lines.len() as f32 / dc.lines.len() as f32;
         assert!(
             (0.8..1.25).contains(&ratio),
@@ -573,14 +665,12 @@ mod tests {
         assert!(wet > 50 && dry > 50, "lines on both: {wet} wet, {dry} dry");
 
         // The shoreline's own width is another pen, plotted after the rest.
-        let pens: Vec<(f32, usize)> = d.pens().map(|(s, run)| (s, run.len())).collect();
+        let pens: Vec<_> = d.pens().map(|(pen, run)| (pen.stroke, run.len())).collect();
         assert_eq!(pens.len(), 2, "{pens:?}");
         assert_eq!(pens[1].0, 2.5);
-        assert_eq!(d.strokes.last().unwrap().1, d.paths.len());
+        assert_eq!(d.runs.last().unwrap().1, d.paths.len());
         let svg = d.to_svg(None);
-        assert!(
-            svg.contains(r#"<g stroke-width="2.5">"#) && svg.contains(r#"<g stroke-width="1.2">"#)
-        );
+        assert!(svg.contains(r#"stroke-width="2.5""#) && svg.contains(r#"stroke-width="1.2""#));
     }
 
     #[test]
@@ -611,6 +701,9 @@ mod tests {
                 Batch::along(st.clone()),
                 Batch {
                     name: None,
+                    layer: None,
+                    color: None,
+                    color_expr: None,
                     angle: 90.0,
                     style: st90,
                 },
@@ -630,6 +723,9 @@ mod tests {
         let e = island(w, h);
         let lit = |az: f32| Batch {
             name: None,
+            layer: None,
+            color: None,
+            color_expr: None,
             angle: 90.0,
             style: Style {
                 sun_azimuth: az,

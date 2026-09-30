@@ -34,6 +34,9 @@ export function normalizeBatches(value) {
       .filter((b) => b && typeof b === 'object')
       .map((b) => ({
         ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
+        ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
+        ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color } : {}),
+        ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
         angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
         style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
       }))
@@ -91,6 +94,9 @@ export function normalizeWater(value) {
     .filter((b) => b && typeof b === 'object')
     .map((b) => ({
       ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
+      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
+      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color } : {}),
+      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
       follow: b.follow === 'map' ? 'map' : 'shore',
       ...(WAVE_MARKS.includes(b.draw) ? { draw: b.draw } : {}),
       angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,

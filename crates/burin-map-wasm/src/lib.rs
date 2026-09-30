@@ -432,7 +432,8 @@ pub fn draw_batches(
         .collect();
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), now_ms);
+    let (d, t) =
+        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &elev, now_ms);
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
 }
@@ -525,7 +526,8 @@ pub async fn draw_batches_gpu(
     }
     timings.push((terrain_label(fields.len(), "GPU"), now_ms() - t1));
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), now_ms);
+    let (d, t) =
+        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &elev, now_ms);
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))
 }

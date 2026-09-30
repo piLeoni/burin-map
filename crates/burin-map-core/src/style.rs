@@ -151,6 +151,15 @@ pub struct Batch {
     /// Optional label; only used for display (logs, the web app's cards).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// SVG layer id for this batch's dashes; defaults to no separate layer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    /// Stroke colour as `#rgb` or `#rrggbb`. Black when omitted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Colour from a small expression; see SYNTAX.md. Ignored when `color` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_expr: Option<String>,
     #[serde(default)]
     pub angle: f32,
     pub style: Style,
@@ -160,6 +169,9 @@ impl Batch {
     pub fn along(style: Style) -> Self {
         Batch {
             name: None,
+            layer: None,
+            color: None,
+            color_expr: None,
             angle: 0.0,
             style,
         }
@@ -213,6 +225,12 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
+        layer: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+        #[serde(default)]
+        color_expr: Option<String>,
+        #[serde(default)]
         angle: f32,
         #[serde(default)]
         style: std::collections::BTreeMap<String, f64>,
@@ -230,6 +248,9 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         }
         out.push(Batch {
             name: g.name,
+            layer: g.layer,
+            color: g.color,
+            color_expr: g.color_expr,
             angle: g.angle,
             style,
         });
@@ -299,6 +320,9 @@ mod json_tests {
             Batch::along(Style::default()),
             Batch {
                 name: Some("Valleys".into()),
+                layer: None,
+                color: None,
+                color_expr: None,
                 angle: 90.0,
                 style: Style {
                     space: 6.0,

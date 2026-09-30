@@ -9,7 +9,7 @@
 use std::time::Instant;
 
 use burin_map_core::{
-    build_fields, dash_lines, pen_up_travel, plot_order, trace_streamlines, Drawing, Style,
+    build_fields, dash_lines, pen_up_travel, plot_order, trace_streamlines, Drawing, Pen, Style,
 };
 
 fn main() {
@@ -86,7 +86,7 @@ fn main() {
     let d = Drawing {
         width: w,
         height: h,
-        strokes: vec![(st.batch_stroke, paths.len())],
+        runs: vec![(Pen::default(), paths.len())],
         paths,
         lines,
     };

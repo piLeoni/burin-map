@@ -538,6 +538,9 @@ where
         }
         vec![Batch {
             name: m.get_one::<String>("batch-name").cloned(),
+            layer: None,
+            color: None,
+            color_expr: None,
             angle: *m.get_one::<f64>("batch-angle").unwrap() as f32,
             style: st,
         }]
@@ -751,6 +754,9 @@ fn parse_batch_section(base: &Style, args: &[OsString]) -> Result<Batch, Error> 
     }
     Ok(Batch {
         name: label,
+        layer: None,
+        color: None,
+        color_expr: None,
         angle: angle as f32,
         style: st,
     })

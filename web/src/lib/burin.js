@@ -97,6 +97,10 @@ function drawWorker() {
 export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opts) {
   const list = Array.isArray(batches) ? batches : []
   const json = JSON.stringify(list.map((b) => ({
+    ...(typeof b?.name === 'string' && b.name.trim() ? { name: b.name } : {}),
+    ...(typeof b?.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
+    ...(typeof b?.color === 'string' && b.color.trim() ? { color: b.color } : {}),
+    ...(typeof b?.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
     style: Object.fromEntries(
       Object.entries(b?.style ?? {}).filter(

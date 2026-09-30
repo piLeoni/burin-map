@@ -153,6 +153,15 @@ const WATER_HELP = {
   follow: 'shore: along the coast; map: one direction over the whole map',
   draw: 'lines fill the water; ripples draw broken rows of hand-drawn waves; dots stipple it',
   angle: 'follow shore: 0 along the coast, 90 straight out; follow map: degrees from north',
+  layer: 'SVG layer id for export; separate from name, which is only a label in the app',
+  color: 'stroke colour as #rgb or #rrggbb',
+  color_expr: 'colour from a small expression; see SYNTAX.md (static hex works today)',
+}
+
+const INK_KEYS = ['layer', 'color', 'color_expr']
+
+function inkHead(b) {
+  return INK_KEYS.flatMap((k) => (b[k] ? [[k, yamlValue(b[k]), WATER_HELP[k]]] : []))
 }
 
 /** Trailing comments that are generated for a path — today's and older, longer ones. */
@@ -318,6 +327,7 @@ function renderYaml(model, schema) {
     aboveRows(rows, n[base], 2)
     const head = []
     if (b.name) head.push(['name', yamlValue(b.name), undefined])
+    head.push(...inkHead(b))
     head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
     head.forEach(([k, v, help], j) => {
       const path = `${base}.${k}`
@@ -357,6 +367,7 @@ function renderYaml(model, schema) {
       aboveRows(rows, n[base], 4)
       const head = []
       if (b.name) head.push(['name', yamlValue(b.name), undefined])
+      head.push(...inkHead(b))
       head.push(['follow', b.follow, WATER_HELP.follow])
       head.push(['draw', b.draw ?? 'lines', WATER_HELP.draw])
       head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
@@ -987,8 +998,8 @@ function readWater(w, schema) {
     const which = `water batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'follow', 'draw', 'angle', 'style'].includes(k)) {
-        throw new Error(`Unknown setting "${k}" in ${which}: use name, follow, draw, angle and style`)
+      if (!['name', 'layer', 'color', 'color_expr', 'follow', 'draw', 'angle', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, follow, draw, angle and style`)
       }
     }
     const follow = b.follow ?? 'shore'
@@ -999,7 +1010,15 @@ function readWater(w, schema) {
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
     const style = readStyle(b.style, which, schema)
     const name = b.name != null && String(b.name).trim() ? String(b.name) : ''
-    const batch = { follow, ...(draw !== 'lines' ? { draw } : {}), angle, style }
+    const batch = {
+      follow,
+      ...(draw !== 'lines' ? { draw } : {}),
+      angle,
+      style,
+      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
+      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),
+      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr.trim() } : {}),
+    }
     return name ? { name, ...batch } : batch
   })
   return out
@@ -1039,13 +1058,22 @@ function toModel(value, notes, schema) {
     const which = `batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'angle', 'style'].includes(k)) throw new Error(`Unknown setting "${k}" in ${which}: use name, angle and style`)
+      if (!['name', 'layer', 'color', 'color_expr', 'angle', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, angle and style`)
+      }
     }
     const angle = b.angle == null ? 0 : Number(b.angle)
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
     const style = readStyle(b.style, which, schema)
     const name = typeof b.name === 'string' && b.name.trim() ? b.name : b.name != null ? String(b.name) : ''
-    return name ? { name, angle, style } : { angle, style }
+    const batch = {
+      angle,
+      style,
+      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
+      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),
+      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr.trim() } : {}),
+    }
+    return name ? { name, ...batch } : batch
   })
   return { area, batches, water: readWater(doc.water, schema), notes }
 }
