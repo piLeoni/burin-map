@@ -93,23 +93,35 @@ async function tileElev(z, x, y) {
   }
 }
 
-function sampleMosaic(tiles, x0, y0, nx, ny, z, px, py) {
-  const n = 2 ** z
-  // Horizontal wrap so samples near ±180° still hit the mosaic.
-  let x = px - x0 * TILE
-  const y = py - y0 * TILE
-  if (y < 0 || y >= ny * TILE) return 0
+/** Column in the mosaic for a tile-pixel x, wrapped across ±180°; -1 when outside. */
+function mosaicColumn(x0, nx, z, px) {
+  let x = Math.floor(px) - x0 * TILE
   if (x < 0 || x >= nx * TILE) {
-    // try wrapping by full world width in tile space
-    const world = n * TILE
+    const world = 2 ** z * TILE
     x = ((x % world) + world) % world
-    if (x >= nx * TILE) return 0
+    if (x >= nx * TILE) return -1
   }
-  const ix = Math.min(Math.floor(x), nx * TILE - 1)
-  const iy = Math.min(Math.floor(y), ny * TILE - 1)
+  return x
+}
+
+/** One mosaic pixel; rows and columns are clamped to the mosaic's edge. */
+function mosaicAt(tiles, nx, ny, ix, iy) {
+  ix = Math.max(0, Math.min(ix, nx * TILE - 1))
+  iy = Math.max(0, Math.min(iy, ny * TILE - 1))
   const elev = tiles[Math.floor(iy / TILE) * nx + Math.floor(ix / TILE)]
-  if (!elev) return 0
-  return elev[(iy % TILE) * TILE + (ix % TILE)]
+  return elev ? elev[(iy % TILE) * TILE + (ix % TILE)] : 0
+}
+
+/** Catmull-Rom weights for the four samples around fraction t. */
+function cubicWeights(t) {
+  const t2 = t * t
+  const t3 = t2 * t
+  return [
+    0.5 * (-t3 + 2 * t2 - t),
+    0.5 * (3 * t3 - 5 * t2 + 2),
+    0.5 * (-3 * t3 + 4 * t2 + t),
+    0.5 * (t3 - t2),
+  ]
 }
 
 /**
@@ -174,14 +186,64 @@ export async function buildDem(bounds, outW, outH, onProgress) {
   const tiles = results.map((r) => r.elev)
   const cached = results.filter((r) => r.cached).length
   const fetched = results.length - cached
-  const elev = new Float32Array(outW * outH)
+  // In Web Mercator a column has one tile x and a row one tile y.
+  const colPx = new Float64Array(outW)
+  for (let col = 0; col < outW; col++) {
+    const [lon] = mercToLonLat(xW + (col + 0.5) * (widthM / outW), yN)
+    colPx[col] = lonLatToTile(lon, lat, z)[0] * TILE
+  }
+  const rowPx = new Float64Array(outH)
   for (let row = 0; row < outH; row++) {
-    const my = yN - (row + 0.5) * (heightM / outH)
-    for (let col = 0; col < outW; col++) {
-      const mx = xW + (col + 0.5) * (widthM / outW)
-      const [lon, la] = mercToLonLat(mx, my)
-      const [fx, fy] = lonLatToTile(lon, la, z)
-      elev[row * outW + col] = sampleMosaic(tiles, x0, y0, nx, ny, z, fx * TILE, fy * TILE)
+    const [lon, la] = mercToLonLat(xW, yN - (row + 0.5) * (heightM / outH))
+    rowPx[row] = lonLatToTile(lon, la, z)[1] * TILE - y0 * TILE
+  }
+
+  const elev = new Float32Array(outW * outH)
+  // Tile pixels larger than ours: sampled whole, each would be a flat
+  // square with a step at its edge, and lines would trace the steps.
+  const magnified = (2 * Math.PI * R) / (TILE * 2 ** z) > 1.2 * pxM
+  if (!magnified) {
+    for (let row = 0; row < outH; row++) {
+      const iy = Math.floor(rowPx[row])
+      if (iy < 0 || iy >= ny * TILE) continue
+      for (let col = 0; col < outW; col++) {
+        const ix = mosaicColumn(x0, nx, z, colPx[col])
+        if (ix >= 0) elev[row * outW + col] = mosaicAt(tiles, nx, ny, ix, iy)
+      }
+    }
+  } else {
+    // Catmull-Rom between tile-pixel centres: a surface with smooth slopes.
+    const cols = Array.from(colPx, (px) => {
+      const u = px - 0.5
+      const raw = Math.floor(u) - x0 * TILE
+      // Half a pixel past the edge is still the edge pixel; further, wrap.
+      let ix = raw
+      if (raw < -1 || raw >= nx * TILE) {
+        const wrapped = mosaicColumn(x0, nx, z, Math.floor(u))
+        ix = wrapped < 0 ? null : wrapped
+      }
+      return { ix, w: cubicWeights(u - Math.floor(u)) }
+    })
+    for (let row = 0; row < outH; row++) {
+      const v = rowPx[row] - 0.5
+      const iy = Math.floor(v)
+      if (iy < -1 || iy >= ny * TILE) continue
+      const wy = cubicWeights(v - iy)
+      for (let col = 0; col < outW; col++) {
+        const { ix, w: wx } = cols[col]
+        if (ix === null) continue
+        let sum = 0
+        for (let j = 0; j < 4; j++) {
+          const y = iy - 1 + j
+          const r =
+            wx[0] * mosaicAt(tiles, nx, ny, ix - 1, y) +
+            wx[1] * mosaicAt(tiles, nx, ny, ix, y) +
+            wx[2] * mosaicAt(tiles, nx, ny, ix + 1, y) +
+            wx[3] * mosaicAt(tiles, nx, ny, ix + 2, y)
+          sum += wy[j] * r
+        }
+        elev[row * outW + col] = sum
+      }
     }
   }
   return { elev, width: outW, height: outH, pxM, z, tiles: nx * ny, cached, fetched }
