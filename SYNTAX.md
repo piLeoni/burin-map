@@ -230,13 +230,21 @@ bathymetry:
 water:
   batches:
     - follow: shore
-      where: { depth_max: 200 }   # shelf only
-      style: { water_start: 3, water_reach: 60, space: 3 }
+      where: { depth_max: 100 }   # shallow shelf: concentric lines only
+      style: { space: 3, water_start: 3, water_reach: 4000, water_fade: 0.35 }
+      # water_reach in px must be large: it is distance-from-shore, not depth.
+      # depth_max ends the shelf; a tiny water_reach leaves white bands on wide shelves.
     - follow: map
-      draw: ripples
-      where: { depth_min: 400 }   # deep ocean only
-      style: { mod_wave: 2.5, mod_wave_size: 70 }
+      where: { depth_min: 100 }   # same depth: engraved waves in deep water
+      style:
+        mod_wave: 2.5
+        mod_wave_size: 30
+        mod_wave_even: 1
+        mod_wobble: 45
+        water_fray: 40
 ```
+
+See `examples/ocean-depth-zones.json5` (shelf + the same look as `ocean-engraved.json5` offshore).
 
 | `bathymetry.source` | Fetch |
 |---|---|
@@ -245,19 +253,35 @@ water:
 
 In `color_expr` on water, `depth` is metres below the surface (same as `where`).
 
+| `where.depth_fade` | metres of soft blend at depth_min / depth_max (default 30) |
+| `water_depth_fray` (`wdf`) | metres band at that depth limit where lines break into dashes/dots, like `water_fray` at the shore |
+
+Without `depth_fade` and `water_depth_fray`, depth limits used to cut ink off in one pixel — a white band between shelf and open-sea batches. `water_reach` is still distance-from-shore in px, not depth.
+
 ### Water parameters
 
 The land's names, minus those that need terrain. The defaults differ, and there are three more.
 
-On water, the "tone" that land takes from terrain and sun is the distance from the shore instead: 1 at the first line (`water_start` out), fading to 0 `water_reach` px further out. That tone drives `space_light` / `space_dark` and `dash_light` / `dash_dark` exactly as shading does on land.
+On water there is no sun shading on a flat sea. The same **names** as land are reused for **distance from the shore**:
+
+| Name | On land | On water |
+|---|---|---|
+| `space_dark` / `space_light` | tighter / wider line spacing in shadow / light | tighter / wider spacing **near / far** from the coast (via `water_space_reach`) |
+| `dash_dark` / `dash_light` | more / less ink in shadow / light | more / less ink **near / far** from the coast (via `water_reach`) |
+
+Lower `space_dark` (e.g. 0.5) means **closer together** near the shore, not wider. To loosen shelf rings, **raise** `space` or `space_dark`, or lengthen `water_space_reach`.
+
+`follow: shore` with `angle: 0` draws **distance contours** (true concentrics), not the land streamline tracer — so changing `space_dark` cannot cross the rings. A second batch at another angle (e.g. engraved open sea at 90°) can still cross the first in the `depth_fade` overlap; that reads as cross-hatching.
+
+Ink and tracing extent use `water_reach`; **line spacing** uses `space` and `water_space_reach` only. A second water batch at another angle (e.g. engraved sea at 90°) can cross the first in the depth-fade overlap — that reads as cross-hatching, not a broken `space`.
 
 **Depth** (metres below the surface) is optional. Nothing extra is downloaded unless a batch asks for depth *and* the document sets `bathymetry.source` to something other than `terrarium` / `auto` (GEBCO or a custom tile URL — not wired in the web app yet). By default, depth comes from the **same elevation mosaic** already fetched for the map (negative heights on water pixels). The depth grid is built only when a water batch has a `where` depth limit or a `color_expr` that uses `depth`.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|
 | Space | `space` | 4 | |
-| | `space_light` | 1.8 | spacing far from the shore |
-| | `space_dark` | 0.8 | spacing near the shore |
+| | `space_light` | 1.8 | spacing multiplier far from the shore (wider rings) |
+| | `space_dark` | 0.8 | spacing multiplier near the shore (tighter rings); not “shadow” |
 | Dash | `dash_light` | 0.25 | ink far from the shore |
 | | `dash_dark` | 1 | ink near the shore |
 | | `dash_period` | 2.2 | |
@@ -280,7 +304,8 @@ On water, the "tone" that land takes from terrain and sun is the distance from t
 | Batch | `batch_stroke` | 1.2 | |
 | | `batch_seed` | 1 | |
 | Water | `water_start` | 2 | gap between the shore and the first line, px |
-| | `water_reach` | 60 | how far out the lines go, px; lower means fewer lines |
+| | `water_reach` | 60 | how far out ink and tracing stay active, px; not line spacing |
+| | `water_space_reach` | 120 | how far out spacing eases from `space_dark` to `space_light`, px; 0 = fixed `space` |
 | | `water_fade` | 1 | how they fade out: above 1 sooner, below 1 later |
 | | `water_fray` | 0 | how far out from `water_start`, px, the lines break up into shorter dashes and dots towards the shore, with a ragged edge; 0 a clean edge |
 

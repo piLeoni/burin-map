@@ -36,7 +36,8 @@ pub use style::{
     Param, Style, GROUPS,
 };
 pub use depth::{
-    bathymetry_source_needs_fetch, build_depth_grid, depth_allows, expr_uses_depth, needs_depth,
+    bathymetry_source_needs_fetch, build_depth_grid, depth_allows, depth_weight, expr_uses_depth,
+    needs_depth,
     BathymetryDoc, WaterWhere,
 };
 pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
@@ -354,9 +355,26 @@ fn trace_water(
             let b = seeded(i, b);
             let f = water::water_fields(wl.coverage, &dist, depth, w, h, &b);
             let t1 = now();
-            let (lines, paths, t) = trace_batch(&f, &st, true, now);
+            let (lines, paths, t) = if water::shore_contour_trace(&b) {
+                trace_polylines(
+                    &f,
+                    &st,
+                    water::shore_rings(&dist, wl.coverage, depth, w, h, &b),
+                    true,
+                    now,
+                )
+            } else {
+                trace_batch(&f, &st, true, now)
+            };
             let paths = water::filter_paths_by_depth(
-                water::fray(paths, &dist, w, h, &st),
+                water::fray_by_depth(
+                    water::fray(paths, &dist, w, h, &st),
+                    depth,
+                    &b.r#where,
+                    w,
+                    h,
+                    &st,
+                ),
                 depth,
                 w,
                 h,
@@ -415,12 +433,35 @@ fn trace_batch(
     } else {
         crate::STRIPE
     };
-    let traced = wave::undulate(
-        trace_stripes(f, st, stripe),
-        st,
-        st.batch_seed,
-        phase.as_ref(),
-    );
+    let raw = trace_stripes(f, st, stripe);
+    let stripe_ms = now() - t0;
+    let (lines, paths, mut t) = finish_traced(f, st, raw, phase.as_ref(), now);
+    t[0] += stripe_ms;
+    (lines, paths, t)
+}
+
+/// Undulate, order, and dash polylines already in map space (e.g. shore rings).
+fn trace_polylines(
+    f: &Fields,
+    st: &Style,
+    raw: Vec<Line>,
+    _whole: bool,
+    now: fn() -> f64,
+) -> (Vec<Line>, Vec<Line>, [f64; 3]) {
+    let phase = (st.mod_wave > 0.0 && st.mod_wave_even > 0.0)
+        .then(|| wave::Phase::from_flow(&f.tx, &f.ty, f.w, f.h));
+    finish_traced(f, st, raw, phase.as_ref(), now)
+}
+
+fn finish_traced(
+    f: &Fields,
+    st: &Style,
+    raw: Vec<Line>,
+    phase: Option<&wave::Phase>,
+    now: fn() -> f64,
+) -> (Vec<Line>, Vec<Line>, [f64; 3]) {
+    let t0 = now();
+    let traced = wave::undulate(raw, st, st.batch_seed, phase);
     let t1 = now();
     let lines = plot_order(traced);
     let t2 = now();

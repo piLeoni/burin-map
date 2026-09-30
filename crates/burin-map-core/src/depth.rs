@@ -28,11 +28,23 @@ pub struct WaterWhere {
     pub depth_min: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth_max: Option<f32>,
+    /// Soft edge in metres on depth_min / depth_max; default [`DEFAULT_DEPTH_FADE_M`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_fade: Option<f32>,
 }
+
+/// Default metres over which depth limits ease in or out when `depth_fade` is omitted.
+pub const DEFAULT_DEPTH_FADE_M: f32 = 30.0;
 
 impl WaterWhere {
     pub fn is_active(&self) -> bool {
         self.depth_min.is_some() || self.depth_max.is_some()
+    }
+
+    pub fn fade_m(&self) -> f32 {
+        self.depth_fade
+            .filter(|&f| f > 0.0)
+            .unwrap_or(DEFAULT_DEPTH_FADE_M)
     }
 }
 
@@ -41,20 +53,32 @@ pub fn where_inactive(w: &WaterWhere) -> bool {
     !w.is_active()
 }
 
-/// Whether a batch draws at this depth (metres below the surface).
+fn smooth01(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// Whether a batch draws at this depth (hard cut; prefer [`depth_weight`] for ink).
 #[must_use]
 pub fn depth_allows(depth_m: f32, w: &WaterWhere) -> bool {
+    depth_weight(depth_m, w) > 0.0
+}
+
+/// 0…1 ink weight from depth limits, with a soft edge in metres.
+#[must_use]
+pub fn depth_weight(depth_m: f32, w: &WaterWhere) -> f32 {
+    if !w.is_active() {
+        return 1.0;
+    }
+    let fade = w.fade_m();
+    let mut wt = 1.0f32;
     if let Some(m) = w.depth_min {
-        if depth_m < m {
-            return false;
-        }
+        wt *= smooth01((depth_m - m) / fade);
     }
     if let Some(m) = w.depth_max {
-        if depth_m > m {
-            return false;
-        }
+        wt *= smooth01((m - depth_m) / fade);
     }
-    true
+    wt
 }
 
 /// Metres below the surface on water pixels; 0 on land. Uses `override_` when
@@ -136,5 +160,17 @@ mod tests {
         };
         assert!(depth_allows(50.0, &w));
         assert!(!depth_allows(150.0, &w));
+    }
+
+    #[test]
+    fn soft_fade_mid_band() {
+        let w = WaterWhere {
+            depth_max: Some(100.0),
+            depth_fade: Some(20.0),
+            ..Default::default()
+        };
+        assert!(depth_weight(100.0, &w) < 0.01);
+        assert!(depth_weight(80.0, &w) > 0.9);
+        assert!(depth_weight(90.0, &w) > 0.2 && depth_weight(90.0, &w) < 0.9);
     }
 }

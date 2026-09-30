@@ -1,12 +1,13 @@
 //! Lines on water. The same tracer and dashes as on land, fed with fields made
 //! from the distance to the shore instead of from the terrain: the input is 1
-//! at the shore and fades to 0 at `water_reach`, so spacing and dashes open up
-//! out to sea exactly as they do on lit slopes.
+//! at the shore and fades to 0 at `water_reach`. Line spacing uses
+//! [`Style::water_space_reach`], not `water_reach`, so a wide shelf trace does
+//! not squeeze lines together.
 
 use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::depth::{depth_allows, WaterWhere};
+use crate::depth::{depth_weight, WaterWhere};
 use crate::fields::{wobble, Fields};
 use crate::grid::{blur, gradient};
 use crate::rng::Rng;
@@ -317,7 +318,7 @@ pub fn filter_paths_by_depth(
                 return false;
             }
             let i = y as usize * w + x as usize;
-            depth_allows(depth[i], wh)
+            depth_weight(depth[i], wh) > 0.02
         })
         .collect()
 }
@@ -357,21 +358,28 @@ pub fn water_fields(
             if c < 0.5 {
                 return 0.0;
             }
+            let mut t = tone(d, st);
             if let Some(dep) = depth {
-                if !depth_allows(dep[i], wh) {
-                    return 0.0;
-                }
+                t *= depth_weight(dep[i], wh);
             }
-            tone(d, st)
+            t
         })
         .collect();
-    let loosen: Vec<f32> = input
+    let loosen: Vec<f32> = d
         .par_iter()
-        .map(|&t| st.space_light + (st.space_dark - st.space_light) * t)
+        .map(|&dist| {
+            if st.water_space_reach <= 0.0 {
+                return 1.0f32;
+            }
+            let t = spacing_tone(dist, st);
+            st.space_light + (st.space_dark - st.space_light) * t
+        })
         .collect();
+    // Very small multipliers pack streamlines until they cross; keep a sane floor.
+    const SPACE_MUL_MIN: f32 = 0.72;
     let space = blur(&loosen, w, h, 3.0)
         .par_iter()
-        .map(|k| st.space * k.clamp(0.05, 4.0))
+        .map(|k| st.space * k.clamp(SPACE_MUL_MIN, 4.0))
         .collect();
     let walkable = (0..w * h)
         .into_par_iter()
@@ -391,12 +399,24 @@ pub fn water_fields(
 /// 1 at `water_start` px from the shore, fading to 0 `water_reach` px further
 /// out; 0 nearer the shore than `water_start`.
 fn tone(d: f32, st: &Style) -> f32 {
-    if d < st.water_start {
+    fade_from_shore(d, st.water_start, st.water_reach, st.water_fade)
+}
+
+/// Like [`tone`], but for [`Style::water_space_reach`] (line spacing only).
+fn spacing_tone(d: f32, st: &Style) -> f32 {
+    if st.water_space_reach <= 0.0 {
+        return 1.0;
+    }
+    fade_from_shore(d, st.water_start, st.water_space_reach, st.water_fade)
+}
+
+fn fade_from_shore(d: f32, start: f32, reach: f32, fade: f32) -> f32 {
+    if d < start {
         return 0.0;
     }
-    (1.0 - (d - st.water_start) / st.water_reach.max(1e-3))
+    (1.0 - (d - start) / reach.max(1e-3))
         .clamp(0.0, 1.0)
-        .powf(st.water_fade.max(1e-3))
+        .powf(fade.max(1e-3))
 }
 
 /// The direction a batch follows at every pixel: along the shore turned by
@@ -469,7 +489,7 @@ pub fn wave_marks(
         at(p).is_some_and(|i| {
             coverage[i] >= 0.5
                 && d[i] >= st.water_start
-                && depth.map_or(true, |dep| depth_allows(dep[i], wh))
+                && depth.map_or(true, |dep| depth_weight(dep[i], wh) > 0.02)
         })
     };
     let spacing = |i: usize| {
@@ -653,7 +673,7 @@ pub fn ripples(
     };
 
     let wh = &b.r#where;
-    let depth_ok = |i: usize| depth.map_or(true, |dep| depth_allows(dep[i], wh));
+    let depth_ok = |i: usize| depth.map_or(true, |dep| depth_weight(dep[i], wh) > 0.02);
 
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x21FF));
     let lump = (st.mod_wobble_size.max(8.0), gap * 30.0);
@@ -750,7 +770,60 @@ pub fn fray(
         dist[y as usize * w + x as usize].min(1e6)
     };
     // 0 where the lines give out, 1 where they are whole.
-    let whole = |p: [f32; 2]| (d(p) - st.water_start) / band + (wander(p) - 0.5) * 0.8;
+    let whole = move |p: [f32; 2]| (d(p) - st.water_start) / band + (wander(p) - 0.5) * 0.8;
+    fray_along(paths, w, h, st, whole)
+}
+
+/// Like [`fray`], but along a batch [`WaterWhere`] depth limit (metres).
+pub fn fray_by_depth(
+    paths: Vec<crate::Line>,
+    depth: Option<&[f32]>,
+    wh: &WaterWhere,
+    w: usize,
+    h: usize,
+    st: &Style,
+) -> Vec<crate::Line> {
+    let band = st.water_depth_fray;
+    if band <= 0.0 || w == 0 || h == 0 || !wh.is_active() {
+        return paths;
+    }
+    let Some(depth) = depth else {
+        return paths;
+    };
+    let mut rng = Rng::new(st.batch_seed ^ 0xD3A7);
+    let wander = noise_field(w, h, 48.0, &mut rng);
+    let dep_at = |p: [f32; 2]| {
+        let (x, y) = (
+            p[0].round() as i32,
+            p[1].round() as i32,
+        );
+        if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
+            return 0.0;
+        }
+        depth[y as usize * w + x as usize]
+    };
+    let whole = move |p: [f32; 2]| {
+        let dep = dep_at(p);
+        let mut t = 1.0f32;
+        if let Some(m) = wh.depth_max {
+            t = t.min((m - dep) / band);
+        }
+        if let Some(m) = wh.depth_min {
+            t = t.min((dep - m) / band);
+        }
+        t + (wander(p) - 0.5) * 0.35
+    };
+    fray_along(paths, w, h, st, whole)
+}
+
+fn fray_along(
+    paths: Vec<crate::Line>,
+    w: usize,
+    h: usize,
+    st: &Style,
+    whole: impl Fn([f32; 2]) -> f32 + Send + Sync,
+) -> Vec<crate::Line> {
+    let _ = (w, h);
     let period = (st.space * 1.5).max(3.0);
     paths
         .into_par_iter()
@@ -768,8 +841,6 @@ pub fn fray(
                 if k > 0 {
                     s += (q[0] - p[k - 1][0]).hypot(q[1] - p[k - 1][1]);
                 }
-                // Each `period` px gets one dash, as long as the line is
-                // whole there; below a px it is a dot, or nothing.
                 let c = (s / period) as usize;
                 if c != cell {
                     cell = c;
@@ -826,6 +897,95 @@ fn noise_field(w: usize, h: usize, cell: f32, rng: &mut Rng) -> impl Fn([f32; 2]
         let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
         top + (bottom - top) * fy
     }
+}
+
+/// True when concentric shore lines should follow distance contours instead of
+/// the streamline tracer (avoids crossings when spacing varies).
+#[must_use]
+pub fn shore_contour_trace(b: &WaterBatch) -> bool {
+    b.follow == Follow::Shore && b.draw == Draw::Lines && b.angle.abs() < 1e-3
+}
+
+/// Concentric lines parallel to the shore: distance contours stepped by
+/// [`Style::space`] (times the near/far multipliers over [`Style::water_space_reach`]).
+pub fn shore_rings(
+    dist: &[f32],
+    coverage: &[f32],
+    depth: Option<&[f32]>,
+    w: usize,
+    h: usize,
+    b: &WaterBatch,
+) -> Vec<crate::Line> {
+    let st = &b.style;
+    let wh = &b.r#where;
+    let top = dist
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite())
+        .fold(0.0f32, f32::max);
+    let max_d = (st.water_start + st.water_reach).min(top + 1.0);
+    if max_d <= st.water_start + 0.01 || w == 0 || h == 0 {
+        return Vec::new();
+    }
+    const SPACE_MUL_MIN: f32 = 0.72;
+    let max_rings = (((max_d - st.water_start) / st.space.max(1.0)).ceil() as usize)
+        .saturating_add(4)
+        .clamp(1, 800);
+
+    let mut level = st.water_start + 0.013;
+    let mut rings = Vec::new();
+    for _ in 0..max_rings {
+        if level >= max_d {
+            break;
+        }
+        let t = spacing_tone(level, st);
+        let mul = if st.water_space_reach <= 0.0 {
+            1.0
+        } else {
+            st.space_light + (st.space_dark - st.space_light) * t
+        };
+        let step = (st.space * mul.clamp(SPACE_MUL_MIN, 4.0)).max(1.0);
+
+        let cov: Vec<f32> = dist
+            .iter()
+            .map(|&d| (0.5 + d - level).clamp(0.0, 1.0))
+            .collect();
+        let outlines = watermask::Mask {
+            width: w,
+            height: h,
+            coverage: cov,
+        }
+        .outlines();
+
+        let mut rng = Rng::new(st.batch_seed.wrapping_add((level * 512.0) as u64 ^ 0xA11C));
+        for outline in outlines {
+            if outline.len() < 2 {
+                continue;
+            }
+            let mid = path_mid(&outline);
+            let (x, y) = (mid[0].round() as i32, mid[1].round() as i32);
+            if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
+                continue;
+            }
+            let i = y as usize * w + x as usize;
+            if coverage[i] < 0.5 {
+                continue;
+            }
+            let mut wt = tone(dist[i], st);
+            if let Some(dep) = depth {
+                wt *= depth_weight(dep[i], wh);
+            }
+            if wt < 0.02 {
+                continue;
+            }
+            let mut l = smooth(&outline, st.mod_smooth);
+            l = resample(&l, 1.0);
+            wander(&mut l, st, &mut rng);
+            rings.push(l);
+        }
+        level += step;
+    }
+    rings
 }
 
 /// The shoreline's lines, before and after dashing. `outlines` is the shore
@@ -1073,6 +1233,30 @@ mod tests {
     }
 
     #[test]
+    fn shore_rings_widen_with_higher_space_dark() {
+        let (w, h) = (120, 120);
+        let c = lake(w, h, 45.0);
+        let (dist, _) = shore(&c, w, h);
+        let batch = |space_dark: f32| WaterBatch {
+            style: Style {
+                space: 6.0,
+                space_dark,
+                space_light: 1.4,
+                water_start: 3.0,
+                water_reach: 80.0,
+                water_space_reach: 60.0,
+                ..Style::water()
+            },
+            ..WaterBatch::default()
+        };
+        let tight = shore_rings(&dist, &c, None, w, h, &batch(0.85));
+        let loose = shore_rings(&dist, &c, None, w, h, &batch(1.2));
+        assert!(
+            loose.len() < tight.len(),
+            "wider spacing near the shore → fewer rings"
+        );
+    }
+
     fn shoreline_takes_the_land_modifiers() {
         let (w, h) = (120, 120);
         let c = lake(w, h, 40.3);

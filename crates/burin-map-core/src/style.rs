@@ -136,11 +136,13 @@ style! {
     batch: batch_seed ("bseed"): u64 = 1, "random seed; change it for another variation of the same style";
 
     water: water_start ("wst"): f32 = 2.0, "gap between the shore and the first line, in px";
-    water: water_reach ("wr"): f32 = 60.0, "how far out from the shore the lines go, in px";
+    water: water_reach ("wr"): f32 = 60.0, "how far out from the shore ink and tracing stay active, in px; does not set line spacing";
+    water: water_space_reach ("wsr"): f32 = 120.0, "how far from the shore line spacing eases from space_dark to space_light, in px; 0 keeps spacing fixed at space";
     water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
     water: water_size ("ws"): f32 = 14.0, "length of each ripple stroke or dot, in px (draw ripples or dots)";
     water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches";
     water: water_fray ("wfr"): f32 = 0.0, "how far out from water_start, in px, lines break up into shorter dashes and dots as they near the shore, with a ragged edge; 0 a clean edge";
+    water: water_depth_fray ("wdf"): f32 = 0.0, "metres band at a batch depth limit where lines break up into dashes and dots with a ragged edge; uses where.depth_max or depth_min; 0 a clean cut";
 }
 
 /// One drawing pass: streamlines at `angle` degrees relative to the contour
@@ -273,7 +275,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 43);
+        assert_eq!(Style::PARAMS.len(), 45);
     }
 
     #[test]
