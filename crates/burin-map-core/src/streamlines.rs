@@ -141,11 +141,27 @@ impl<'a> Tracer<'a> {
     /// Follow the field from a seed in one direction (RK2).
     /// Returns (points, closed) where closed means it came back to the seed.
     fn trace(&self, x0: f32, y0: f32, sign: f32, own: &mut Own) -> (Line, bool) {
-        let step = self.st.engine_step;
         let Some(d) = self.direction(x0, y0, 0.0, 0.0) else {
             return (Vec::new(), false);
         };
-        let (mut pu, mut pv) = (d.0 * sign, d.1 * sign);
+        self.walk(x0, y0, (d.0 * sign, d.1 * sign), sign as i32, 0, true, own)
+    }
+
+    /// Follow the field from (x0, y0), heading (pu, pv) at first. Points go
+    /// into `own` numbered `sign * (k0 + i + 1)`; `close` ends the line when
+    /// it comes back to (x0, y0).
+    #[allow(clippy::too_many_arguments)]
+    fn walk(
+        &self,
+        x0: f32,
+        y0: f32,
+        (mut pu, mut pv): (f32, f32),
+        sign: i32,
+        k0: i32,
+        close: bool,
+        own: &mut Own,
+    ) -> (Line, bool) {
+        let step = self.st.engine_step;
         let (mut x, mut y) = (x0, y0);
         let r_close = (self.sep_at(x0, y0) * self.st.engine_stop).max(1.5 * step);
         let mut pts = Vec::new();
@@ -166,10 +182,13 @@ impl<'a> Tracer<'a> {
             if !self.free(x, y, Occ::Test) {
                 break;
             }
-            if i as i32 > self.lag && (x - x0).powi(2) + (y - y0).powi(2) < r_close * r_close {
+            if close
+                && i as i32 > self.lag
+                && (x - x0).powi(2) + (y - y0).powi(2) < r_close * r_close
+            {
                 return (pts, true);
             }
-            let k = sign as i32 * (i as i32 + 1);
+            let k = sign * (k0 + i as i32 + 1);
             if self.hits_itself(own, x, y, k) {
                 break;
             }
@@ -240,11 +259,39 @@ impl<'a> Tracer<'a> {
     }
 }
 
+/// Candidate seeds on both sides of a line; placed by gap_seed when popped.
+fn seeds_beside(queue: &mut Seeds, pts: &Line, lid: i32, every: usize) {
+    if pts.len() < 2 {
+        return;
+    }
+    for k in (0..pts.len() - 1).step_by(every) {
+        let (dx, dy) = (pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
+        let n = dx.hypot(dy).max(1e-9);
+        let (nx, ny) = (-dy / n, dx / n);
+        queue.push_back((pts[k][0], pts[k][1], nx, ny, lid));
+        queue.push_back((pts[k][0], pts[k][1], -nx, -ny, lid));
+    }
+}
+
+type Seeds = VecDeque<(f32, f32, f32, f32, i32)>;
+
+/// Ids of lines drawn elsewhere start here, clear of the ones traced now.
+const OTHERS: i32 = 1 << 24;
+
 /// Polylines in px. Closed loops repeat their first point.
 pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
+    trace_beside(f, st, &[], &[]).0
+}
+
+/// `trace_streamlines` next to lines drawn before: the new lines keep their
+/// distance from `fixed` and grow out from them, as if all had been traced
+/// together. Each of `open` ends where this field starts to be walkable, its
+/// last point on the edge, and is carried on. Returns the new lines and, for
+/// each open line, the points added to its end.
+fn trace_beside(f: &Fields, st: &Style, fixed: &[Line], open: &[Line]) -> (Vec<Line>, Vec<Line>) {
     let (w, h) = (f.w, f.h);
     if w < 5 || h < 5 {
-        return Vec::new();
+        return (Vec::new(), vec![Vec::new(); open.len()]);
     }
     let space_max = f.space.iter().copied().fold(0.0f32, f32::max);
     let space_min = f.space.iter().copied().fold(f32::INFINITY, f32::min);
@@ -275,9 +322,38 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
         .collect();
     rng.shuffle(&mut grid);
     let mut grid_i = 0;
-    let mut queue: VecDeque<(f32, f32, f32, f32, i32)> = VecDeque::new();
+    let mut queue = Seeds::new();
     let mut lines: Vec<Line> = Vec::new();
     let seed_every = ((st.space / st.engine_step).round() as usize).max(1);
+
+    for (i, l) in fixed.iter().enumerate() {
+        let lid = OTHERS + i as i32;
+        t.stamp(l, lid);
+        seeds_beside(&mut queue, l, lid, seed_every);
+    }
+    let mut added = Vec::with_capacity(open.len());
+    for (i, l) in open.iter().enumerate() {
+        let lid = OTHERS + (fixed.len() + i) as i32;
+        let n = l.len();
+        let more = if n >= 2 {
+            let (p, q) = (l[n - 1], l[n - 2]);
+            let m = (p[0] - q[0]).hypot(p[1] - q[1]).max(1e-6);
+            let mut own = Own::default();
+            for (j, p) in l.iter().enumerate() {
+                own.entry(cell_key((p[0] / t.cell) as i32, (p[1] / t.cell) as i32))
+                    .or_default()
+                    .push((j as i32, p[0], p[1]));
+            }
+            let head = ((p[0] - q[0]) / m, (p[1] - q[1]) / m);
+            t.walk(p[0], p[1], head, 1, n as i32 - 1, false, &mut own).0
+        } else {
+            Vec::new()
+        };
+        let whole: Line = l.iter().chain(&more).copied().collect();
+        t.stamp(&whole, lid);
+        seeds_beside(&mut queue, &whole, lid, seed_every);
+        added.push(more);
+    }
 
     loop {
         let (sx, sy) = if let Some((bx, by, nx, ny, lid)) = queue.pop_front() {
@@ -318,18 +394,10 @@ pub fn trace_streamlines(f: &Fields, st: &Style) -> Vec<Line> {
         }
         let lid = lines.len() as i32;
         t.stamp(&pts, lid);
-
-        // Candidate seeds on both sides; placed by gap_seed when popped.
-        for k in (0..pts.len() - 1).step_by(seed_every) {
-            let (dx, dy) = (pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
-            let n = dx.hypot(dy).max(1e-9);
-            let (nx, ny) = (-dy / n, dx / n);
-            queue.push_back((pts[k][0], pts[k][1], nx, ny, lid));
-            queue.push_back((pts[k][0], pts[k][1], -nx, -ny, lid));
-        }
+        seeds_beside(&mut queue, &pts, lid, seed_every);
         lines.push(pts);
     }
-    lines
+    (lines, added)
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,17 +413,16 @@ const STRIPE_MARGIN_PX: f32 = 16.0;
 ///
 /// `trace_streamlines` already runs a whole line per thread, but it produces
 /// one set of lines. Here the plane is cut into vertical stripes, each traced
-/// on its own with the same rule over the same fields. What a stripe cannot
-/// see is its neighbours' lines, so it may only *walk* its own stripe — the
-/// padding it reads has its walkable flag cleared, and the seeding grid works
-/// on the same field. Strands stop at the stripe edge, where the neighbour
-/// picks them up: the same clean cut a dash makes, so joins are seamless.
+/// on its own with the same rule over the same fields. A stripe may only
+/// *walk* its own columns — the padding it reads has its walkable flag
+/// cleared — so its strands stop at the edge.
 ///
-/// The seam costs a little density: a stripe cannot notice that the far side
-/// of its own boundary is already inked, so the first line inside the edge
-/// starts from the edge itself and the two sides are a hair closer than the
-/// spacing asks. That is the one visible fingerprint of this scheme, and it
-/// is why the stripe should be as wide as the pixels allow.
+/// Every other stripe is traced first, all at once: a stripe apart, they
+/// never meet. The stripes between are traced next, each with its
+/// neighbours' lines already in place: it keeps its distance from them, seeds
+/// beside them, and carries on every strand that stopped at its edge, so a
+/// line crosses the seam as one line. Two rounds, each as long as its
+/// slowest stripe.
 pub fn trace_stripes(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
     // Stripes are cut across the flow, so few lines cross a seam: where
     // lines mostly run east-west, the grid is traced on its side.
@@ -398,38 +465,136 @@ fn transpose(f: &Fields) -> Fields {
     }
 }
 
+/// What a stripe added to a neighbour's line: which line, at its tail or its
+/// head, and the points, going away from it.
+type Grown = (usize, bool, Line);
+
 fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
+    use rayon::prelude::*;
     let (w, h) = (f.w, f.h);
     if w < 5 || h < 5 || stripe < 8 {
         return Vec::new();
     }
     let n = (w as i32 + stripe - 1) / stripe;
-    let parts: Vec<Vec<Line>> = {
-        use rayon::prelude::*;
-        (0..n)
-            .into_par_iter()
-            .map(|s| {
-                let x0 = s * stripe;
-                let x1 = (x0 + stripe).min(w as i32);
-                // Each stripe shuffles its seeds with its own seed, so
-                // neighbours do not repeat the same pattern side by side.
-                let mut st = st.clone();
-                st.batch_seed = st.batch_seed.wrapping_add(0x9E37_79B9 * (s as u64 + 1));
-                let sub = slice_columns(f, x0, x1, STRIPE_MARGIN_PX);
-                let dx = (x0 as f32 - STRIPE_MARGIN_PX).max(0.0);
-                trace_streamlines(&sub, &st)
-                    .into_iter()
-                    .map(|l| l.into_iter().map(|p| [p[0] + dx, p[1]]).collect())
-                    .collect()
-            })
+    let cols = |s: i32| (s * stripe, ((s + 1) * stripe).min(w as i32));
+    // Each stripe shuffles its seeds with its own seed, so neighbours do not
+    // repeat the same pattern side by side.
+    let seeded = |s: i32| {
+        let mut st = st.clone();
+        st.batch_seed = st.batch_seed.wrapping_add(0x9E37_79B9 * (s as u64 + 1));
+        st
+    };
+    let shift = |ls: Vec<Line>, dx: f32| -> Vec<Line> {
+        ls.into_iter()
+            .map(|l| l.into_iter().map(|p| [p[0] + dx, p[1]]).collect())
             .collect()
     };
+
+    // Every other stripe first: they are a stripe apart, so none sees another.
+    let even: Vec<i32> = (0..n).step_by(2).collect();
+    let mut lines: Vec<Line> = even
+        .par_iter()
+        .flat_map_iter(|&s| {
+            let (x0, x1) = cols(s);
+            let sub = slice_columns(f, x0, x1, STRIPE_MARGIN_PX);
+            let dx = (x0 as f32 - STRIPE_MARGIN_PX).max(0.0);
+            shift(trace_streamlines(&sub, &seeded(s)), dx)
+        })
+        .collect();
+
+    // Then the ones between, next to what their neighbours drew: they keep
+    // the spacing across the seam and carry on the lines that reach it.
+    let space_max = f.space.iter().copied().fold(0.0f32, f32::max);
+    let reach = STRIPE_MARGIN_PX.max(2.0 * space_max + 2.0);
+    let spans: Vec<(f32, f32)> = lines
+        .iter()
+        .map(|l| {
+            l.iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])))
+        })
+        .collect();
+    let odd: Vec<i32> = (1..n).step_by(2).collect();
+    let done: Vec<(Vec<Line>, Vec<Grown>)> = odd
+        .par_iter()
+        .map(|&s| {
+            let (x0, x1) = cols(s);
+            let sub = slice_columns(f, x0, x1, reach);
+            let lo = (x0 as f32 - reach).max(0.0);
+            let hi = lo + sub.w as f32;
+            let seam = |p: [f32; 2], q: [f32; 2]| {
+                let out = p[0] - q[0];
+                (out > 0.0 && (p[0] - x0 as f32).abs() <= 2.0)
+                    || (out < 0.0 && (p[0] - x1 as f32).abs() <= 2.0)
+            };
+            let inside = |p: &[f32; 2]| p[0] >= lo && p[0] < hi - 1.0;
+            let local = |p: &[f32; 2]| [p[0] - lo, p[1]];
+            let mut fixed = Vec::new();
+            let mut open = Vec::new();
+            let mut ends = Vec::new();
+            for (i, l) in lines.iter().enumerate() {
+                if l.len() < 2 || spans[i].1 < lo || spans[i].0 >= hi {
+                    continue;
+                }
+                let m = l.len();
+                // From each end at the seam, the run of points in the window.
+                let mut tail = vec![false; m];
+                for at_tail in [false, true] {
+                    let (p, q) = if at_tail {
+                        (l[m - 1], l[m - 2])
+                    } else {
+                        (l[0], l[1])
+                    };
+                    if !seam(p, q) {
+                        continue;
+                    }
+                    let run: Vec<usize> = if at_tail {
+                        (0..m).rev().take_while(|&k| inside(&l[k])).collect()
+                    } else {
+                        (0..m).take_while(|&k| inside(&l[k])).collect()
+                    };
+                    for &k in &run {
+                        tail[k] = true;
+                    }
+                    open.push(run.iter().rev().map(|&k| local(&l[k])).collect::<Line>());
+                    ends.push((i, at_tail));
+                }
+                let mut piece = Vec::new();
+                for (k, p) in l.iter().enumerate() {
+                    if inside(p) && !tail[k] {
+                        piece.push(local(p));
+                    } else if !piece.is_empty() {
+                        fixed.push(std::mem::take(&mut piece));
+                    }
+                }
+                if !piece.is_empty() {
+                    fixed.push(piece);
+                }
+            }
+            let (new, added) = trace_beside(&sub, &seeded(s), &fixed, &open);
+            let grown = ends
+                .into_iter()
+                .zip(shift(added, lo))
+                .map(|((i, at_tail), more)| (i, at_tail, more))
+                .collect();
+            (shift(new, lo), grown)
+        })
+        .collect();
+    for (new, grown) in done {
+        for (i, at_tail, more) in grown {
+            if more.is_empty() {
+                continue;
+            }
+            if at_tail {
+                lines[i].extend(more);
+            } else {
+                lines[i].splice(0..0, more.into_iter().rev());
+            }
+        }
+        lines.extend(new);
+    }
+
     let seams: Vec<f32> = (1..n).map(|s| (s * stripe) as f32).collect();
-    join_at_seams(
-        parts.into_iter().flatten().collect(),
-        &seams,
-        st.space.max(3.0),
-    )
+    join_at_seams(lines, &seams, st.space.max(3.0))
 }
 
 /// A line's end at a seam: which end, where, the way it faces, and whether

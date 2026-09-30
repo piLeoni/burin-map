@@ -42,7 +42,7 @@ pub use style::{
 pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
 
 /// Stripe width used by the drawing engine, in px. See `streamlines::trace_stripes`.
-pub const STRIPE: i32 = 512;
+pub const STRIPE: i32 = 256;
 
 /// Maps pixel coordinates back to geographic lon/lat. Pixel (0,0) is the
 /// north-west corner of the elevation grid; y grows southward.
