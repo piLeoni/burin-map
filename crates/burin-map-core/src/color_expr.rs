@@ -49,7 +49,10 @@ pub fn colorize_paths(
     let expr = match parse_color(color_expr.unwrap_or("")) {
         Ok(e) => e,
         Err(()) => {
-            return vec![(Pen::with_expr(stroke, color, color_expr, layer.as_deref()), paths)];
+            return vec![(
+                Pen::with_expr(stroke, color, color_expr, layer.as_deref()),
+                paths,
+            )];
         }
     };
     let mut by_hex: HashMap<String, Vec<Line>> = HashMap::new();
@@ -235,17 +238,11 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some('+') => {
                 self.bump();
-                Ok(Scalar::Add(
-                    Box::new(left),
-                    Box::new(self.scalar_term()?),
-                ))
+                Ok(Scalar::Add(Box::new(left), Box::new(self.scalar_term()?)))
             }
             Some('-') => {
                 self.bump();
-                Ok(Scalar::Sub(
-                    Box::new(left),
-                    Box::new(self.scalar_term()?),
-                ))
+                Ok(Scalar::Sub(Box::new(left), Box::new(self.scalar_term()?)))
             }
             _ => Ok(left),
         }
@@ -257,17 +254,11 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some('*') => {
                 self.bump();
-                Ok(Scalar::Mul(
-                    Box::new(left),
-                    Box::new(self.scalar_factor()?),
-                ))
+                Ok(Scalar::Mul(Box::new(left), Box::new(self.scalar_factor()?)))
             }
             Some('/') => {
                 self.bump();
-                Ok(Scalar::Div(
-                    Box::new(left),
-                    Box::new(self.scalar_factor()?),
-                ))
+                Ok(Scalar::Div(Box::new(left), Box::new(self.scalar_factor()?)))
             }
             _ => Ok(left),
         }
@@ -342,7 +333,9 @@ fn eval_scalar(s: &Scalar, ctx: &EvalCtx) -> f32 {
         Scalar::Elev => ctx.elev,
         Scalar::Dist => ctx.dist,
         Scalar::Depth => ctx.depth,
-        Scalar::Clamp(x, lo, hi) => eval_scalar(x, ctx).clamp(eval_scalar(lo, ctx), eval_scalar(hi, ctx)),
+        Scalar::Clamp(x, lo, hi) => {
+            eval_scalar(x, ctx).clamp(eval_scalar(lo, ctx), eval_scalar(hi, ctx))
+        }
         Scalar::Div(a, b) => {
             let d = eval_scalar(b, ctx);
             if d.abs() < 1e-6 {
@@ -441,23 +434,63 @@ mod tests {
     #[test]
     fn lerp_mid_grey() {
         let c = parse_color("lerp(#000000, #ffffff, 0.5)").unwrap();
-        let rgb = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
+        let rgb = eval_color(
+            &c,
+            &EvalCtx {
+                tone: 0.0,
+                elev: 0.0,
+                dist: 0.0,
+                depth: 0.0,
+            },
+        );
         assert!((rgb[0] - 0.5).abs() < 0.02);
     }
 
     #[test]
     fn tone_drives_land() {
         let c = parse_color("lerp(#000000, #ffffff, tone)").unwrap();
-        let dark = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
-        let light = eval_color(&c, &EvalCtx { tone: 1.0, elev: 0.0, dist: 0.0, depth: 0.0 });
+        let dark = eval_color(
+            &c,
+            &EvalCtx {
+                tone: 0.0,
+                elev: 0.0,
+                dist: 0.0,
+                depth: 0.0,
+            },
+        );
+        let light = eval_color(
+            &c,
+            &EvalCtx {
+                tone: 1.0,
+                elev: 0.0,
+                dist: 0.0,
+                depth: 0.0,
+            },
+        );
         assert!(light[0] > dark[0] + 0.5);
     }
 
     #[test]
     fn dist_over_reach() {
         let c = parse_color("lerp(#ffffff, #000000, clamp(dist/100, 0, 1))").unwrap();
-        let near = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
-        let far = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 200.0, depth: 0.0 });
+        let near = eval_color(
+            &c,
+            &EvalCtx {
+                tone: 0.0,
+                elev: 0.0,
+                dist: 0.0,
+                depth: 0.0,
+            },
+        );
+        let far = eval_color(
+            &c,
+            &EvalCtx {
+                tone: 0.0,
+                elev: 0.0,
+                dist: 200.0,
+                depth: 0.0,
+            },
+        );
         assert!(near[0] > far[0] + 0.5);
     }
 }

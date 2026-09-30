@@ -27,6 +27,10 @@ pub mod water;
 mod wave;
 
 pub use dashes::{dash_lines, dash_lines_by};
+pub use depth::{
+    bathymetry_source_needs_fetch, build_depth_grid, depth_allows, depth_weight, expr_uses_depth,
+    needs_depth, BathymetryDoc, WaterWhere,
+};
 pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Fields};
 pub use order::{pen_up_travel, plot_order};
 pub use pen::Pen;
@@ -34,11 +38,6 @@ pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
     Param, Style, GROUPS,
-};
-pub use depth::{
-    bathymetry_source_needs_fetch, build_depth_grid, depth_allows, depth_weight, expr_uses_depth,
-    needs_depth,
-    BathymetryDoc, WaterWhere,
 };
 pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
 
@@ -329,12 +328,10 @@ fn trace_water(
             if b.draw != water::Draw::Lines {
                 let b = seeded(i, b);
                 let (marks, ms) = match b.draw {
-                    water::Draw::Ripples => {
-                        (
-                            water::ripples(wl.coverage, &dist, depth, w, h, &b),
-                            now() - t0,
-                        )
-                    }
+                    water::Draw::Ripples => (
+                        water::ripples(wl.coverage, &dist, depth, w, h, &b),
+                        now() - t0,
+                    ),
                     _ => (
                         water::wave_marks(wl.coverage, &dist, depth, w, h, &b),
                         now() - t0,
@@ -403,10 +400,7 @@ fn trace_water(
         paths.extend(color_expr::colorize_paths(
             p,
             sh.style.batch_stroke,
-            sh
-                .layer
-                .clone()
-                .or_else(|| Some("shoreline".into())),
+            sh.layer.clone().or_else(|| Some("shoreline".into())),
             sh.color.as_deref(),
             sh.color_expr.as_deref(),
             &ctx,

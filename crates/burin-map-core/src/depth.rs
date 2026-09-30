@@ -83,24 +83,14 @@ pub fn depth_weight(depth_m: f32, w: &WaterWhere) -> f32 {
 
 /// Metres below the surface on water pixels; 0 on land. Uses `override_` when
 /// the caller already fetched a dedicated bathymetry grid.
-pub fn build_depth_grid(
-    elev: &[f32],
-    coverage: &[f32],
-    override_: Option<&[f32]>,
-) -> Vec<f32> {
+pub fn build_depth_grid(elev: &[f32], coverage: &[f32], override_: Option<&[f32]>) -> Vec<f32> {
     if let Some(o) = override_ {
         assert_eq!(o.len(), elev.len(), "depth grid size mismatch");
         return o.to_vec();
     }
     elev.par_iter()
         .zip(coverage)
-        .map(|(&e, &c)| {
-            if c < 0.5 {
-                0.0
-            } else {
-                (-e).max(0.0)
-            }
-        })
+        .map(|(&e, &c)| if c < 0.5 { 0.0 } else { (-e).max(0.0) })
         .collect()
 }
 

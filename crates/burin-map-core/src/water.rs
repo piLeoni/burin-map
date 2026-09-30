@@ -55,7 +55,11 @@ pub struct WaterBatch {
     pub angle: f32,
     pub draw: Draw,
     /// Optional depth window in metres below the surface.
-    #[serde(default, skip_serializing_if = "crate::depth::where_inactive", rename = "where")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::depth::where_inactive",
+        rename = "where"
+    )]
     pub r#where: WaterWhere,
     /// Missing parameters take [`Style::drawn`]'s values for what the batch
     /// draws, not the land's.
@@ -254,12 +258,12 @@ pub mod shoreline_option {
         #[serde(untagged)]
         enum Given {
             Flag(bool),
-            Lines(Shoreline),
+            Lines(Box<Shoreline>),
         }
         Ok(match Given::deserialize(d)? {
             Given::Flag(false) => None,
             Given::Flag(true) => default(),
-            Given::Lines(s) => Some(s),
+            Given::Lines(s) => Some(*s),
         })
     }
 
@@ -489,7 +493,7 @@ pub fn wave_marks(
         at(p).is_some_and(|i| {
             coverage[i] >= 0.5
                 && d[i] >= st.water_start
-                && depth.map_or(true, |dep| depth_weight(dep[i], wh) > 0.02)
+                && depth.is_none_or(|dep| depth_weight(dep[i], wh) > 0.02)
         })
     };
     let spacing = |i: usize| {
@@ -673,7 +677,7 @@ pub fn ripples(
     };
 
     let wh = &b.r#where;
-    let depth_ok = |i: usize| depth.map_or(true, |dep| depth_weight(dep[i], wh) > 0.02);
+    let depth_ok = |i: usize| depth.is_none_or(|dep| depth_weight(dep[i], wh) > 0.02);
 
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x21FF));
     let lump = (st.mod_wobble_size.max(8.0), gap * 30.0);
@@ -711,9 +715,8 @@ pub fn ripples(
             if k > 0 {
                 left -= (p[0] - row[k - 1][0]).hypot(p[1] - row[k - 1][1]);
             }
-            let here = at(p).filter(|&i| {
-                coverage[i] >= 0.5 && d[i] >= st.water_start && depth_ok(i)
-            });
+            let here =
+                at(p).filter(|&i| coverage[i] >= 0.5 && d[i] >= st.water_start && depth_ok(i));
             if left <= 0.0 {
                 inked = !inked;
                 let ink = here.map_or(0.5, |i| {
@@ -793,10 +796,7 @@ pub fn fray_by_depth(
     let mut rng = Rng::new(st.batch_seed ^ 0xD3A7);
     let wander = noise_field(w, h, 48.0, &mut rng);
     let dep_at = |p: [f32; 2]| {
-        let (x, y) = (
-            p[0].round() as i32,
-            p[1].round() as i32,
-        );
+        let (x, y) = (p[0].round() as i32, p[1].round() as i32);
         if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
             return 0.0;
         }
@@ -1257,6 +1257,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn shoreline_takes_the_land_modifiers() {
         let (w, h) = (120, 120);
         let c = lake(w, h, 40.3);

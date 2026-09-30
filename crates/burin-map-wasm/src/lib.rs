@@ -342,15 +342,14 @@ struct WaterSpec {
     batches: Vec<burin_map_core::WaterBatch>,
 }
 
+/// Water coverage, the water spec, and an optional depth grid from the page.
+type Wet = (Vec<f32>, WaterSpec, Option<Vec<f32>>);
+
 /// `water` is `undefined`, or `{ spec, bounds, tiles }`: `spec` the water part
 /// of the document as JSON, `bounds` the grid's `[west, south, east, north]`
 /// (north-up Web Mercator, like the elevation), `tiles` an array of
 /// `[z, x, y, bytes]` as listed by [`water_tiles`].
-fn read_water(
-    water: &JsValue,
-    w: usize,
-    h: usize,
-) -> Result<Option<(Vec<f32>, WaterSpec, Option<Vec<f32>>)>, JsValue> {
+fn read_water(water: &JsValue, w: usize, h: usize) -> Result<Option<Wet>, JsValue> {
     if water.is_undefined() || water.is_null() {
         return Ok(None);
     }
@@ -455,8 +454,7 @@ pub fn draw_batches(
         .collect();
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
     let layer = layer(&wet);
-    let (d, t) =
-        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &elev, now_ms);
+    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), elev, now_ms);
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
 }
@@ -468,14 +466,15 @@ fn terrain_label(n: usize, device: &str) -> String {
     }
 }
 
-fn layer(wet: &Option<(Vec<f32>, WaterSpec, Option<Vec<f32>>)>) -> Option<burin_map_core::WaterLayer<'_>> {
-    wet.as_ref().map(|(c, s, depth)| burin_map_core::WaterLayer {
-        coverage: c,
-        depth: None,
-        depth_override: depth.as_deref(),
-        shoreline: s.shoreline.as_ref(),
-        batches: &s.batches,
-    })
+fn layer(wet: &Option<Wet>) -> Option<burin_map_core::WaterLayer<'_>> {
+    wet.as_ref()
+        .map(|(c, s, depth)| burin_map_core::WaterLayer {
+            coverage: c,
+            depth: None,
+            depth_override: depth.as_deref(),
+            shoreline: s.shoreline.as_ref(),
+            batches: &s.batches,
+        })
 }
 
 fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
