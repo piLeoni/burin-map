@@ -109,6 +109,10 @@ pub struct Document {
     /// Absent: no water, and the land is wherever the ground is above sea level.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub water: Option<WaterDoc>,
+    /// Optional bathymetry source when water batches need depth. Absent: depth
+    /// is derived from elevation only when a batch asks for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bathymetry: Option<burin_map_core::BathymetryDoc>,
 }
 
 impl Document {

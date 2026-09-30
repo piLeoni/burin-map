@@ -175,6 +175,8 @@ pub fn draw_with_water(
         .zip(coverage.as_deref())
         .map(|(doc, c)| burin_map_core::WaterLayer {
             coverage: c,
+            depth: None,
+            depth_override: None,
             shoreline: doc.shoreline.as_ref(),
             batches: &doc.batches,
         });

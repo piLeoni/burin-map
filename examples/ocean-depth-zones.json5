@@ -1,0 +1,46 @@
+// Shelf vs deep ocean by bathymetry (Terrarium depth — no extra fetch).
+// Near coast: concentric lines up to ~80 m; deeper water: even engraved waves.
+{
+  area: { at: "37.75,-122.45", size_km: [36, 28] },
+  batches: [
+    {
+      angle: 0,
+      style: { space_light: 1.8, space_dark: 0.65, dash_light: 0.12 },
+    },
+  ],
+  bathymetry: { source: terrarium },
+  water: {
+    shoreline: { lines: 2, style: { space: 2 } },
+    batches: [
+      {
+        name: shelf contours,
+        follow: shore,
+        where: { depth_max: 80 },
+        color_expr: 'lerp(#3d6b8a, #c8e8ff, clamp(depth/80, 0, 1))',
+        style: { space: 3, water_start: 4, water_reach: 55, batch_stroke: 1.1 },
+      },
+      {
+        name: deep swell,
+        follow: map,
+        angle: 90,
+        where: { depth_min: 120 },
+        color_expr: 'lerp(#1a3a5c, #0a1628, clamp(depth/800, 0, 1))',
+        style: {
+          space: 5,
+          space_light: 1,
+          space_dark: 1,
+          water_start: 30,
+          water_reach: 3000,
+          water_fade: 0.25,
+          dash_light: 0.9,
+          mod_wobble: 50,
+          mod_wobble_size: 100,
+          mod_wave: 2.2,
+          mod_wave_size: 35,
+          mod_wave_even: 1,
+          batch_stroke: 1,
+        },
+      },
+    ],
+  },
+}

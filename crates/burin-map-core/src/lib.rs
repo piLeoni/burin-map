@@ -10,6 +10,7 @@
 
 mod color_expr;
 mod dashes;
+mod depth;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 pub mod engine;
 mod fields;
@@ -33,6 +34,10 @@ pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
     Param, Style, GROUPS,
+};
+pub use depth::{
+    bathymetry_source_needs_fetch, build_depth_grid, depth_allows, expr_uses_depth, needs_depth,
+    BathymetryDoc, WaterWhere,
 };
 pub use water::{Draw, Follow, Shoreline, WaterBatch, WaterLayer};
 
@@ -210,9 +215,13 @@ pub fn draw_fields_timed(
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (fields[0].w, fields[0].h);
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
+    let depth_store = water
+        .filter(|wl| needs_depth(wl.batches, wl.shoreline))
+        .map(|wl| build_depth_grid(elev, wl.coverage, wl.depth_override));
+    let depth = depth_store.as_deref();
     let ((mut lines, dry, mut timings), wet) = rayon::join(
         || trace_land(fields, batches, elev, now),
-        || water.map(|wl| trace_water(wl, width, height, now)),
+        || water.map(|wl| trace_water(wl, width, height, depth, now)),
     );
     let mut pens: Vec<(Pen, Vec<Line>)> = Vec::new();
     let mut add = |groups: Vec<(Pen, Vec<Line>)>| {
@@ -274,6 +283,7 @@ fn trace_land(fields: &[Fields], batches: &[Batch], elev: &[f32], now: fn() -> f
                 elev: Some(elev),
                 tone: Some(&bf.input),
                 dist: None,
+                depth: None,
             };
             let ink = color_expr::colorize_paths(
                 paths,
@@ -289,7 +299,13 @@ fn trace_land(fields: &[Fields], batches: &[Batch], elev: &[f32], now: fn() -> f
     collect_parts(parts, "batch")
 }
 
-fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced {
+fn trace_water(
+    wl: &WaterLayer,
+    w: usize,
+    h: usize,
+    depth: Option<&[f32]>,
+    now: fn() -> f64,
+) -> Traced {
     use rayon::prelude::*;
     let t0 = now();
     let (dist, outlines) = water::shore(wl.coverage, w, h);
@@ -313,12 +329,18 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
                 let b = seeded(i, b);
                 let (marks, ms) = match b.draw {
                     water::Draw::Ripples => {
-                        (water::ripples(wl.coverage, &dist, w, h, &b), now() - t0)
+                        (
+                            water::ripples(wl.coverage, &dist, depth, w, h, &b),
+                            now() - t0,
+                        )
                     }
-                    _ => (water::wave_marks(wl.coverage, &dist, w, h, &b), now() - t0),
+                    _ => (
+                        water::wave_marks(wl.coverage, &dist, depth, w, h, &b),
+                        now() - t0,
+                    ),
                 };
-                let f = water::water_fields(wl.coverage, &dist, w, h, &b);
-                let ctx = water_ctx(w, h, Some(&f.input), &dist);
+                let f = water::water_fields(wl.coverage, &dist, depth, w, h, &b);
+                let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
                 let ink = color_expr::colorize_paths(
                     plot_order(marks),
                     st.batch_stroke,
@@ -330,11 +352,17 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
                 return (Vec::new(), ink, [ms, 0.0, 0.0, 0.0]);
             }
             let b = seeded(i, b);
-            let f = water::water_fields(wl.coverage, &dist, w, h, &b);
+            let f = water::water_fields(wl.coverage, &dist, depth, w, h, &b);
             let t1 = now();
             let (lines, paths, t) = trace_batch(&f, &st, true, now);
-            let paths = water::fray(paths, &dist, w, h, &st);
-            let ctx = water_ctx(w, h, Some(&f.input), &dist);
+            let paths = water::filter_paths_by_depth(
+                water::fray(paths, &dist, w, h, &st),
+                depth,
+                w,
+                h,
+                &b.r#where,
+            );
+            let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
             let ink = color_expr::colorize_paths(
                 paths,
                 st.batch_stroke,
@@ -353,13 +381,7 @@ fn trace_water(wl: &WaterLayer, w: usize, h: usize, now: fn() -> f64) -> Traced 
         let (l, p) = water::shoreline(&outlines, &dist, w, h, sh);
         timings.push(("water shoreline".into(), now() - t));
         lines.extend(l);
-        let ctx = color_expr::ColorCtx {
-            w,
-            h,
-            elev: None,
-            tone: None,
-            dist: Some(&dist),
-        };
+        let ctx = water_ctx(w, h, None, &dist, depth);
         paths.extend(color_expr::colorize_paths(
             p,
             sh.style.batch_stroke,
@@ -415,6 +437,7 @@ fn water_ctx<'a>(
     h: usize,
     tone: Option<&'a [f32]>,
     dist: &'a [f32],
+    depth: Option<&'a [f32]>,
 ) -> color_expr::ColorCtx<'a> {
     color_expr::ColorCtx {
         w,
@@ -422,6 +445,7 @@ fn water_ctx<'a>(
         elev: None,
         tone,
         dist: Some(dist),
+        depth,
     }
 }
 
@@ -642,6 +666,8 @@ mod tests {
         sh.style.batch_stroke = 2.5;
         let layer = WaterLayer {
             coverage: &c,
+            depth: None,
+            depth_override: None,
             shoreline: Some(&sh),
             batches: &batches,
         };

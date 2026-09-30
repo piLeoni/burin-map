@@ -100,9 +100,31 @@ export function normalizeWater(value) {
       follow: b.follow === 'map' ? 'map' : 'shore',
       ...(WAVE_MARKS.includes(b.draw) ? { draw: b.draw } : {}),
       angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
+      ...(readWaterWhere(b.where) ? { where: readWaterWhere(b.where) } : {}),
       style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
     }))
   return out
+}
+
+/** @param {unknown} w */
+function readWaterWhere(w) {
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return null
+  const out = {}
+  const min = Number(/** @type {Record<string, unknown>} */ (w).depth_min)
+  const max = Number(/** @type {Record<string, unknown>} */ (w).depth_max)
+  if (Number.isFinite(min)) out.depth_min = min
+  if (Number.isFinite(max)) out.depth_max = max
+  return Object.keys(out).length ? out : null
+}
+
+/** @param {unknown} value */
+export function normalizeBathymetry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = /** @type {Record<string, unknown>} */ (value)
+  const out = {}
+  if (typeof v.source === 'string' && v.source.trim()) out.source = v.source.trim()
+  if (typeof v.url === 'string' && v.url.trim()) out.url = v.url.trim()
+  return Object.keys(out).length ? out : null
 }
 
 const rawWaterAtom = atomWithStorage('burin-map.water.v1', null)
@@ -113,6 +135,16 @@ export const waterAtom = atom(
   (get, set, next) => {
     const value = typeof next === 'function' ? next(normalizeWater(get(rawWaterAtom))) : next
     set(rawWaterAtom, normalizeWater(value))
+  },
+)
+
+const rawBathymetryAtom = atomWithStorage('burin-map.bathymetry.v1', null)
+
+export const bathymetryAtom = atom(
+  (get) => normalizeBathymetry(get(rawBathymetryAtom)),
+  (get, set, next) => {
+    const value = typeof next === 'function' ? next(normalizeBathymetry(get(rawBathymetryAtom))) : next
+    set(rawBathymetryAtom, normalizeBathymetry(value))
   },
 )
 

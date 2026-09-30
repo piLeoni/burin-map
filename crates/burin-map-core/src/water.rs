@@ -6,10 +6,12 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::depth::{depth_allows, WaterWhere};
 use crate::fields::{wobble, Fields};
 use crate::grid::{blur, gradient};
 use crate::rng::Rng;
 use crate::style::Style;
+use crate::Line;
 
 /// What a water batch's lines follow.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +53,9 @@ pub struct WaterBatch {
     pub follow: Follow,
     pub angle: f32,
     pub draw: Draw,
+    /// Optional depth window in metres below the surface.
+    #[serde(default, skip_serializing_if = "crate::depth::where_inactive", rename = "where")]
+    pub r#where: WaterWhere,
     /// Missing parameters take [`Style::drawn`]'s values for what the batch
     /// draws, not the land's.
     pub style: Style,
@@ -66,6 +71,7 @@ impl Default for WaterBatch {
             follow: Follow::Shore,
             angle: 0.0,
             draw: Draw::Lines,
+            r#where: WaterWhere::default(),
             style: Style::drawn(Draw::Lines),
         }
     }
@@ -83,6 +89,8 @@ impl<'de> Deserialize<'de> for WaterBatch {
             follow: Follow,
             angle: f32,
             draw: Draw,
+            #[serde(default, rename = "where")]
+            r#where: WaterWhere,
             style: std::collections::BTreeMap<String, f64>,
         }
         impl Default for Given {
@@ -95,6 +103,7 @@ impl<'de> Deserialize<'de> for WaterBatch {
                     follow: Follow::Shore,
                     angle: 0.0,
                     draw: Draw::Lines,
+                    r#where: WaterWhere::default(),
                     style: Default::default(),
                 }
             }
@@ -113,6 +122,7 @@ impl<'de> Deserialize<'de> for WaterBatch {
             follow: g.follow,
             angle: g.angle,
             draw: g.draw,
+            r#where: g.r#where,
             style,
         })
     }
@@ -265,6 +275,10 @@ pub mod shoreline_option {
 pub struct WaterLayer<'a> {
     /// Fraction of each pixel that is water, 0…1, row 0 at the top.
     pub coverage: &'a [f32],
+    /// Metres below the surface on water; built only when [`crate::needs_depth`] says so.
+    pub depth: Option<&'a [f32]>,
+    /// Dedicated bathymetry fetch, when the document asked for one.
+    pub depth_override: Option<&'a [f32]>,
     /// The shoreline, if it is drawn.
     pub shoreline: Option<&'a Shoreline>,
     pub batches: &'a [WaterBatch],
@@ -280,8 +294,51 @@ pub fn shore(coverage: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<crate::Line
     (m.distance(), m.outlines())
 }
 
+/// Drop paths whose midpoint falls outside the batch's depth window.
+pub fn filter_paths_by_depth(
+    paths: Vec<Line>,
+    depth: Option<&[f32]>,
+    w: usize,
+    h: usize,
+    wh: &WaterWhere,
+) -> Vec<Line> {
+    if !wh.is_active() {
+        return paths;
+    }
+    let Some(depth) = depth else {
+        return paths;
+    };
+    paths
+        .into_iter()
+        .filter(|l| {
+            let p = path_mid(l);
+            let (x, y) = (p[0].round() as i32, p[1].round() as i32);
+            if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
+                return false;
+            }
+            let i = y as usize * w + x as usize;
+            depth_allows(depth[i], wh)
+        })
+        .collect()
+}
+
+fn path_mid(l: &Line) -> [f32; 2] {
+    if l.is_empty() {
+        return [0.0, 0.0];
+    }
+    let m = l.len() / 2;
+    l[m]
+}
+
 /// Fields for one water batch, from the distance to the shore.
-pub fn water_fields(coverage: &[f32], dist: &[f32], w: usize, h: usize, b: &WaterBatch) -> Fields {
+pub fn water_fields(
+    coverage: &[f32],
+    dist: &[f32],
+    depth: Option<&[f32]>,
+    w: usize,
+    h: usize,
+    b: &WaterBatch,
+) -> Fields {
     let st = &b.style;
     // No shore on the grid: the distance is infinite everywhere, and so the
     // input is 0; a finite stand-in keeps the blur and gradient clean.
@@ -291,10 +348,22 @@ pub fn water_fields(coverage: &[f32], dist: &[f32], w: usize, h: usize, b: &Wate
     let (mut tx, mut ty) = directions(&d, w, h, b, (0.0, 0.0));
     wobble(&mut tx, &mut ty, w, h, st, |_| 1.0);
 
+    let wh = &b.r#where;
     let input: Vec<f32> = d
         .par_iter()
         .zip(coverage)
-        .map(|(&d, &c)| if c < 0.5 { 0.0 } else { tone(d, st) })
+        .enumerate()
+        .map(|(i, (&d, &c))| {
+            if c < 0.5 {
+                return 0.0;
+            }
+            if let Some(dep) = depth {
+                if !depth_allows(dep[i], wh) {
+                    return 0.0;
+                }
+            }
+            tone(d, st)
+        })
         .collect();
     let loosen: Vec<f32> = input
         .par_iter()
@@ -369,6 +438,7 @@ fn directions(
 pub fn wave_marks(
     coverage: &[f32],
     dist: &[f32],
+    depth: Option<&[f32]>,
     w: usize,
     h: usize,
     b: &WaterBatch,
@@ -394,7 +464,14 @@ pub fn wave_marks(
         (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
             .then(|| y as usize * w + x as usize)
     };
-    let open = |p: [f32; 2]| at(p).is_some_and(|i| coverage[i] >= 0.5 && d[i] >= st.water_start);
+    let wh = &b.r#where;
+    let open = |p: [f32; 2]| {
+        at(p).is_some_and(|i| {
+            coverage[i] >= 0.5
+                && d[i] >= st.water_start
+                && depth.map_or(true, |dep| depth_allows(dep[i], wh))
+        })
+    };
     let spacing = |i: usize| {
         let t = tone(d[i], st);
         st.space.max(1.0) * (st.space_light + (st.space_dark - st.space_light) * t).clamp(0.05, 4.0)
@@ -498,6 +575,7 @@ fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
 pub fn ripples(
     coverage: &[f32],
     dist: &[f32],
+    depth: Option<&[f32]>,
     w: usize,
     h: usize,
     b: &WaterBatch,
@@ -574,6 +652,9 @@ pub fn ripples(
         }
     };
 
+    let wh = &b.r#where;
+    let depth_ok = |i: usize| depth.map_or(true, |dep| depth_allows(dep[i], wh));
+
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x21FF));
     let lump = (st.mod_wobble_size.max(8.0), gap * 30.0);
     let swell = noise_field(w, h, lump.0, &mut rng);
@@ -610,7 +691,9 @@ pub fn ripples(
             if k > 0 {
                 left -= (p[0] - row[k - 1][0]).hypot(p[1] - row[k - 1][1]);
             }
-            let here = at(p).filter(|&i| coverage[i] >= 0.5 && d[i] >= st.water_start);
+            let here = at(p).filter(|&i| {
+                coverage[i] >= 0.5 && d[i] >= st.water_start && depth_ok(i)
+            });
             if left <= 0.0 {
                 inked = !inked;
                 let ink = here.map_or(0.5, |i| {
@@ -964,7 +1047,7 @@ mod tests {
             },
             ..WaterBatch::default()
         };
-        let f = water_fields(&c, &dist, w, h, &b);
+        let f = water_fields(&c, &dist, None, w, h, &b);
         let row = 10 * w;
         assert_eq!(f.input[row + 70], 0.0, "land");
         assert!(
@@ -1077,9 +1160,9 @@ mod tests {
             );
             let run = || {
                 if draw == Draw::Ripples {
-                    ripples(&c, &dist, w, h, &b)
+                    ripples(&c, &dist, None, w, h, &b)
                 } else {
-                    wave_marks(&c, &dist, w, h, &b)
+                    wave_marks(&c, &dist, None, w, h, &b)
                 }
             };
             let marks = run();
@@ -1107,7 +1190,7 @@ mod tests {
             angle: 90.0,
             ..WaterBatch::default()
         };
-        let f = water_fields(&c, &dist, w, h, &b);
+        let f = water_fields(&c, &dist, None, w, h, &b);
         assert!(
             (f.tx[5] - 1.0).abs() < 1e-6 && f.ty[5].abs() < 1e-6,
             "east-west"

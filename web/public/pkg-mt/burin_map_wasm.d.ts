@@ -75,6 +75,11 @@ export function initGpu(): Promise<string | undefined>;
 export function initThreadPool(num_threads: number): Promise<any>;
 
 /**
+ * True when any water batch or shoreline colouring needs a depth grid.
+ */
+export function needsWaterDepth(spec_json: string): boolean;
+
+/**
  * (id, blurb) for each style group — section headers in the web UI.
  */
 export function style_groups(): any;
@@ -131,6 +136,7 @@ export interface InitOutput {
     readonly drawing_width: (a: number) => number;
     readonly initGpu: () => any;
     readonly initThreadPool: (a: number) => any;
+    readonly needsWaterDepth: (a: number, b: number) => number;
     readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
     readonly water_tiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
@@ -142,8 +148,8 @@ export interface InitOutput {
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue__core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__32: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__33: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__34: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___futures__task__wait_async_polyfill__MessageEvent______true_: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue______true_: (a: number, b: number, c: any) => void;
     readonly memory: WebAssembly.Memory;

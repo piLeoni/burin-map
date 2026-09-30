@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAtom } from 'jotai'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { bathymetryNeedsNetworkFetch, fetchBathymetryGrid, waterSpecNeedsDepth } from '../lib/bathymetry'
 import { buildDem } from '../lib/dem'
 import { drawBatches } from '../lib/burin'
 import { waterTiles } from '../lib/water'
@@ -34,7 +35,7 @@ function zoomToFit(map, frame, lat) {
   return k > 0 ? Math.log2(k) : 0
 }
 
-export default function MapView({ batches, water, onStatus, onDrawing, drawing }) {
+export default function MapView({ batches, water, bathymetry, onStatus, onDrawing, drawing }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const genRef = useRef(0)
@@ -46,6 +47,8 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
   batchesRef.current = batches
   const waterRef = useRef(water)
   waterRef.current = water
+  const bathymetryRef = useRef(bathymetry)
+  bathymetryRef.current = bathymetry
   const convertRef = useRef(async () => {})
 
   const [, setMapView] = useAtom(mapViewAtom)
@@ -115,9 +118,19 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
     try {
       const t0 = performance.now()
       const wet = waterRef.current
-      const [dem, tiles] = await Promise.all([
+      const bathy = bathymetryRef.current
+      const waterSpec = wet && {
+        classes: wet.classes,
+        shoreline: wet.shoreline,
+        batches: wet.batches,
+      }
+      const needsDepth = waterSpec && waterSpecNeedsDepth(waterSpec)
+      const [dem, tiles, depthGrid] = await Promise.all([
         buildDem(bounds, outW, outH, progress),
         wet ? waterTiles(bounds, outW, wet.source, progress) : null,
+        needsDepth && bathymetryNeedsNetworkFetch(bathy)
+          ? fetchBathymetryGrid(bounds, outW, outH, bathy, progress)
+          : null,
       ])
       if (my !== genRef.current || movingRef.current) return
       const { width: demW, height: demH } = dem
@@ -132,9 +145,10 @@ export default function MapView({ batches, water, onStatus, onDrawing, drawing }
       }, null, {
         gpu: !forceCpu,
         water: wet && {
-          spec: JSON.stringify({ classes: wet.classes, shoreline: wet.shoreline, batches: wet.batches }),
+          spec: JSON.stringify(waterSpec),
           bounds: [bounds.west, bounds.south, bounds.east, bounds.north],
           tiles,
+          ...(depthGrid ? { depth: depthGrid } : {}),
         },
       })
       const tBack = performance.now()

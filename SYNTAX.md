@@ -95,6 +95,7 @@ batches:
 |---|---|---|
 | `elev` | height at the point, metres | — |
 | `dist` | — | distance from the shore, px |
+| `depth` | — | metres below the surface (when depth is active) |
 | `tone` | shading input 0…1 (light/dark) | water tone from the field input |
 | `lerp(a, b, t)` | mix two colours; `t` 0…1 | same |
 | `clamp(x, lo, hi)` | scalar | same |
@@ -217,13 +218,40 @@ With a `water` block, the water is downloaded from OpenStreetMap and decides whe
 | `follow` | `shore`: concentric lines along the coast; `map`: one direction over the whole map | `shore` |
 | `draw` | `lines` fill the water; `ripples` draw broken rows of hand-drawn waves; `dots` stipple it; see [Ripples and dots](#ripples-and-dots) | `lines` |
 | `angle` | with `shore`, 0 runs along the coast and 90 straight out to sea; with `map`, degrees clockwise from north | 0 |
+| `where` | optional depth window in metres (`depth_min`, `depth_max`); see [Depth](#depth) | |
 | `style` | parameters, see below | |
+
+### Depth
+
+```yaml
+bathymetry:
+  source: terrarium   # default: reuse elevation (no extra fetch)
+
+water:
+  batches:
+    - follow: shore
+      where: { depth_max: 200 }   # shelf only
+      style: { water_start: 3, water_reach: 60, space: 3 }
+    - follow: map
+      draw: ripples
+      where: { depth_min: 400 }   # deep ocean only
+      style: { mod_wave: 2.5, mod_wave_size: 70 }
+```
+
+| `bathymetry.source` | Fetch |
+|---|---|
+| absent, `terrarium`, `auto`, `dem` | none; depth from elevation when needed |
+| `gebco`, `url`, or an `http…` / `{z}/{x}/{y}` template | separate bathymetry tiles (reserved for precise charts) |
+
+In `color_expr` on water, `depth` is metres below the surface (same as `where`).
 
 ### Water parameters
 
 The land's names, minus those that need terrain. The defaults differ, and there are three more.
 
-There is no seabed: nothing about depth is downloaded. On water, the "tone" that land takes from terrain and sun is the distance from the shore instead: 1 at the first line (`water_start` out), fading to 0 `water_reach` px further out. That tone drives `space_light` / `space_dark` and `dash_light` / `dash_dark` exactly as shading does on land. Water depth could be an optional input one day.
+On water, the "tone" that land takes from terrain and sun is the distance from the shore instead: 1 at the first line (`water_start` out), fading to 0 `water_reach` px further out. That tone drives `space_light` / `space_dark` and `dash_light` / `dash_dark` exactly as shading does on land.
+
+**Depth** (metres below the surface) is optional. Nothing extra is downloaded unless a batch asks for depth *and* the document sets `bathymetry.source` to something other than `terrarium` / `auto` (GEBCO or a custom tile URL — not wired in the web app yet). By default, depth comes from the **same elevation mosaic** already fetched for the map (negative heights on water pixels). The depth grid is built only when a water batch has a `where` depth limit or a `color_expr` that uses `depth`.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|

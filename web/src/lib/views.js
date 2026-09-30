@@ -998,8 +998,8 @@ function readWater(w, schema) {
     const which = `water batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'layer', 'color', 'color_expr', 'follow', 'draw', 'angle', 'style'].includes(k)) {
-        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, follow, draw, angle and style`)
+      if (!['name', 'layer', 'color', 'color_expr', 'where', 'follow', 'draw', 'angle', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, where, follow, draw, angle and style`)
       }
     }
     const follow = b.follow ?? 'shore'
@@ -1010,6 +1010,7 @@ function readWater(w, schema) {
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
     const style = readStyle(b.style, which, schema)
     const name = b.name != null && String(b.name).trim() ? String(b.name) : ''
+    const where = readWaterWhere(b.where, which)
     const batch = {
       follow,
       ...(draw !== 'lines' ? { draw } : {}),
@@ -1018,18 +1019,39 @@ function readWater(w, schema) {
       ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
       ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),
       ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr.trim() } : {}),
+      ...(where ? { where } : {}),
     }
     return name ? { name, ...batch } : batch
   })
   return out
 }
 
+function readWaterWhere(w, which) {
+  if (w == null) return null
+  if (typeof w !== 'object' || Array.isArray(w)) throw new Error(`where in ${which} must be a block with depth_min and/or depth_max`)
+  for (const k of Object.keys(w)) {
+    if (k !== 'depth_min' && k !== 'depth_max') throw new Error(`Unknown setting "${k}" in ${which}.where`)
+  }
+  const out = {}
+  if (w.depth_min != null) {
+    const v = Number(w.depth_min)
+    if (!Number.isFinite(v)) throw new Error(`depth_min in ${which} must be a number (metres)`)
+    out.depth_min = v
+  }
+  if (w.depth_max != null) {
+    const v = Number(w.depth_max)
+    if (!Number.isFinite(v)) throw new Error(`depth_max in ${which} must be a number (metres)`)
+    out.depth_max = v
+  }
+  return Object.keys(out).length ? out : null
+}
+
 function toModel(value, notes, schema) {
   let doc = Array.isArray(value) ? { batches: value } : value
   if (!doc || typeof doc !== 'object') throw new Error('Expected an area block and a list of batches')
   for (const key of Object.keys(doc)) {
-    if (!['area', 'batches', 'land', 'water'].includes(key)) {
-      throw new Error(`Unknown setting "${key}": only "area", "batches" (or "land") and "water" go at the top`)
+    if (!['area', 'batches', 'land', 'water', 'bathymetry'].includes(key)) {
+      throw new Error(`Unknown setting "${key}": only "area", "batches" (or "land"), "water" and "bathymetry" go at the top`)
     }
   }
   if (doc.land != null) {
@@ -1075,7 +1097,20 @@ function toModel(value, notes, schema) {
     }
     return name ? { name, ...batch } : batch
   })
-  return { area, batches, water: readWater(doc.water, schema), notes }
+  let bathymetry = null
+  if (doc.bathymetry != null) {
+    if (typeof doc.bathymetry !== 'object' || Array.isArray(doc.bathymetry)) {
+      throw new Error('"bathymetry" must be a block with source (and optional url)')
+    }
+    bathymetry = {}
+    for (const k of Object.keys(doc.bathymetry)) {
+      if (k !== 'source' && k !== 'url') throw new Error(`Unknown setting "${k}" in bathymetry: use source and url`)
+    }
+    if (doc.bathymetry.source != null) bathymetry.source = String(doc.bathymetry.source)
+    if (doc.bathymetry.url != null) bathymetry.url = String(doc.bathymetry.url)
+    if (!Object.keys(bathymetry).length) bathymetry = null
+  }
+  return { area, batches, water: readWater(doc.water, schema), bathymetry, notes }
 }
 
 /** Write the model in one of the three views. */

@@ -14,6 +14,8 @@ pub struct ColorCtx<'a> {
     /// Shading 0…1 on land (`input`); distance tone on water.
     pub tone: Option<&'a [f32]>,
     pub dist: Option<&'a [f32]>,
+    /// Metres below the surface on water; absent when depth was not needed.
+    pub depth: Option<&'a [f32]>,
 }
 
 /// True when dashes need their own colour from `color_expr`.
@@ -80,6 +82,7 @@ fn scalar_ctx(ctx: &ColorCtx<'_>, p: [f32; 2]) -> EvalCtx {
         tone: ctx.tone.map(|g| sample(g, ctx.w, ctx.h, p)).unwrap_or(0.5),
         elev: ctx.elev.map(|g| sample(g, ctx.w, ctx.h, p)).unwrap_or(0.0),
         dist: ctx.dist.map(|g| sample(g, ctx.w, ctx.h, p)).unwrap_or(0.0),
+        depth: ctx.depth.map(|g| sample(g, ctx.w, ctx.h, p)).unwrap_or(0.0),
     }
 }
 
@@ -87,6 +90,7 @@ struct EvalCtx {
     tone: f32,
     elev: f32,
     dist: f32,
+    depth: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +105,7 @@ enum Scalar {
     Tone,
     Elev,
     Dist,
+    Depth,
     Clamp(Box<Scalar>, Box<Scalar>, Box<Scalar>),
     Div(Box<Scalar>, Box<Scalar>),
     Mul(Box<Scalar>, Box<Scalar>),
@@ -309,6 +314,7 @@ impl<'a> Parser<'a> {
             "tone" | "input" => Scalar::Tone,
             "elev" | "elevation" => Scalar::Elev,
             "dist" | "distance" => Scalar::Dist,
+            "depth" => Scalar::Depth,
             _ => return Err(()),
         })
     }
@@ -335,6 +341,7 @@ fn eval_scalar(s: &Scalar, ctx: &EvalCtx) -> f32 {
         Scalar::Tone => ctx.tone,
         Scalar::Elev => ctx.elev,
         Scalar::Dist => ctx.dist,
+        Scalar::Depth => ctx.depth,
         Scalar::Clamp(x, lo, hi) => eval_scalar(x, ctx).clamp(eval_scalar(lo, ctx), eval_scalar(hi, ctx)),
         Scalar::Div(a, b) => {
             let d = eval_scalar(b, ctx);
@@ -434,23 +441,23 @@ mod tests {
     #[test]
     fn lerp_mid_grey() {
         let c = parse_color("lerp(#000000, #ffffff, 0.5)").unwrap();
-        let rgb = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0 });
+        let rgb = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
         assert!((rgb[0] - 0.5).abs() < 0.02);
     }
 
     #[test]
     fn tone_drives_land() {
         let c = parse_color("lerp(#000000, #ffffff, tone)").unwrap();
-        let dark = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0 });
-        let light = eval_color(&c, &EvalCtx { tone: 1.0, elev: 0.0, dist: 0.0 });
+        let dark = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
+        let light = eval_color(&c, &EvalCtx { tone: 1.0, elev: 0.0, dist: 0.0, depth: 0.0 });
         assert!(light[0] > dark[0] + 0.5);
     }
 
     #[test]
     fn dist_over_reach() {
         let c = parse_color("lerp(#ffffff, #000000, clamp(dist/100, 0, 1))").unwrap();
-        let near = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0 });
-        let far = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 200.0 });
+        let near = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 0.0, depth: 0.0 });
+        let far = eval_color(&c, &EvalCtx { tone: 0.0, elev: 0.0, dist: 200.0, depth: 0.0 });
         assert!(near[0] > far[0] + 0.5);
     }
 }

@@ -350,7 +350,7 @@ fn read_water(
     water: &JsValue,
     w: usize,
     h: usize,
-) -> Result<Option<(Vec<f32>, WaterSpec)>, JsValue> {
+) -> Result<Option<(Vec<f32>, WaterSpec, Option<Vec<f32>>)>, JsValue> {
     if water.is_undefined() || water.is_null() {
         return Ok(None);
     }
@@ -388,7 +388,30 @@ fn read_water(
     }
     let grid = watermask::Grid::new([west, south, east, north], w, h);
     let mask = found.mask(&grid, &watermask::MaskOptions::default());
-    Ok(Some((mask.coverage, spec)))
+    let depth_override = get("depth")
+        .ok()
+        .filter(|v| !v.is_undefined() && !v.is_null())
+        .map(|v| {
+            let arr = js_sys::Float32Array::new(&v);
+            let n = arr.length() as usize;
+            if n != w * h {
+                return Err(JsValue::from_str(&format!(
+                    "water.depth length {n} ≠ {w}×{h}"
+                )));
+            }
+            Ok(arr.to_vec())
+        })
+        .transpose()?;
+    Ok(Some((mask.coverage, spec, depth_override)))
+}
+
+/// True when any water batch or shoreline colouring needs a depth grid.
+#[wasm_bindgen(js_name = needsWaterDepth)]
+pub fn needs_water_depth(spec_json: &str) -> bool {
+    let Ok(spec) = serde_json::from_str::<WaterSpec>(spec_json) else {
+        return false;
+    };
+    burin_map_core::needs_depth(&spec.batches, spec.shoreline.as_ref())
 }
 
 /// Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
@@ -424,7 +447,7 @@ pub fn draw_batches(
         timings.push(("water mask".to_string(), now_ms() - t0));
     }
     let t1 = now_ms();
-    let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
+    let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let fields: Vec<_> = burin_map_core::terrain_groups(&batches)
         .0
         .iter()
@@ -445,9 +468,11 @@ fn terrain_label(n: usize, device: &str) -> String {
     }
 }
 
-fn layer(wet: &Option<(Vec<f32>, WaterSpec)>) -> Option<burin_map_core::WaterLayer<'_>> {
-    wet.as_ref().map(|(c, s)| burin_map_core::WaterLayer {
+fn layer(wet: &Option<(Vec<f32>, WaterSpec, Option<Vec<f32>>)>) -> Option<burin_map_core::WaterLayer<'_>> {
+    wet.as_ref().map(|(c, s, depth)| burin_map_core::WaterLayer {
         coverage: c,
+        depth: None,
+        depth_override: depth.as_deref(),
         shoreline: s.shoreline.as_ref(),
         batches: &s.batches,
     })
@@ -516,7 +541,7 @@ pub async fn draw_batches_gpu(
         timings.push(("water mask".to_string(), now_ms() - t0));
     }
     let t1 = now_ms();
-    let coverage = wet.as_ref().map(|(c, _)| c.as_slice());
+    let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let mut fields = Vec::new();
     for i in burin_map_core::terrain_groups(&batches).0 {
         fields.push(

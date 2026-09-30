@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import PasswordGate from './components/PasswordGate'
-import { drawingAtom, statusAtom, styleAtom, waterAtom } from './state'
+import { bathymetryAtom, drawingAtom, statusAtom, styleAtom, waterAtom } from './state'
 
 export default function App() {
   const batches = useAtomValue(styleAtom)
@@ -16,6 +16,7 @@ export default function App() {
     batches: water.batches.map(({ name: _name, ...drawn }) => drawn),
   })
   const wet = useMemo(() => JSON.parse(waterKey), [waterKey])
+  const bathymetry = useAtomValue(bathymetryAtom)
   const status = useAtomValue(statusAtom)
   const drawing = useAtomValue(drawingAtom)
   const setStatus = useSetAtom(statusAtom)
@@ -26,7 +27,7 @@ export default function App() {
     <PasswordGate>
       <div className="relative flex h-full min-h-0 w-full flex-col lg:flex-row">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <MapView batches={drawn} water={wet} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
+          <MapView batches={drawn} water={wet} bathymetry={bathymetry} onStatus={setStatus} onDrawing={setDrawing} drawing={drawing} />
 
           <button
             type="button"

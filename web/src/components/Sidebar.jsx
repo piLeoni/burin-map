@@ -7,7 +7,7 @@ import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import { VIEWS, detectView, parseView, renderView } from '../lib/views'
 import {
-  BATCHES_V1_KEY, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom, waterAtom,
+  BATCHES_V1_KEY, bathymetryAtom, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom, waterAtom,
 } from '../state'
 
 const PHASE_LABEL = {
@@ -69,6 +69,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   const [schema, setSchema] = useState(null)   // { params, groups } from the engine
   const [batches, setBatches] = useAtom(styleAtom)
   const [water, setWater] = useAtom(waterAtom)
+  const [, setBathymetry] = useAtom(bathymetryAtom)
   const [notes, setNotes] = useAtom(notesAtom)
   const [kind, setKind] = useAtom(viewKindAtom)
   const [mapView] = useAtom(mapViewAtom)
@@ -103,6 +104,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     applyArea(m.area)
     setBatches(m.batches)
     setWater(m.water ?? null)
+    setBathymetry(m.bathymetry ?? null)
     setNotes(m.notes ?? {})
   }
 
