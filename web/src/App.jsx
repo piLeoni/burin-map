@@ -33,10 +33,11 @@ export default function App() {
 
           <button
             type="button"
-            className="btn btn-sm safe-fab absolute right-4 z-20 border border-base-content bg-base-100 lg:hidden"
+            size-="small"
+            className="safe-fab absolute right-4 z-20 lg:hidden"
             onClick={() => setMenuOpen(true)}
           >
-            Controls
+            controls
           </button>
         </main>
 
@@ -44,7 +45,7 @@ export default function App() {
           <button
             type="button"
             aria-label="Close controls"
-            className="absolute inset-0 z-30 bg-base-content/25 lg:hidden"
+            className="absolute inset-0 z-30 h-full w-full bg-black/25 bg-none lg:hidden"
             onClick={() => setMenuOpen(false)}
           />
         ) : null}

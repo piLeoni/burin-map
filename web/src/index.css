@@ -1,7 +1,16 @@
+/* WebTUI's layers (utils, components) sit between Tailwind's base and its
+   utilities, so a utility class still wins over a WebTUI component. */
+@layer theme, base, utils, components, utilities;
+
 @import "tailwindcss";
-@plugin "daisyui" {
-  themes: wireframe --default;
-}
+
+/* Only the parts we use: WebTUI's base and typography restyle every element
+   of the page (and break words anywhere). */
+@import "@webtui/css/utils/box.css";
+@import "@webtui/css/components/button.css";
+@import "@webtui/css/components/input.css";
+@import "@webtui/css/components/popover.css";
+@import "@webtui/css/components/badge.css";
 
 /* One monospace for everything monospace: labels, buttons and the editor,
    which reads this variable when it mounts. */
@@ -9,9 +18,68 @@
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 
-.btn {
-  font-family: var(--font-mono);
-  font-weight: 400;
+/* Black on white, greys between; one character cell is 1ch × 1lh. */
+:root {
+  --background0: #fff;
+  --background1: #ebebeb;
+  --background2: #d4d4d4;
+  --background3: #a3a3a3;
+  --foreground0: #000;
+  --foreground1: #444;
+  --foreground2: #888;
+  --font-family: var(--font-mono);
+  --font-size: 12px;
+  --line-height: 1.5;
+  --font-weight-bold: 700;
+  --font-weight-normal: 400;
+  --box-border-color: var(--foreground0);
+}
+
+@layer base {
+  body {
+    background-color: var(--background0);
+    color: var(--foreground0);
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: var(--line-height);
+  }
+}
+
+/* Registered as not inherited, so it has to be set on the box itself. */
+[box-] {
+  --box-border-width: 1px;
+}
+
+@layer utils {
+  [box-] {
+    padding-inline: round(2ch, 1px);
+  }
+  /* WebTUI centres the border at half a cell, which lands between pixels and blurs it. */
+  [box-]:before {
+    inset: round(down, 0.5lh, 1px) round(down, 0.5ch, 1px);
+    width: auto;
+    height: auto;
+    translate: none;
+  }
+}
+
+@layer components {
+  /* WebTUI shows focus but not hover. */
+  button:hover,
+  [is-~="button"]:hover {
+    text-decoration: underline;
+  }
+
+  button:disabled,
+  [is-~="button"][aria-disabled="true"] {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  summary[is-~="button"] {
+    cursor: pointer;
+    list-style: none;
+  }
 }
 
 html,

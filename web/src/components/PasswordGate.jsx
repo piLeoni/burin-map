@@ -31,13 +31,13 @@ export default function PasswordGate({ children }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 items-center justify-center bg-base-100 p-6">
-      <form onSubmit={submit} className="flex w-full max-w-xs flex-col gap-3 font-mono">
-        <h1 className="text-2xl font-bold tracking-tight">BurinMap</h1>
+    <div className="flex h-full min-h-0 items-center justify-center p-6">
+      <form onSubmit={submit} box-="square" className="flex w-full max-w-[40ch] flex-col gap-[1lh]">
+        <h1 className="font-bold">BurinMap</h1>
         <input
           type="password"
           autoFocus
-          className="input input-bordered w-full"
+          className="w-full"
           placeholder="Password"
           value={value}
           onChange={(e) => {
@@ -45,9 +45,9 @@ export default function PasswordGate({ children }) {
             setError(false)
           }}
         />
-        {error ? <p className="text-xs text-error">Wrong password.</p> : null}
-        <button type="submit" className="btn border border-base-content">
-          Unlock
+        {error ? <p className="font-bold">✗ wrong password</p> : null}
+        <button type="submit" size-="small">
+          unlock
         </button>
       </form>
     </div>

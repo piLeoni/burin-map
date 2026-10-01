@@ -8,6 +8,7 @@ import { PRESETS } from '../lib/presets'
 import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import { VIEWS, detectView, parseView, renderView } from '../lib/views'
+import Panel from './Panel'
 import {
   BATCHES_V1_KEY, bathymetryAtom, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom, waterAtom,
 } from '../state'
@@ -62,6 +63,10 @@ function batchesFromV1(params) {
 }
 
 const FRESH = [{ angle: 0, style: {} }]
+
+/** WebTUI button looks: a grey key, and one that only shows on hover. */
+const KEY = { 'size-': 'small', 'variant-': 'background1' }
+const QUIET = { 'size-': 'small', 'variant-': 'background0', className: 'opacity-50 hover:opacity-100' }
 
 /* ---------------------------------------------------------------- */
 /*  Sidebar — the document as YAML, JSON5 or a command               */
@@ -254,202 +259,193 @@ export default function Sidebar({ open, onClose, status, drawing }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema])
 
-  useEffect(() => {
-    const close = (e) => {
-      const menu = presetMenuRef.current
-      if (menu?.open && !menu.contains(e.target)) menu.removeAttribute('open')
-    }
-    document.addEventListener('pointerdown', close)
-    return () => document.removeEventListener('pointerdown', close)
-  }, [])
-
-  const tool = 'btn btn-xs border-base-content/25 whitespace-nowrap'
+  const statusText = status.detail || PHASE_LABEL[status.phase] || status.phase
+  const loud = status.phase === 'error' || status.phase === 'working'
 
   return (
     <aside
-      className={`fixed inset-x-0 bottom-0 z-40 flex h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-base-content bg-base-100 transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:w-[28rem] lg:shrink-0 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
+      className={`fixed inset-x-0 bottom-0 z-40 flex h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-black bg-white px-1 py-[0.5lh] transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:w-[28rem] lg:shrink-0 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
         open ? 'translate-y-0' : 'pointer-events-none translate-y-full'
       }`}
     >
       {/* Mobile header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-base-content px-4 py-2 lg:hidden">
-        <span className="font-mono text-sm font-bold">BurinMap</span>
-        <button type="button" aria-label="Close" className="btn btn-sm btn-square border border-base-content" onClick={onClose}>✕</button>
+      <div className="flex shrink-0 items-center justify-between px-[1ch] lg:hidden">
+        <span className="font-bold">BurinMap</span>
+        <button type="button" aria-label="Close" {...KEY} onClick={onClose}>✕</button>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* Fixed top: title, stats, toolbar */}
-        <div className="flex shrink-0 flex-col gap-3.5 px-5 pt-5 pb-4">
-          <header className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <h1 className="hidden font-mono text-2xl font-bold tracking-tight lg:block">BurinMap</h1>
-              {import.meta.env.DEV && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs ml-auto whitespace-nowrap opacity-40 hover:opacity-100"
-                  title="Dev only: remove service workers and their caches, then reload, so the latest WASM is used. The document is kept."
-                  onClick={() => clearServiceWorkers()}
-                >
-                  Clear cache
-                </button>
-              )}
-            </div>
-            <p className="text-[11px] leading-relaxed opacity-50">
-              Terrain drawn as engraved lines. Pan or zoom the map; the view is
-              redrawn when you stop. An online demo of{' '}
-              <a className="link whitespace-nowrap" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
-              a terrain engine written in Rust, also available as a command-line
-              tool and as Python and Node libraries. Here the same engine runs in
-              your browser, compiled to WebAssembly.
-            </p>
-          </header>
-
-          <div className="flex items-baseline gap-3 font-mono text-[10px]">
-            <span className="shrink-0 tabular-nums opacity-60">
-              {drawing
-                ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
-                  + (drawing.threads > 1 ? ` · ${drawing.threads} threads` : '')
-                  + (typeof drawing.gpu === 'string' ? ` · ${drawing.gpu}` : '')
-                : '-'}
-            </span>
-            <span className={`ml-auto truncate tracking-wider uppercase ${status.phase === 'error' ? 'text-error' : 'opacity-40'}`}>
-              {status.detail || PHASE_LABEL[status.phase] || status.phase}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2 border-t border-base-content/15 pt-4">
-            <div className="flex items-center gap-2">
-              <div role="tablist" className="join">
-                {Object.entries(VIEWS).map(([id, v]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    aria-selected={view === id}
-                    className={`btn btn-xs join-item px-3 whitespace-nowrap ${view === id ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25 bg-base-100'}`}
-                    onClick={() => switchView(id)}
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              <button type="button" className={tool} title="Open a YAML, JSON, JSON5 or .sh file" disabled={!schema} onClick={() => fileRef.current?.click()}>
-                Import
-              </button>
-              <button type="button" className={tool} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
-                Download
-              </button>
-              <details ref={presetMenuRef} className="dropdown dropdown-end flex">
-                <summary className={`${tool} w-full list-none ${schema ? '' : 'btn-disabled'}`} title="Replace the style and the area with a ready-made one">
-                  Load ▾
-                </summary>
-                <ul className="menu dropdown-content z-20 mt-1 max-h-[60vh] w-64 flex-nowrap overflow-y-auto rounded-box border border-base-content/25 bg-base-100 p-1 shadow">
-                  {PRESETS.map((p) => (
-                    <li key={p.id}>
-                      <button type="button" className="flex flex-col items-start gap-0" onClick={() => loadPreset(p)}>
-                        <span className="font-mono text-[11px] font-bold">{p.label}</span>
-                        <span className="text-[10px] opacity-50">{p.blurb}</span>
-                        <span className="text-[10px] opacity-70">
-                          {p.screen} on screen · {p.plot} to plot
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <button type="button" className={tool} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
-                Link
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".yaml,.yml,.json,.json5,.sh,.txt"
-                className="hidden"
-                onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = '' }}
-              />
-            </div>
-            {notice && (
-              <p className={`font-mono text-[10px] leading-snug break-words ${notice.error ? 'text-error' : 'opacity-60'}`}>
-                {notice.text}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-2 border-t border-base-content/15 px-5 py-4">
-          <div className="flex shrink-0 flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
-              <span className={`mr-auto truncate font-mono text-[11px] ${dirty ? 'font-bold' : 'opacity-50'}`}>
-                {dirty ? '● Edited, not applied' : 'In step with the map'}
-              </span>
-              <button type="button" className="btn btn-xs border-base-content/25" disabled={!dirty} onClick={revertDraft}>
-                Revert
-              </button>
-              <button type="button" className={`btn btn-xs ${dirty ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25'}`} disabled={!dirty} title="⌘/Ctrl + Enter" onClick={applyDraft}>
-                Apply
-              </button>
-            </div>
-            {error && <p className="font-mono text-[10px] leading-snug break-words text-error">{error}</p>}
-          </div>
-          <div className={`relative min-h-0 flex-1 overflow-hidden rounded-lg border ${dirty ? 'border-base-content' : 'border-base-content/25'}`}>
-            {shown && (
-              <button
-                type="button"
-                aria-label={`Copy ${VIEWS[view].label}`}
-                title={`Copy the ${VIEWS[view].label}`}
-                className="btn btn-square btn-xs absolute top-1.5 right-4 z-10 border-base-content/25 bg-base-100/90 opacity-60 hover:opacity-100"
-                onClick={() => copy(shown, VIEWS[view].label)}
-              >
-                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="12" height="12" rx="2" />
-                  <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
-                </svg>
-              </button>
-            )}
-            {schema ? (
-              <Editor
-                height="100%"
-                language={VIEWS[view].language}
-                theme={EDITOR_THEME}
-                value={shown}
-                onChange={(v) => { setDraft(v ?? ''); setError('') }}
-                beforeMount={(monaco) => {
-                  monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({ validate: false })
-                  registerCliLanguage(monaco)
-                  defineEditorTheme(monaco)
-                }}
-                onMount={(editor, monaco) => {
-                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => applyDraftRef.current())
-                  // Monaco measures glyphs once; a web font that lands later
-                  // would leave the cursor out of step with the text.
-                  document.fonts.ready.then(() => monaco.editor.remeasureFonts())
-                }}
-                options={{
-                  minimap: { enabled: false },
-                  fontFamily: editorFont(),
-                  fontSize: 11,
-                  bracketPairColorization: { enabled: false },
-                  lineNumbersMinChars: 3,
-                  scrollBeyondLastLine: false,
-                  wordWrap: 'on',
-                  wrappingIndent: 'deepIndent',
-                  tabSize: 2,
-                  insertSpaces: true,
-                  detectIndentation: false,
-                }}
-              />
-            ) : (
-              <p className="p-3 text-[11px] opacity-40">Loading parameters…</p>
-            )}
-          </div>
-        </div>
-
-        <p className="shrink-0 border-t border-base-content/15 px-5 py-2 text-[10px] opacity-40">
-          Elevation: AWS Terrain Tiles. Basemap: Mapbox.
+      <Panel
+        title="BurinMap"
+        className="shrink-0"
+        aside={import.meta.env.DEV && (
+          <button
+            type="button"
+            {...QUIET}
+            title="Dev only: remove service workers and their caches, then reload, so the latest WASM is used. The document is kept."
+            onClick={() => clearServiceWorkers()}
+          >
+            clear cache
+          </button>
+        )}
+      >
+        <p className="opacity-60">
+          Terrain drawn as engraved lines. Pan or zoom the map; the view is
+          redrawn when you stop. An online demo of{' '}
+          <a className="underline" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
+          a terrain engine written in Rust, also available as a command-line
+          tool and as Python and Node libraries. Here the same engine runs in
+          your browser, compiled to WebAssembly.
         </p>
-      </div>
+        <div className="mt-[1lh] flex items-center gap-[1ch]">
+          <span className="truncate tabular-nums opacity-60">
+            {drawing
+              ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
+                + (drawing.threads > 1 ? ` · ${drawing.threads} threads` : '')
+                + (typeof drawing.gpu === 'string' ? ` · ${drawing.gpu}` : '')
+              : '-'}
+          </span>
+          <span is-="badge" variant-={loud ? 'foreground0' : 'background1'} className="ml-auto shrink-0 lowercase">
+            {status.phase === 'error' ? `✗ ${statusText}` : statusText}
+          </span>
+        </div>
+      </Panel>
+
+      <Panel
+        title={dirty ? 'document ●' : 'document'}
+        className="flex min-h-0 flex-1 flex-col"
+        aside={(
+          <span role="tablist" className="flex">
+            {Object.entries(VIEWS).map(([id, v]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                size-="small"
+                variant-={view === id ? 'foreground0' : 'background0'}
+                onClick={() => switchView(id)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </span>
+        )}
+      >
+        <div className="relative flex shrink-0 flex-wrap gap-[1ch]">
+          <button type="button" {...KEY} title="Open a YAML, JSON, JSON5 or .sh file" disabled={!schema} onClick={() => fileRef.current?.click()}>
+            import
+          </button>
+          <button type="button" {...KEY} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
+            download
+          </button>
+          {/* Static, so the menu opens under the whole row rather than this button. */}
+          <details ref={presetMenuRef} is-="popover" className="static">
+            <summary is-="button" {...KEY} aria-disabled={!schema} title="Replace the style and the area with a ready-made one">
+              load ▾
+            </summary>
+            <div box-="square" className="z-30 w-full bg-white">
+              <ul className="max-h-[60vh] overflow-y-auto">
+                {PRESETS.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      size-="small"
+                      variant-="background0"
+                      className="h-auto w-full flex-col items-start justify-start px-[1ch] py-[0.5lh] text-left hover:bg-black hover:text-white hover:no-underline"
+                      onClick={() => loadPreset(p)}
+                    >
+                      <span className="font-bold">{p.label}</span>
+                      <span className="opacity-60">{p.blurb}</span>
+                      <span className="opacity-60">{p.screen} on screen · {p.plot} to plot</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </details>
+          <button type="button" {...KEY} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
+            link
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".yaml,.yml,.json,.json5,.sh,.txt"
+            className="hidden"
+            onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = '' }}
+          />
+        </div>
+        {notice && (
+          <p className={`mt-[0.5lh] shrink-0 break-words ${notice.error ? 'font-bold' : 'opacity-60'}`}>
+            {notice.error ? `✗ ${notice.text}` : notice.text}
+          </p>
+        )}
+
+        <div className="mt-[1lh] flex shrink-0 items-center gap-[1ch]">
+          <span className={`mr-auto truncate ${dirty ? 'font-bold' : 'opacity-50'}`}>
+            {dirty ? 'edited, not applied' : 'in step with the map'}
+          </span>
+          <button type="button" {...KEY} disabled={!dirty} onClick={revertDraft}>
+            revert
+          </button>
+          <button type="button" size-="small" variant-={dirty ? 'foreground0' : 'background1'} disabled={!dirty} title="⌘/Ctrl + Enter" onClick={applyDraft}>
+            apply
+          </button>
+        </div>
+        {error && <p className="mt-[0.5lh] shrink-0 font-bold break-words">✗ {error}</p>}
+
+        <div className="relative mt-[0.5lh] min-h-0 flex-1 overflow-hidden border-t border-black/15 pt-[0.5lh]">
+          {shown && (
+            <button
+              type="button"
+              {...KEY}
+              title={`Copy the ${VIEWS[view].label}`}
+              className="absolute top-[0.5lh] right-[2ch] z-10"
+              onClick={() => copy(shown, VIEWS[view].label)}
+            >
+              copy
+            </button>
+          )}
+          {schema ? (
+            <Editor
+              height="100%"
+              language={VIEWS[view].language}
+              theme={EDITOR_THEME}
+              value={shown}
+              onChange={(v) => { setDraft(v ?? ''); setError('') }}
+              beforeMount={(monaco) => {
+                monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({ validate: false })
+                registerCliLanguage(monaco)
+                defineEditorTheme(monaco)
+              }}
+              onMount={(editor, monaco) => {
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => applyDraftRef.current())
+                // Monaco measures glyphs once; a web font that lands later
+                // would leave the cursor out of step with the text.
+                document.fonts.ready.then(() => monaco.editor.remeasureFonts())
+              }}
+              options={{
+                minimap: { enabled: false },
+                fontFamily: editorFont(),
+                fontSize: 11,
+                bracketPairColorization: { enabled: false },
+                lineNumbersMinChars: 3,
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                wrappingIndent: 'deepIndent',
+                tabSize: 2,
+                insertSpaces: true,
+                detectIndentation: false,
+              }}
+            />
+          ) : (
+            <p className="opacity-40">loading parameters…</p>
+          )}
+        </div>
+      </Panel>
+
+      <p className="shrink-0 px-[1ch] opacity-40">
+        Elevation: AWS Terrain Tiles. Basemap: Mapbox.
+      </p>
     </aside>
   )
 }

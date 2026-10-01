@@ -434,17 +434,17 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
 
   if (!MAPBOX_TOKEN) {
     return (
-      <div className="flex h-full min-w-0 items-center justify-center border-r border-base-content p-8">
-        <div className="max-w-md space-y-3 font-mono text-sm">
+      <div className="flex h-full min-w-0 items-center justify-center border-r border-black p-8">
+        <div box-="square" className="max-w-md space-y-[1lh]">
           <p className="font-bold">Mapbox token required</p>
           <p className="opacity-70">
             Create a token at{' '}
-            <a className="link" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noreferrer">
+            <a className="underline" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noreferrer">
               account.mapbox.com
             </a>
             , then put it in <code>web/.env.local</code>:
           </p>
-          <pre className="border border-base-content bg-base-200 p-3 text-xs">
+          <pre className="bg-[var(--background1)] px-[1ch]">
             VITE_MAPBOX_TOKEN=pk.…
           </pre>
           <p className="opacity-70">Restart <code>npm run dev</code> after saving.</p>
@@ -531,7 +531,7 @@ function FrameOverlay({ frame, map }) {
 /* ---------------------------------------------------------------- */
 
 /** A number box that commits on Enter or blur; anything not above 0 is refused. */
-function NumInput({ value, onCommit, label, className = 'w-14' }) {
+function NumInput({ value, onCommit, label, className = 'w-[7ch]' }) {
   const [text, setText] = useState(String(value ?? ''))
   const [editing, setEditing] = useState(false)
 
@@ -551,7 +551,7 @@ function NumInput({ value, onCommit, label, className = 'w-14' }) {
       type="text"
       inputMode="decimal"
       aria-label={label}
-      className={`input input-xs h-6 shrink-0 px-1.5 text-right font-mono text-[11px] tabular-nums ${className}`}
+      className={`min-w-0 shrink-0 px-[0.5ch] text-right tabular-nums ${className}`}
       value={text}
       onFocus={() => setEditing(true)}
       onChange={(e) => setText(e.target.value)}
@@ -566,7 +566,7 @@ function NumInput({ value, onCommit, label, className = 'w-14' }) {
 
 function FlagRow({ flag, children }) {
   return (
-    <div className="flex items-center gap-1 font-mono text-[11px]">
+    <div className="flex items-center gap-[1ch]">
       <span className="mr-auto">{flag}</span>
       {children}
     </div>
@@ -610,37 +610,22 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
 
   return (
     <div className="flex flex-col-reverse items-start gap-2">
-      <button
-        type="button"
-        aria-expanded={open}
-        className="btn btn-sm border-base-content bg-base-content text-base-100 shadow-md hover:bg-base-content/85"
-        onClick={() => onOpenChange(!open)}
-      >
-        Download
-        <svg
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          className={`ml-0.5 h-3.5 w-3.5 transition-transform duration-150 ${open ? '' : 'rotate-180'}`}
-        >
-          <path d="M5 7.5l5 5 5-5" />
-        </svg>
+      <button type="button" aria-expanded={open} size-="small" onClick={() => onOpenChange(!open)}>
+        download {open ? '▾' : '▴'}
       </button>
 
       {open && (
-        <div className="flex w-72 flex-col gap-2 rounded-lg border border-base-content/25 bg-base-100 p-3 shadow-md">
-          <div role="tablist" className="join w-full">
+        <div box-="square" className="flex w-[44ch] flex-col gap-[0.5lh] bg-white">
+          <div role="tablist" className="flex">
             {[['land', '--terrain-size'], ['paper', '--frame-size']].map(([id, flag]) => (
               <button
                 key={id}
                 type="button"
                 role="tab"
                 aria-selected={frame.mode === id}
-                className={`btn btn-xs join-item flex-1 font-mono text-[10px] normal-case ${frame.mode === id ? 'border-base-content bg-base-content text-base-100' : 'border-base-content/25 bg-base-100'}`}
+                size-="small"
+                variant-={frame.mode === id ? 'foreground0' : 'background1'}
+                className="flex-1"
                 onClick={() => setMode(id)}
               >
                 {flag}
@@ -656,7 +641,7 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
           </FlagRow>
           <FlagRow flag="--export-scale">
             <span className="opacity-50">1:</span>
-            <NumInput label="Scale" className="w-20" value={frame.scale} onCommit={(v) => setFrame({ ...frame, scale: v })} />
+            <NumInput label="Scale" className="w-[10ch]" value={frame.scale} onCommit={(v) => setFrame({ ...frame, scale: v })} />
             <span className="w-5" />
           </FlagRow>
           <FlagRow flag="--pen-width">
@@ -665,7 +650,7 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
           </FlagRow>
 
           {ground && paper && (
-            <p className="font-mono text-[10px] tabular-nums opacity-50">
+            <p className="tabular-nums opacity-50">
               {frame.mode === 'land'
                 ? `paper ${sig3(paper[0])} × ${sig3(paper[1])} mm`
                 : `ground ${sig3(ground[0])} × ${sig3(ground[1])} km`}
@@ -673,25 +658,26 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
             </p>
           )}
 
-          <div className="grid grid-cols-2 gap-1.5 border-t border-base-content/15 pt-2">
+          <div className="grid grid-cols-2 gap-[1ch] border-t border-black/15 pt-[0.5lh]">
             <button
               type="button"
-              className="btn btn-xs btn-neutral"
+              size-="small"
               disabled={!drawing?.svg}
               onClick={() => save(exportSvg(), 'image/svg+xml', 'burin-map.svg')}
             >
-              SVG
+              svg
             </button>
             <button
               type="button"
-              className="btn btn-xs border-base-content/25"
+              size-="small"
+              variant-="background1"
               disabled={!drawing?.geojson}
               onClick={() => save(exportGeojson(), 'application/geo+json', 'burin-map.geojson')}
             >
-              GeoJSON
+              geojson
             </button>
           </div>
-          {!drawing?.svg && <p className="font-mono text-[10px] opacity-50">Waiting for the drawing…</p>}
+          {!drawing?.svg && <p className="opacity-50">waiting for the drawing…</p>}
         </div>
       )}
     </div>

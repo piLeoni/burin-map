@@ -58,7 +58,7 @@ await act(async () => {
 await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 
 const html = document.getElementById('root').innerHTML
-const checks = ['>YAML<', '>JSON5<', '>CLI<', 'Load ▾', 'Import', 'Download', 'Copy', 'Link', 'In step with the map']
+const checks = ['>YAML<', '>JSON5<', '>CLI<', 'load ▾', 'import', 'download', 'copy', 'link', 'in step with the map']
 const missing = checks.filter((c) => !html.includes(c))
 if (html.includes('type="range"')) missing.push('the sliders should be gone')
 if (html.includes('Parameters')) missing.push('the Parameters tab should be gone')

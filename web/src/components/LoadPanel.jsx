@@ -66,7 +66,7 @@ export default function LoadPanel({ title, load }) {
   const label = Math.max(9, ...load.tasks.map((t) => t.label.length + (t.child ? 2 : 0)))
   const spin = SPIN[Math.floor(now / 80) % SPIN.length]
   return (
-    <div className="w-[34rem] max-w-[92%] border border-base-content bg-base-100 p-3 font-mono text-[11px] leading-snug text-base-content">
+    <div className="w-[34rem] max-w-[92%] border border-black bg-white p-3 font-mono text-[11px] leading-snug text-black">
       <div className="mb-2 truncate">
         <span className="font-bold">please wait</span>
         <span className="opacity-50"> ▸ {title}</span>
@@ -96,7 +96,7 @@ export default function LoadPanel({ title, load }) {
         })}
       </div>
       {load.log.length > 0 && (
-        <div ref={logRef} className="mt-2 max-h-24 overflow-hidden border-t border-base-content/20 pt-1">
+        <div ref={logRef} className="mt-2 max-h-24 overflow-hidden border-t border-black/20 pt-1">
           {load.log.map((l, i) => (
             <div
               key={i}
