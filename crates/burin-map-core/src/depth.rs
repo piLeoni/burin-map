@@ -98,14 +98,18 @@ pub fn build_depth_grid(elev: &[f32], coverage: &[f32], override_: Option<&[f32]
 #[must_use]
 pub fn needs_depth(batches: &[WaterBatch], shoreline: Option<&Shoreline>) -> bool {
     batches.iter().any(batch_needs_depth)
-        || shoreline.is_some_and(|s| expr_uses_depth(s.color_expr.as_deref()))
+        || shoreline.is_some_and(|s| {
+            expr_uses_depth(s.color_expr.as_deref()) || expr_uses_depth(s.width_expr.as_deref())
+        })
 }
 
 fn batch_needs_depth(b: &WaterBatch) -> bool {
-    b.r#where.is_active() || expr_uses_depth(b.color_expr.as_deref())
+    b.r#where.is_active()
+        || expr_uses_depth(b.color_expr.as_deref())
+        || expr_uses_depth(b.width_expr.as_deref())
 }
 
-/// True when `color_expr` references the `depth` scalar.
+/// True when a colour or width expression references the `depth` scalar.
 #[must_use]
 pub fn expr_uses_depth(expr: Option<&str>) -> bool {
     let Some(s) = expr.filter(|t| !t.is_empty()) else {

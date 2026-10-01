@@ -62,6 +62,11 @@ self.onmessage = async ({ data }) => {
     lap('worker: engine ready')
     const adapter = data.gpu ? await loadGpu(m) : null
     if (data.gpu) lap('worker: WebGPU ready')
+    // Shared only by the threaded build: then the page can watch the draw.
+    const board = m.progressBoard?.()
+    if (typeof SharedArrayBuffer !== 'undefined' && board?.buffer instanceof SharedArrayBuffer) {
+      self.postMessage({ id, board, draws: Atomics.load(board, 0) + 1 })
+    }
     const d = adapter != null
       ? await m.draw_batches_gpu(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined, water ?? null)
       : m.draw_batches(elev, width, height, pxM, json, geo ?? null, mmPerPx ?? undefined, water ?? null)

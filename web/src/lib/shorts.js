@@ -38,6 +38,7 @@ export const PARAM_SHORTS = {
   input_blur: 'ib',
   input_broad_blur: 'ibb',
   input_broad: 'ibr',
+  input_height: 'ih',
   sun_azimuth: 'sa',
   sun_altitude: 'salt',
   sun_exag: 'sx',

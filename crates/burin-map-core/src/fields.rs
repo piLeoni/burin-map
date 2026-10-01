@@ -201,6 +201,60 @@ pub(crate) fn wobble(
         });
 }
 
+/// Lay height over a batch's shading: its input moves `input_height` of the
+/// way from the shade to the height's rank among the ground the batch walks,
+/// the highest 1 (or with a negative `input_height` the lowest), and its
+/// spacing follows the new input as it followed the shade.
+pub fn heighten(f: &mut Fields, elev: &[f32], st: &Style) {
+    let k = st.input_height.clamp(-1.0, 1.0);
+    if k == 0.0 {
+        return;
+    }
+    let (lo, hi) = elev
+        .iter()
+        .zip(&f.walkable)
+        .filter(|(_, &w)| w)
+        .fold((f32::MAX, f32::MIN), |(a, b), (&e, _)| (a.min(e), b.max(e)));
+    if hi <= lo {
+        return;
+    }
+    const BINS: usize = 1024;
+    let bin = |e: f32| {
+        (((e - lo) / (hi - lo)) * (BINS - 1) as f32).clamp(0.0, (BINS - 1) as f32) as usize
+    };
+    let mut hist = vec![0u32; BINS];
+    for (&e, _) in elev.iter().zip(&f.walkable).filter(|(_, &w)| w) {
+        hist[bin(e)] += 1;
+    }
+    let total = hist.iter().sum::<u32>().max(1) as f32;
+    let mut below = 0u32;
+    let rank: Vec<f32> = hist
+        .iter()
+        .map(|&n| {
+            let r = (below as f32 + n as f32 * 0.5) / total;
+            below += n;
+            r
+        })
+        .collect();
+    let shade_k = |t: f32| (st.space_light + (st.space_dark - st.space_light) * t).max(0.05);
+    let (smin, smax) = (st.space * 0.05, st.space * 4.0);
+    f.input
+        .par_iter_mut()
+        .zip(&mut f.space)
+        .zip(&f.walkable)
+        .zip(elev)
+        .for_each(|(((t, s), &w), &e)| {
+            if !w {
+                return;
+            }
+            let r = rank[bin(e)];
+            let r = if k > 0.0 { r } else { 1.0 - r };
+            let t1 = *t + (r - *t) * k.abs();
+            *s = (*s * shade_k(t1) / shade_k(*t)).clamp(smin, smax);
+            *t = t1;
+        });
+}
+
 /// Fields for one batch: rotate the contour direction by `batch.angle` degrees,
 /// rescale pitch to `batch.style.space`, and optionally gate on `batch_floor`.
 pub fn batch_fields(base: &Fields, batch: &crate::style::Batch, base_space: f32) -> Fields {

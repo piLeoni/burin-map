@@ -27,6 +27,8 @@
  * @typedef {{ area: Record<string, any>, batches: Array<{ name?: string, angle: number, style: Record<string, number> }>, notes: Record<string, Note> }} Model
  */
 import { LineCounter, parseDocument, isMap, isSeq, isScalar, stringify as yamlStringify } from 'yaml'
+import { FILL_WHERE_KEYS, LAND_DRAWS, readFillWhere } from './fill.js'
+import { INK_HELP, INK_KEYS, readInk } from './ink.js'
 import { SHORT_PARAMS } from './shorts.js'
 
 export const VIEWS = {
@@ -86,12 +88,22 @@ function paramByName(schema, name) {
 
 const ANGLE_NOTE = 'default 0'
 const GROUND_NOTE = 'land (default) or sea: sea draws the seabed like land, and nothing on land'
+const OLD_LAND_DRAW_NOTE = 'lines (default) or dots: stippling, denser where lines would be'
+const LAND_DRAW_NOTE = 'lines (default), dots (stippling), or fill: a flat area over the batches before it'
+const FILL_WHERE_NOTE = 'heights and depths in m; leave a limit out to keep it open'
+const FILL_COLOR_NOTE = 'fill colour as #rgb or #rrggbb; light grey when left out'
+
+/** A land batch's ink settings, a fill's colour noted as such. */
+const landInk = (b, json) => inkHead(b, json).map(([k, v, help]) => [k, v, b.draw === 'fill' && k === 'color' ? FILL_COLOR_NOTE : help])
+
+/** A land batch's kind of style: lines, dots, or a fill. */
+const landKind = (b) => (b.draw === 'dots' ? 'land-dots' : b.draw === 'fill' ? 'land-fill' : 'land')
 
 /**
  * Where a style is: `land`, a `water` batch that draws lines, `ripples` or
  * `dots`, or the `shoreline`. Each has its own defaults, and leaves out what
  * means nothing there.
- * @typedef {'land' | 'water' | 'ripples' | 'dots' | 'shoreline'} Kind
+ * @typedef {'land' | 'land-dots' | 'land-fill' | 'water' | 'ripples' | 'dots' | 'shoreline'} Kind
  */
 
 /** A parameter's default in a style of that kind. */
@@ -99,6 +111,7 @@ function defaultOf(p, kind) {
   if (kind === 'water') return p.water_default ?? p.default
   if (kind === 'ripples') return p.ripples_default ?? p.default
   if (kind === 'dots') return p.dots_default ?? p.default
+  if (kind === 'land-dots') return p.name === 'water_size' ? (p.dots_default ?? p.default) : p.default
   if (kind === 'shoreline') return p.shoreline_default ?? p.default
   return p.default
 }
@@ -131,6 +144,14 @@ const WATER_SKIPS = new Set(['space_steep', 'space_steep_gamma', 'batch_floor', 
 
 /** Parameters that mean nothing there: terrain shading on water, water settings on land. */
 function skipsParam(p, kind) {
+  // A fill only softens its band's edges.
+  if (kind === 'land-fill') return p.name !== 'input_blur'
+  if (kind === 'land-dots') {
+    if (p.group === 'water') return !['water_size', 'water_patches'].includes(p.name)
+    if (p.group === 'dash') return p.name !== 'dash_cutoff'
+    if (p.group === 'mod') return !['mod_jitter', 'mod_wobble', 'mod_wobble_size', 'mod_smooth'].includes(p.name)
+    return p.group === 'engine'
+  }
   if (kind === 'shoreline') return !SHORELINE_PARAMS.has(p.name)
   if (kind === 'ripples') return !RIPPLES_PARAMS.has(p.name)
   if (kind === 'dots') return !DOTS_PARAMS.has(p.name)
@@ -154,15 +175,21 @@ const WATER_HELP = {
   follow: 'shore: along the coast; map: one direction over the whole map',
   draw: 'lines fill the water; ripples draw broken rows of hand-drawn waves; dots stipple it',
   angle: 'follow shore: 0 along the coast, 90 straight out; follow map: degrees from north',
-  layer: 'SVG layer id for export; separate from name, which is only a label in the app',
-  color: 'stroke colour as #rgb or #rrggbb',
-  color_expr: 'colour from a small expression; see SYNTAX.md (static hex works today)',
+  ...INK_HELP,
 }
 
-const INK_KEYS = ['layer', 'color', 'color_expr']
+/** What older builds wrote after an ink key, still recognised as generated. */
+const OLD_INK_HELP = { color_expr: 'colour from a small expression; see SYNTAX.md (static hex works today)' }
 
-function inkHead(b) {
-  return INK_KEYS.flatMap((k) => (b[k] ? [[k, yamlValue(b[k]), WATER_HELP[k]]] : []))
+const inkNotes = (k) => [INK_HELP[k], OLD_INK_HELP[k]].filter(Boolean)
+
+/** `[key, value, help]` for each ink setting `b` has; `json` quotes the text. */
+function inkHead(b, json = false) {
+  return INK_KEYS.flatMap((k) => {
+    if (b[k] == null || b[k] === '') return []
+    const v = typeof b[k] === 'number' ? num(b[k]) : json ? JSON.stringify(b[k]) : yamlValue(b[k])
+    return [[k, v, INK_HELP[k]]]
+  })
 }
 
 /** Trailing comments that are generated for a path — today's and older, longer ones. */
@@ -171,20 +198,25 @@ function generatedAfter(schema, path) {
   if (parts[0] === 'area' && parts.length === 2) return [AREA_HELP[parts[1]]]
   if (parts[0] === 'batches' && parts[2] === 'angle') return [ANGLE_NOTE, ANGLE_HELP]
   if (parts[0] === 'batches' && parts[2] === 'ground') return [GROUND_NOTE]
+  if (parts[0] === 'batches' && parts[2] === 'draw') return [LAND_DRAW_NOTE, OLD_LAND_DRAW_NOTE]
+  if (parts[0] === 'batches' && parts[2] === 'where') return [FILL_WHERE_NOTE]
+  if (parts[0] === 'batches' && parts[2] === 'color' && parts.length === 3) return [FILL_COLOR_NOTE, ...inkNotes('color')]
+  if (parts[0] === 'batches' && parts.length === 3 && INK_HELP[parts[2]]) return inkNotes(parts[2])
   if (parts[0] === 'batches' && parts[2] === 'style' && parts.length === 4) {
     const p = paramByName(schema, parts[3])
-    if (p) return [defaultNote(p), p.help, `${p.help} (default ${num(p.default)})`]
+    if (p) return [defaultNote(p), defaultNote(p, 'land-dots'), p.help, `${p.help} (default ${num(p.default)})`]
   }
   if (parts[0] === 'water') {
     if (parts.length === 1) return [WATER_HELP.water]
     if (parts.length === 2) return [WATER_HELP[parts[1]]]
     if (parts[1] === 'batches' && parts[3] === 'angle') return [ANGLE_NOTE, ANGLE_HELP]
-    if (parts[1] === 'batches' && parts.length === 4) return [WATER_HELP[parts[3]]]
+    if (parts[1] === 'batches' && parts.length === 4) return [WATER_HELP[parts[3]], ...inkNotes(parts[3])]
     if (parts[1] === 'batches' && parts[3] === 'style' && parts.length === 5) {
       const p = paramByName(schema, parts[4])
       if (p) return [defaultNote(p, 'water'), defaultNote(p, 'ripples'), defaultNote(p, 'dots')]
     }
     if (parts[1] === 'shoreline' && parts[2] === 'lines') return [WATER_HELP.lines]
+    if (parts[1] === 'shoreline' && parts.length === 3 && INK_HELP[parts[2]]) return inkNotes(parts[2])
     if (parts[1] === 'shoreline' && parts[2] === 'style' && parts.length === 4) {
       const p = paramByName(schema, parts[3])
       if (p) return [defaultNote(p, 'shoreline')]
@@ -279,10 +311,11 @@ function isTerrain(p) {
   return p.group === 'input' || p.group === 'sun' || TERRAIN_NAMES.has(p.name)
 }
 
-/** For each land batch, the terrain values it takes from the batches above. */
+/** For each land batch, the terrain values it takes from the batches above; fills take and give none. */
 function inheritedTerrain(batches, schema) {
   let carry = {}
   return batches.map((b) => {
+    if (b.draw === 'fill') return {}
     const mine = carry
     carry = { ...carry }
     for (const p of schema.params) if (isTerrain(p) && p.name in b.style) carry[p.name] = b.style[p.name]
@@ -344,9 +377,12 @@ function renderYaml(model, schema) {
     aboveRows(rows, n[base], 2)
     const head = []
     if (b.name) head.push(['name', yamlValue(b.name), undefined])
-    head.push(...inkHead(b))
-    head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
+    head.push(...landInk(b))
+    if (b.draw !== 'fill' || b.angle) head.push(['angle', num(b.angle ?? 0), ANGLE_NOTE])
     if (b.ground === 'sea') head.push(['ground', 'sea', GROUND_NOTE])
+    if (b.draw === 'dots' || b.draw === 'fill') head.push(['draw', b.draw, LAND_DRAW_NOTE])
+    const where = flowBlock(b.where, FILL_WHERE_KEYS, false)
+    if (where) head.push(['where', where, FILL_WHERE_NOTE])
     head.forEach(([k, v, help], j) => {
       const path = `${base}.${k}`
       aboveRows(rows, n[path], j === 0 ? 2 : 4)
@@ -354,7 +390,7 @@ function renderYaml(model, schema) {
     })
     aboveRows(rows, n[`${base}.style`], 4)
     rows.push(code(4, 'style:', n[`${base}.style`]?.after))
-    styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'land', inherited[i])
+    styleRows(rows, b.style, base, schema, n, 6, (k, v) => `${k}: ${num(v)}`, landKind(b), inherited[i])
   })
 
   const bathy = flowBlock(model.bathymetry, BATHYMETRY_KEYS, false)
@@ -377,6 +413,10 @@ function renderYaml(model, schema) {
       rows.push(code(2, 'shoreline:', n['water.shoreline']?.after ?? WATER_HELP.shoreline))
       aboveRows(rows, n['water.shoreline.lines'], 4)
       rows.push(code(4, `lines: ${num(w.shoreline.lines)}`, n['water.shoreline.lines']?.after ?? WATER_HELP.lines))
+      for (const [k, v, help] of inkHead(w.shoreline)) {
+        aboveRows(rows, n[`water.shoreline.${k}`], 4)
+        rows.push(code(4, `${k}: ${v}`, n[`water.shoreline.${k}`]?.after ?? help))
+      }
       aboveRows(rows, n['water.shoreline.style'], 4)
       rows.push(code(4, 'style:', n['water.shoreline.style']?.after))
       styleRows(rows, w.shoreline.style, 'water.shoreline', schema, n, 6, (k, v) => `${k}: ${num(v)}`, 'shoreline')
@@ -517,15 +557,30 @@ function renderJson5(model, schema) {
       aboveRows(rows, n[`${base}.name`], 6)
       rows.push(code(6, `"name": ${JSON.stringify(b.name)},`, n[`${base}.name`]?.after))
     }
-    aboveRows(rows, n[`${base}.angle`], 6)
-    rows.push(code(6, `"angle": ${num(b.angle ?? 0)},`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
+    for (const [k, v, help] of landInk(b, true)) {
+      aboveRows(rows, n[`${base}.${k}`], 6)
+      rows.push(code(6, `"${k}": ${v},`, n[`${base}.${k}`]?.after ?? help))
+    }
+    if (b.draw !== 'fill' || b.angle) {
+      aboveRows(rows, n[`${base}.angle`], 6)
+      rows.push(code(6, `"angle": ${num(b.angle ?? 0)},`, n[`${base}.angle`]?.after ?? ANGLE_NOTE))
+    }
     if (b.ground === 'sea') {
       aboveRows(rows, n[`${base}.ground`], 6)
       rows.push(code(6, '"ground": "sea",', n[`${base}.ground`]?.after ?? GROUND_NOTE))
     }
+    if (b.draw === 'dots' || b.draw === 'fill') {
+      aboveRows(rows, n[`${base}.draw`], 6)
+      rows.push(code(6, `"draw": "${b.draw}",`, n[`${base}.draw`]?.after ?? LAND_DRAW_NOTE))
+    }
+    const where = flowBlock(b.where, FILL_WHERE_KEYS, true)
+    if (where) {
+      aboveRows(rows, n[`${base}.where`], 6)
+      rows.push(code(6, `"where": ${where},`, n[`${base}.where`]?.after ?? FILL_WHERE_NOTE))
+    }
     aboveRows(rows, n[`${base}.style`], 6)
     rows.push(code(6, '"style": {', n[`${base}.style`]?.after))
-    styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'land', inherited[i])
+    styleRows(rows, b.style, base, schema, n, 8, (k, v) => `"${k}": ${num(v)},`, landKind(b), inherited[i])
     rows.push(code(6, '},'))
     rows.push(code(4, '},'))
   })
@@ -551,6 +606,10 @@ function renderJson5(model, schema) {
       rows.push(code(4, '"shoreline": {', n['water.shoreline']?.after ?? WATER_HELP.shoreline))
       aboveRows(rows, n['water.shoreline.lines'], 6)
       rows.push(code(6, `"lines": ${num(w.shoreline.lines)},`, n['water.shoreline.lines']?.after ?? WATER_HELP.lines))
+      for (const [k, v, help] of inkHead(w.shoreline, true)) {
+        aboveRows(rows, n[`water.shoreline.${k}`], 6)
+        rows.push(code(6, `"${k}": ${v},`, n[`water.shoreline.${k}`]?.after ?? help))
+      }
       aboveRows(rows, n['water.shoreline.style'], 6)
       rows.push(code(6, '"style": {', n['water.shoreline.style']?.after))
       styleRows(rows, w.shoreline.style, 'water.shoreline', schema, n, 8, (k, v) => `"${k}": ${num(v)},`, 'shoreline')
@@ -571,6 +630,7 @@ function renderJson5(model, schema) {
         rows.push(code(8, `"${k}": ${v},`, n[`${base}.${k}`]?.after ?? help))
       }
       if (b.name) field('name', JSON.stringify(b.name))
+      for (const [k, v, help] of inkHead(b, true)) field(k, v, help)
       field('follow', JSON.stringify(b.follow), WATER_HELP.follow)
       field('draw', JSON.stringify(b.draw ?? 'lines'), WATER_HELP.draw)
       field('angle', num(b.angle ?? 0), ANGLE_NOTE)
@@ -1022,11 +1082,13 @@ function readWater(w, schema) {
   if (w.shoreline === false) out.shoreline = false
   else if (w.shoreline != null && typeof w.shoreline === 'object' && !Array.isArray(w.shoreline)) {
     for (const k of Object.keys(w.shoreline)) {
-      if (!['lines', 'style'].includes(k)) throw new Error(`Unknown setting "${k}" in water.shoreline: use lines and style`)
+      if (!['lines', ...INK_KEYS, 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in water.shoreline: use lines, ${INK_KEYS.join(', ')} and style`)
+      }
     }
     const lines = w.shoreline.lines == null ? 1 : Number(w.shoreline.lines)
     if (!Number.isInteger(lines) || lines < 1) throw new Error('water.shoreline.lines must be a whole number, 1 or more')
-    out.shoreline = { lines, style: readStyle(w.shoreline.style, 'the shoreline', schema) }
+    out.shoreline = { lines, ...readInk(w.shoreline, 'water.shoreline'), style: readStyle(w.shoreline.style, 'the shoreline', schema) }
   } else if (w.shoreline != null && w.shoreline !== true) {
     throw new Error('water.shoreline is true, false, or a block with lines and a style')
   }
@@ -1036,13 +1098,14 @@ function readWater(w, schema) {
     const which = `water batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'layer', 'color', 'color_expr', 'where', 'follow', 'draw', 'angle', 'style'].includes(k)) {
-        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, where, follow, draw, angle and style`)
+      if (!['name', ...INK_KEYS, 'where', 'follow', 'draw', 'angle', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, ${INK_KEYS.join(', ')}, where, follow, draw, angle and style`)
       }
     }
     const follow = b.follow ?? 'shore'
     if (follow !== 'shore' && follow !== 'map') throw new Error(`follow in ${which} is "shore" or "map", not "${follow}"`)
     const draw = b.draw ?? 'lines'
+    if (draw === 'fill') throw new Error(`Fills are land batches: put ${which}'s fill in batches, with ground: sea for the water`)
     if (!WATER_DRAWS.includes(draw)) throw new Error(`draw in ${which} is ${WATER_DRAWS.map((d) => `"${d}"`).join(', ')}, not "${draw}"`)
     const angle = b.angle == null ? 0 : Number(b.angle)
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
@@ -1054,9 +1117,7 @@ function readWater(w, schema) {
       ...(draw !== 'lines' ? { draw } : {}),
       angle,
       style,
-      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
-      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),
-      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr.trim() } : {}),
+      ...readInk(b, which),
       ...(where ? { where } : {}),
     }
     return name ? { name, ...batch } : batch
@@ -1125,13 +1186,20 @@ function toModel(value, notes, schema) {
     const which = `batch ${i + 1}`
     if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error(`${which} must be a block of settings`)
     for (const k of Object.keys(b)) {
-      if (!['name', 'layer', 'color', 'color_expr', 'angle', 'ground', 'style'].includes(k)) {
-        throw new Error(`Unknown setting "${k}" in ${which}: use name, layer, color, color_expr, angle, ground and style`)
+      if (!['name', ...INK_KEYS, 'angle', 'ground', 'draw', 'where', 'style'].includes(k)) {
+        throw new Error(`Unknown setting "${k}" in ${which}: use name, ${INK_KEYS.join(', ')}, angle, ground, draw, where and style`)
       }
     }
     if (b.ground != null && b.ground !== 'land' && b.ground !== 'sea') {
       throw new Error(`ground in ${which} is land or sea`)
     }
+    if (b.draw != null && !LAND_DRAWS.includes(b.draw)) {
+      throw new Error(`draw in ${which} is lines, dots or fill; ripples are for water`)
+    }
+    if (b.where != null && b.draw !== 'fill') {
+      throw new Error(`where in ${which} is for fills (draw: fill); water batches keep their own where`)
+    }
+    const where = readFillWhere(b.where, which)
     const angle = b.angle == null ? 0 : Number(b.angle)
     if (!Number.isFinite(angle)) throw new Error(`The angle of ${which} must be a number`)
     const style = readStyle(b.style, which, schema)
@@ -1139,10 +1207,10 @@ function toModel(value, notes, schema) {
     const batch = {
       angle,
       ...(b.ground === 'sea' ? { ground: 'sea' } : {}),
+      ...(b.draw === 'dots' || b.draw === 'fill' ? { draw: b.draw } : {}),
+      ...(where ? { where } : {}),
       style,
-      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer.trim() } : {}),
-      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color.trim() } : {}),
-      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr.trim() } : {}),
+      ...readInk(b, which),
     }
     return name ? { name, ...batch } : batch
   })

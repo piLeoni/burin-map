@@ -1,5 +1,7 @@
 /** Terrarium DEM mosaic for a lon/lat bounding box → Float32 elevation grid. */
 
+import { fetchTile, limiter } from './net'
+
 const TERRARIUM = '/terrarium'
 const TILE = 256
 const R = 6378137
@@ -51,9 +53,13 @@ function touchCache(key, elev) {
   }
 }
 
-async function fetchTileElev(z, x, y) {
-  const r = await fetch(`${TERRARIUM}/${z}/${x}/${y}.png`)
-  if (!r.ok) return new Float32Array(TILE * TILE)
+const run = limiter(8)
+
+async function fetchTileElev(z, x, y, progress) {
+  const onRetry = (why, n, ms) => progress?.log(`elevation ${z}/${x}/${y}: ${why}, retry ${n} in ${ms / 1000} s`, 'warn')
+  const r = await fetchTile(`${TERRARIUM}/${z}/${x}/${y}.png`, { run, onRetry })
+  // Terrarium covers the world; a tile it lacks is open sea at sea level.
+  if (!r) return new Float32Array(TILE * TILE)
   const bmp = await createImageBitmap(await r.blob())
   const c = new OffscreenCanvas(TILE, TILE)
   const g = c.getContext('2d', { willReadFrequently: true })
@@ -66,11 +72,54 @@ async function fetchTileElev(z, x, y) {
   return elev
 }
 
+/** Below this zoom no tile is patched from its parent. */
+const PATCH_MIN_Z = 5
+
+/**
+ * Sea the tile has at exactly 0 m where its parent, a zoom level out, has a
+ * seabed: from z11 up Terrarium has whole tiles of open sea missing their
+ * bathymetry, and contours ring each one. Land, and sea the parent has at
+ * 0 m too, stay as they are. True if any pixel changed.
+ */
+function patchSea(elev, parent, x, y) {
+  const ox = (x & 1) * (TILE / 2)
+  const oy = (y & 1) * (TILE / 2)
+  const at = (px, py) => parent[Math.min(TILE - 1, Math.max(0, py)) * TILE + Math.min(TILE - 1, Math.max(0, px))]
+  let changed = false
+  for (let j = 0, i = 0; j < TILE; j++) {
+    for (let k = 0; k < TILE; k++, i++) {
+      if (elev[i] !== 0) continue
+      const u = ox + (k + 0.5) / 2 - 0.5
+      const v = oy + (j + 0.5) / 2 - 0.5
+      const u0 = Math.floor(u)
+      const v0 = Math.floor(v)
+      const fu = u - u0
+      const fv = v - v0
+      const e =
+        (at(u0, v0) * (1 - fu) + at(u0 + 1, v0) * fu) * (1 - fv) +
+        (at(u0, v0 + 1) * (1 - fu) + at(u0 + 1, v0 + 1) * fu) * fv
+      if (e < 0) {
+        elev[i] = e
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
+/** A fetched tile with its missing seabed taken from its parent, itself patched in turn. */
+async function patchedTile(z, x, y, progress) {
+  const elev = await fetchTileElev(z, x, y, progress)
+  if (z <= PATCH_MIN_Z || !elev.includes(0)) return { elev, patched: false }
+  const { elev: parent } = await tileElev(z - 1, x >> 1, y >> 1, progress)
+  return { elev, patched: patchSea(elev, parent, x, y) }
+}
+
 /**
  * Cached terrarium tile. Reuses memory + dedupes concurrent requests for the same z/x/y.
- * @returns {Promise<{ elev: Float32Array, cached: boolean }>}
+ * @returns {Promise<{ elev: Float32Array, cached: boolean, patched?: boolean }>}
  */
-async function tileElev(z, x, y) {
+async function tileElev(z, x, y, progress) {
   x = wrapTileX(x, z)
   const key = `${z}/${x}/${y}`
   if (tileCache.has(key)) {
@@ -79,15 +128,15 @@ async function tileElev(z, x, y) {
     return { elev, cached: true }
   }
   if (inflight.has(key)) {
-    const elev = await inflight.get(key)
+    const { elev } = await inflight.get(key)
     return { elev, cached: true }
   }
-  const p = fetchTileElev(z, x, y)
+  const p = patchedTile(z, x, y, progress)
   inflight.set(key, p)
   try {
-    const elev = await p
+    const { elev, patched } = await p
     touchCache(key, elev)
-    return { elev, cached: false }
+    return { elev, cached: false, patched }
   } finally {
     inflight.delete(key)
   }
@@ -128,9 +177,9 @@ function cubicWeights(t) {
  * @param {{ west: number, south: number, east: number, north: number }} bounds degrees
  * @param {number} outW
  * @param {number} outH
- * @param {(msg: string) => void} [onProgress]
+ * @param {ReturnType<import('./progress.js').createProgress>} [progress]
  */
-export async function buildDem(bounds, outW, outH, onProgress) {
+export async function buildDem(bounds, outW, outH, progress) {
   let { west: lonW, south: latS, east: lonE, north: latN } = bounds
 
   // Clamp latitude; keep a single world copy of longitude span.
@@ -176,13 +225,18 @@ export async function buildDem(bounds, outW, outH, onProgress) {
       coords.push([z, x, ty])
     }
   }
-  const missing = coords.filter(([zz, x, y]) => {
-    const key = `${zz}/${x}/${y}`
-    return !tileCache.has(key) && !inflight.has(key)
-  }).length
-  if (missing > 0) onProgress?.(`Downloading elevation (${missing} tile${missing === 1 ? '' : 's'})…`)
-
-  const results = await Promise.all(coords.map(([zz, x, y]) => tileElev(zz, x, y)))
+  const task = progress?.task('elevation', 'elevation', coords.length, 'tiles')
+  let results
+  try {
+    results = await Promise.all(coords.map(([zz, x, y]) => tileElev(zz, x, y, progress).then((r) => {
+      task?.tick()
+      return r
+    })))
+  } catch (e) {
+    task?.fail(String(e?.message || e))
+    progress?.log(`elevation: ${e?.message || e}`, 'error')
+    throw e
+  }
   const tiles = results.map((r) => r.elev)
   const cached = results.filter((r) => r.cached).length
   const fetched = results.length - cached
@@ -246,5 +300,7 @@ export async function buildDem(bounds, outW, outH, onProgress) {
       }
     }
   }
+  const patched = results.filter((r) => r.patched).length
+  task?.ok(`z${z} · ${fetched} new${patched ? ` · ${patched} seabed from z${z - 1}` : ''}`)
   return { elev, width: outW, height: outH, pxM, z, tiles: nx * ny, cached, fetched }
 }

@@ -13,10 +13,10 @@ export function waterSpecNeedsDepth(spec) {
     if (!b || typeof b !== 'object') continue
     const w = b.where
     if (w && (w.depth_min != null || w.depth_max != null)) return true
-    if (exprUsesDepth(b.color_expr)) return true
+    if (exprUsesDepth(b.color_expr) || exprUsesDepth(b.width_expr)) return true
   }
   const sh = spec.shoreline
-  if (sh && typeof sh === 'object' && exprUsesDepth(sh.color_expr)) return true
+  if (sh && typeof sh === 'object' && (exprUsesDepth(sh.color_expr) || exprUsesDepth(sh.width_expr))) return true
   return false
 }
 
@@ -33,13 +33,14 @@ export function bathymetryNeedsNetworkFetch(bathymetry) {
  * Optional dedicated bathymetry grid (metres below surface). Returns null when
  * the engine should derive depth from elevation instead.
  */
-export async function fetchBathymetryGrid(bounds, outW, outH, bathymetry, onProgress) {
+export async function fetchBathymetryGrid(bounds, outW, outH, bathymetry, progress) {
   if (!bathymetryNeedsNetworkFetch(bathymetry)) return null
   const src = String(bathymetry?.source ?? 'gebco').trim().toLowerCase()
-  onProgress?.(
+  progress?.log(
     src === 'gebco'
       ? 'GEBCO bathymetry is not wired yet — use bathymetry.source: terrarium'
       : 'Custom bathymetry URL is not wired yet — use terrarium or wait for GEBCO',
+    'warn',
   )
   return null
 }

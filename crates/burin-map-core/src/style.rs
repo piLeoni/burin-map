@@ -13,6 +13,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::fills::Band;
+use crate::pen::{Cap, Ink};
+pub use crate::water::Draw;
+
 /// One style parameter as exposed to CLI / Python / WASM / the web UI.
 #[derive(Clone, Copy, Debug)]
 pub struct Param {
@@ -31,7 +35,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("sun", "Where the light comes from."),
     ("engine", "How lines are traced. Usually best left alone."),
     ("batch", "Settings for this batch only: line width, random seed, and where it draws."),
-    ("water", "Lines on water: where they start and end away from the shore, and how they fade. Water batches only."),
+    ("water", "Lines on water: where they start and end away from the shore, and how they fade. Water batches only, but for the size and patches of dots on land."),
 ];
 
 macro_rules! style {
@@ -121,6 +125,7 @@ style! {
     input: input_blur ("ib"): f32 = 1.8, "smoothing of the fine-detail shading";
     input: input_broad_blur ("ibb"): f32 = 11.5, "smoothing of the large-scale shading (whole ridges and massifs)";
     input: input_broad ("ibr"): f32 = 0.5, "blend of fine and large-scale shading: 0 fine only, 1 large-scale only";
+    input: input_height ("ih"): f32 = 0.0, "how much height, rather than shade, sets the input: 1 the highest ground darkest, -1 the lowest, 0 shade only";
 
     sun: sun_azimuth ("sa"): f32 = 315.0, "direction the light comes from, in degrees clockwise from north";
     sun: sun_altitude ("salt"): f32 = 45.0, "height of the sun above the horizon, in degrees";
@@ -139,8 +144,8 @@ style! {
     water: water_reach ("wr"): f32 = 60.0, "how far out from the shore ink and tracing stay active, in px; does not set line spacing";
     water: water_space_reach ("wsr"): f32 = 120.0, "how far from the shore line spacing eases from space_dark to space_light, in px; 0 keeps spacing fixed at space";
     water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
-    water: water_size ("ws"): f32 = 14.0, "length of each ripple stroke or dot, in px (draw ripples or dots)";
-    water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches";
+    water: water_size ("ws"): f32 = 14.0, "length of each ripple stroke or dot, in px (draw ripples or dots; dots on land too)";
+    water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches (dots on land too)";
     water: water_fray ("wfr"): f32 = 0.0, "how far out from water_start, in px, lines break up into shorter dashes and dots as they near the shore, with a ragged edge; 0 a clean edge";
     water: water_depth_fray ("wdf"): f32 = 0.0, "metres band at a batch depth limit where lines break up into dashes and dots with a ragged edge; uses where.depth_max or depth_min; 0 a clean cut";
 }
@@ -178,11 +183,36 @@ pub struct Batch {
     /// Colour from a small expression; see SYNTAX.md. Ignored when `color` is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_expr: Option<String>,
+    /// Line width as a multiple of `batch_stroke`, from an expression like
+    /// `color_expr`'s scalars; see SYNTAX.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_expr: Option<String>,
+    /// Rounds the widths from `width_expr` to this many, each its own layer;
+    /// 0 keeps them as they come.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub width_steps: u32,
+    /// How the ends of the dashes look.
+    #[serde(skip_serializing_if = "Cap::is_round")]
+    pub cap: Cap,
     #[serde(default)]
     pub angle: f32,
     #[serde(skip_serializing_if = "Ground::is_land")]
     pub ground: Ground,
+    /// Lines, dots, or a fill; land has no ripples.
+    #[serde(skip_serializing_if = "is_lines")]
+    pub draw: Draw,
+    /// The heights or depths a fill keeps to.
+    #[serde(rename = "where", skip_serializing_if = "Band::is_open")]
+    pub band: Band,
     pub style: Style,
+}
+
+fn is_lines(d: &Draw) -> bool {
+    *d == Draw::Lines
+}
+
+pub(crate) fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Batch {
@@ -192,12 +222,32 @@ impl Batch {
             layer: None,
             color: None,
             color_expr: None,
+            width_expr: None,
+            width_steps: 0,
+            cap: Cap::Round,
             angle: 0.0,
             ground: Ground::Land,
+            draw: Draw::Lines,
+            band: Band::default(),
             style,
         }
     }
+
+    pub fn ink(&self) -> Ink<'_> {
+        Ink {
+            stroke: self.style.batch_stroke,
+            layer: self.layer.as_deref(),
+            color: self.color.as_deref(),
+            color_expr: self.color_expr.as_deref(),
+            width_expr: self.width_expr.as_deref(),
+            width_steps: self.width_steps,
+            cap: self.cap,
+        }
+    }
 }
+
+/// Dots on land are this many px across unless the style says otherwise.
+const LAND_DOT: f32 = 1.2;
 
 impl Style {
     /// Whether the land's terrain fields are built from this parameter: the
@@ -205,8 +255,11 @@ impl Style {
     /// wander and smooth. Batches that agree on all of them share one set of
     /// fields; a batch that changes one gets its own.
     pub fn is_terrain(name: &str) -> bool {
+        // input_height is laid over each batch's own fields, so it neither
+        // splits the shared ones nor carries over.
         Self::PARAMS.iter().any(|p| {
             p.name == name
+                && p.name != "input_height"
                 && (matches!(p.group, "input" | "sun")
                     || matches!(
                         p.name,
@@ -238,8 +291,8 @@ impl Style {
 }
 
 /// Land batches as written: a terrain parameter left out takes the value of
-/// the batch before, and the default only in the first. Everything else left
-/// out takes its default. For `#[serde(deserialize_with = "…")]`.
+/// the batch before (fills aside), and the default only in the first.
+/// Everything else left out takes its default. For `#[serde(deserialize_with = "…")]`.
 pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Batch>, D::Error> {
     #[derive(Deserialize)]
     struct Given {
@@ -252,18 +305,47 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         #[serde(default)]
         color_expr: Option<String>,
         #[serde(default)]
+        width_expr: Option<String>,
+        #[serde(default)]
+        width_steps: u32,
+        #[serde(default)]
+        cap: Cap,
+        #[serde(default)]
         angle: f32,
         #[serde(default)]
         ground: Ground,
+        #[serde(default)]
+        draw: Draw,
+        #[serde(default, rename = "where")]
+        band: Band,
         #[serde(default)]
         style: std::collections::BTreeMap<String, f64>,
     }
     let given = Vec::<Given>::deserialize(d)?;
     let mut out: Vec<Batch> = Vec::with_capacity(given.len());
     for g in given {
+        if g.draw == Draw::Ripples {
+            return Err(serde::de::Error::custom(
+                "land batches draw lines, dots or fills; ripples are for water",
+            ));
+        }
+        if g.draw != Draw::Fill && !g.band.is_open() {
+            return Err(serde::de::Error::custom(
+                "where on a land batch is for fills (draw: fill)",
+            ));
+        }
+        if let Some(e) = &g.width_expr {
+            crate::color_expr::check_width(e).map_err(serde::de::Error::custom)?;
+        }
         let mut style = Style::default();
-        if let Some(prev) = out.last() {
-            style.inherit_terrain(&prev.style);
+        if g.draw == Draw::Dots {
+            style.water_size = LAND_DOT;
+        }
+        // Fills trace no terrain: they neither take it nor hand it on.
+        if g.draw != Draw::Fill {
+            if let Some(prev) = out.iter().rev().find(|b| b.draw != Draw::Fill) {
+                style.inherit_terrain(&prev.style);
+            }
         }
         for (name, v) in g.style {
             // Unknown names are ignored.
@@ -274,8 +356,13 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
             layer: g.layer,
             color: g.color,
             color_expr: g.color_expr,
+            width_expr: g.width_expr,
+            width_steps: g.width_steps,
+            cap: g.cap,
             angle: g.angle,
             ground: g.ground,
+            draw: g.draw,
+            band: g.band,
             style,
         });
     }
@@ -297,7 +384,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 45);
+        assert_eq!(Style::PARAMS.len(), 46);
     }
 
     #[test]
@@ -347,8 +434,13 @@ mod json_tests {
                 layer: None,
                 color: None,
                 color_expr: None,
+                width_expr: Some("lerp(2, 0.5, clamp(elev / 500, 0, 1))".into()),
+                width_steps: 3,
+                cap: Cap::RoundInside,
                 angle: 90.0,
                 ground: Ground::Sea,
+                draw: Draw::Dots,
+                band: Band::default(),
                 style: Style {
                     space: 6.0,
                     batch_floor: 0.4,
@@ -362,6 +454,12 @@ mod json_tests {
         assert_eq!(back[0].name, None);
         assert_eq!(back[1].name.as_deref(), Some("Valleys"));
         assert_eq!(back[1].angle, 90.0);
+        assert_eq!(back[1].draw, Draw::Dots);
+        assert_eq!(back[1].width_expr, batches[1].width_expr);
+        assert_eq!(back[1].width_steps, 3);
+        assert_eq!(back[1].cap, Cap::RoundInside);
+        assert!(json.contains(r#""cap":"round_inside""#));
+        assert!(!to_json_batches(&batches[..1]).contains("cap"));
         assert_eq!(back[1].style.space, 6.0);
         assert_eq!(back[1].style.batch_floor, 0.4);
     }
@@ -399,6 +497,51 @@ mod json_tests {
         assert_eq!(b[2].style.sun_azimuth, 200.0);
         assert!(b[0].style.same_terrain(&b[1].style));
         assert!(!b[1].style.same_terrain(&b[2].style));
+    }
+
+    #[test]
+    fn land_draws_lines_or_dots() {
+        let b = from_json_batches(r#"[{"draw": "dots"}, {}]"#).unwrap();
+        assert_eq!(b[0].draw, Draw::Dots);
+        assert_eq!(b[0].style.water_size, LAND_DOT);
+        assert_eq!(b[1].draw, Draw::Lines);
+        assert!(from_json_batches(r#"[{"draw": "ripples"}]"#).is_err());
+    }
+
+    #[test]
+    fn fills_keep_to_where() {
+        let json = r##"[{"draw": "fill", "ground": "sea", "color": "#cde", "where": {"depth_min": 200}}]"##;
+        let b = from_json_batches(json).unwrap();
+        assert_eq!(b[0].draw, Draw::Fill);
+        assert_eq!(b[0].band.depth_min, Some(200.0));
+        let back = to_json_batches(&b);
+        assert!(back.contains(r#""where":{"depth_min":200.0}"#), "{back}");
+        assert_eq!(from_json_batches(&back).unwrap()[0].band, b[0].band);
+        assert!(
+            from_json_batches(r#"[{"where": {"elev_min": 100}}]"#).is_err(),
+            "lines"
+        );
+        assert!(from_json_batches(r#"[{"draw": "fill", "where": {"height": 1}}]"#).is_err());
+    }
+
+    #[test]
+    fn fills_leave_the_terrain_alone() {
+        let json = r#"[
+            {"style": {"sun_azimuth": 45}},
+            {"draw": "fill", "style": {"input_blur": 6}},
+            {"angle": 90}
+        ]"#;
+        let b = from_json_batches(json).unwrap();
+        assert_eq!(b[1].style.sun_azimuth, Style::default().sun_azimuth);
+        assert_eq!(b[2].style.sun_azimuth, 45.0);
+        assert_eq!(b[2].style.input_blur, Style::default().input_blur);
+    }
+
+    #[test]
+    fn width_expr_is_checked() {
+        assert!(from_json_batches(r#"[{"width_expr": "lerp(2, 0.5, tone)"}]"#).is_ok());
+        assert!(from_json_batches(r#"[{"width_expr": "lerp(#000, #fff, tone)"}]"#).is_err());
+        assert!(from_json_batches(r#"[{"cap": "pointy"}]"#).is_err());
     }
 
     #[test]

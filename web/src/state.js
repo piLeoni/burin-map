@@ -1,6 +1,8 @@
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
 import { DEFAULT_FRAME, pair } from './lib/frame.js'
+import { pickLand } from './lib/fill.js'
+import { pickInk } from './lib/ink.js'
 
 /** Map camera — persisted in localStorage. The centre is the frame's centre. */
 export const mapViewAtom = atomWithStorage('burin-map.map', {
@@ -34,11 +36,9 @@ export function normalizeBatches(value) {
       .filter((b) => b && typeof b === 'object')
       .map((b) => ({
         ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
-        ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
-        ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color } : {}),
-        ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
+        ...pickInk(b),
         angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,
-        ...(b.ground === 'sea' ? { ground: 'sea' } : {}),
+        ...pickLand(b),
         style: b.style && typeof b.style === 'object' && !Array.isArray(b.style) ? b.style : {},
       }))
   }
@@ -87,6 +87,7 @@ export function normalizeWater(value) {
     const style = shoreline.style
     out.shoreline = {
       lines: Number.isInteger(lines) && lines >= 1 ? lines : 1,
+      ...pickInk(shoreline),
       style: style && typeof style === 'object' && !Array.isArray(style) ? style : {},
     }
   }
@@ -95,9 +96,7 @@ export function normalizeWater(value) {
     .filter((b) => b && typeof b === 'object')
     .map((b) => ({
       ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name } : {}),
-      ...(typeof b.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
-      ...(typeof b.color === 'string' && b.color.trim() ? { color: b.color } : {}),
-      ...(typeof b.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
+      ...pickInk(b),
       follow: b.follow === 'map' ? 'map' : 'shore',
       ...(WAVE_MARKS.includes(b.draw) ? { draw: b.draw } : {}),
       angle: Number.isFinite(Number(b.angle)) ? Number(b.angle) : 0,

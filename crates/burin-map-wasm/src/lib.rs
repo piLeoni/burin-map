@@ -4,7 +4,9 @@
 //! flat `f32` height grid. Paths come back packed for canvas stroking; [`svg`]
 //! builds an SVG document for download.
 
-use burin_map_core::{Batch, GeoTransform, Line, Style};
+mod board;
+
+use burin_map_core::{Batch, GeoTransform, Line, Stage, Style};
 use js_sys::{Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::prelude::*;
 
@@ -104,6 +106,7 @@ pub struct Drawing {
     ms: f64,
     timings: burin_map_core::Timings,
     svg: String,
+    fills: Vec<burin_map_core::Fill>,
     /// Pixel → lon/lat, when geography was provided.
     nw_lon: f64,
     nw_lat: f64,
@@ -153,7 +156,8 @@ impl Drawing {
     pub fn svg(&self) -> String {
         self.svg.clone()
     }
-    /// GeoJSON MultiLineString FeatureCollection of the dashes.
+    /// GeoJSON FeatureCollection: the dashes as one MultiLineString, then
+    /// each fill as a MultiPolygon.
     #[wasm_bindgen(getter)]
     pub fn geojson(&self) -> String {
         let tr = GeoTransform {
@@ -182,8 +186,9 @@ impl Drawing {
             }
             out
         };
-        burin_map_core::geojson::to_geojson(
+        burin_map_core::geojson::to_geojson_with_fills(
             &paths,
+            &self.fills,
             self.width as f64,
             self.height as f64,
             |x, y| tr.to_lonlat(x, y),
@@ -252,6 +257,7 @@ pub fn draw(
         ms,
         timings: Vec::new(),
         svg,
+        fills: d.fills,
         nw_lon: geo.nw_lon,
         nw_lat: geo.nw_lat,
         deg_per_px_lon: geo.deg_per_px_lon,
@@ -439,12 +445,18 @@ pub fn draw_batches(
         )));
     }
     let batches = parse_batches(json)?;
+    board::begin();
+    if !(water.is_null() || water.is_undefined()) {
+        board::mark(board::WATER_MASK, Stage::Start);
+    }
     let t0 = now_ms();
     let wet = read_water(water, w, h)?;
     let mut timings = Vec::new();
     if wet.is_some() {
         timings.push(("water mask".to_string(), now_ms() - t0));
+        board::mark(board::WATER_MASK, Stage::Done);
     }
+    board::mark(board::TERRAIN, Stage::Start);
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let sea = burin_map_core::sea_coverage(elev, coverage, &batches);
@@ -457,8 +469,16 @@ pub fn draw_batches(
         })
         .collect();
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
+    board::mark(board::TERRAIN, Stage::Done);
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), elev, now_ms);
+    let (d, t) = burin_map_core::draw_fields_timed(
+        &fields,
+        &batches,
+        layer.as_ref(),
+        elev,
+        now_ms,
+        &board::Board,
+    );
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
 }
@@ -537,12 +557,18 @@ pub async fn draw_batches_gpu(
     let gpu = GPU
         .with(|g| g.borrow().clone())
         .ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
+    board::begin();
+    if !(water.is_null() || water.is_undefined()) {
+        board::mark(board::WATER_MASK, Stage::Start);
+    }
     let t0 = now_ms();
     let wet = read_water(&water, w, h)?;
     let mut timings = Vec::new();
     if wet.is_some() {
         timings.push(("water mask".to_string(), now_ms() - t0));
+        board::mark(board::WATER_MASK, Stage::Done);
     }
+    board::mark(board::TERRAIN, Stage::Start);
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let sea = burin_map_core::sea_coverage(&elev, coverage, &batches);
@@ -555,9 +581,16 @@ pub async fn draw_batches_gpu(
         );
     }
     timings.push((terrain_label(fields.len(), "GPU"), now_ms() - t1));
+    board::mark(board::TERRAIN, Stage::Done);
     let layer = layer(&wet);
-    let (d, t) =
-        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &elev, now_ms);
+    let (d, t) = burin_map_core::draw_fields_timed(
+        &fields,
+        &batches,
+        layer.as_ref(),
+        &elev,
+        now_ms,
+        &board::Board,
+    );
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))
 }
@@ -570,10 +603,12 @@ fn finish(
     mm_per_px: Option<f32>,
 ) -> Drawing {
     let (width, height) = (d.width as u32, d.height as u32);
+    board::mark(board::SVG, Stage::Start);
     let t = now_ms();
     let (pts, ends) = pack(&d.paths);
     let svg = d.to_svg(mm_per_px);
     timings.push(("svg".into(), now_ms() - t));
+    board::mark(board::SVG, Stage::Done);
     let geo = read_geo(geo);
     Drawing {
         width,
@@ -585,6 +620,7 @@ fn finish(
         ms,
         timings,
         svg,
+        fills: d.fills,
         nw_lon: geo.nw_lon,
         nw_lat: geo.nw_lat,
         deg_per_px_lon: geo.deg_per_px_lon,

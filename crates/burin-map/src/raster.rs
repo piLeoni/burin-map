@@ -1,7 +1,7 @@
-//! Greyscale PNG: black round-capped strokes on white, antialiased.
+//! Greyscale PNG: each pen's strokes on white, antialiased.
 
-use burin_map_core::Drawing;
-use tiny_skia::{LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use burin_map_core::{Cap, Drawing, Layer};
+use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 use crate::Error;
 
@@ -13,12 +13,41 @@ pub fn to_png(d: &Drawing) -> Result<Vec<u8>, Error> {
     let mut paint = Paint::default();
     paint.set_color_rgba8(0, 0, 0, 255);
     paint.anti_alias = true;
-    for (pen, paths) in d.pens() {
+    for layer in d.layers() {
+        let (pen, paths) = match layer {
+            Layer::Strokes(pen, paths) => (pen, paths),
+            Layer::Fill(f) => {
+                let [r, g, b] = rgb_bytes(&f.pen.color);
+                paint.set_color_rgba8(r, g, b, 255);
+                let mut pb = PathBuilder::new();
+                for ring in f.rings.iter().filter(|r| r.len() >= 3) {
+                    pb.move_to(ring[0][0], ring[0][1]);
+                    for q in &ring[1..] {
+                        pb.line_to(q[0], q[1]);
+                    }
+                    pb.close();
+                }
+                if let Some(path) = pb.finish() {
+                    pm.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::EvenOdd,
+                        Transform::identity(),
+                        None,
+                    );
+                }
+                continue;
+            }
+        };
         let [r, g, b] = rgb_bytes(&pen.color);
         paint.set_color_rgba8(r, g, b, 255);
         let st = Stroke {
             width: pen.stroke,
-            line_cap: LineCap::Round,
+            line_cap: match pen.cap {
+                Cap::Round | Cap::RoundInside => LineCap::Round,
+                Cap::Square => LineCap::Square,
+                Cap::Butt => LineCap::Butt,
+            },
             line_join: LineJoin::Round,
             ..Stroke::default()
         };

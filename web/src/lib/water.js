@@ -5,6 +5,7 @@
  */
 
 import { loadBurin } from './burin'
+import { fetchTile, limiter } from './net'
 
 const OPENFREEMAP = 'https://tiles.openfreemap.org/planet'
 /** Zoom out until the view needs no more tiles than this. */
@@ -50,8 +51,10 @@ function urlOf(template, z, x, y) {
   return template.replace('{z}', z).replace('{x}', ((x % n) + n) % n).replace('{y}', y)
 }
 
-/** One tile's bytes; empty where the source has none. */
-async function tile(template, z, x, y) {
+const run = limiter(8)
+
+/** One tile's bytes; empty where the source has none. Failures are thrown, not kept. */
+async function tile(template, z, x, y, progress) {
   const url = urlOf(template, z, x, y)
   if (tileCache.has(url)) {
     const bytes = tileCache.get(url)
@@ -59,8 +62,9 @@ async function tile(template, z, x, y) {
     return bytes
   }
   if (!inflight.has(url)) {
-    inflight.set(url, fetch(url)
-      .then(async (r) => (r.ok ? new Uint8Array(await r.arrayBuffer()) : new Uint8Array(0)))
+    const onRetry = (why, n, ms) => progress?.log(`water ${z}/${x}/${y}: ${why}, retry ${n} in ${ms / 1000} s`, 'warn')
+    inflight.set(url, fetchTile(url, { run, onRetry })
+      .then(async (r) => (r ? new Uint8Array(await r.arrayBuffer()) : new Uint8Array(0)))
       .finally(() => inflight.delete(url)))
   }
   const bytes = await inflight.get(url)
@@ -74,15 +78,26 @@ async function tile(template, z, x, y) {
  * @param {{ west: number, south: number, east: number, north: number }} bounds
  * @param {number} width
  * @param {string} [source]
- * @param {(msg: string) => void} [onProgress]
+ * @param {ReturnType<import('./progress.js').createProgress>} [progress]
  */
-export async function waterTiles(bounds, width, source, onProgress) {
-  const [m, src] = await Promise.all([loadBurin(), resolve(source || OPENFREEMAP)])
-  const ids = m.water_tiles(bounds.west, bounds.south, bounds.east, bounds.north, width, src.maxzoom, MAX_TILES)
-  const list = []
-  for (let i = 0; i < ids.length; i += 3) list.push([ids[i], ids[i + 1], ids[i + 2]])
-  const missing = list.filter(([z, x, y]) => !tileCache.has(urlOf(src.template, z, x, y))).length
-  if (missing > 0) onProgress?.(`Downloading water (${missing} tile${missing === 1 ? '' : 's'})…`)
-  const got = await Promise.all(list.map(([z, x, y]) => tile(src.template, z, x, y)))
-  return list.map(([z, x, y], i) => [z, x, y, got[i]])
+export async function waterTiles(bounds, width, source, progress) {
+  const task = progress?.task('water', 'water', 0, 'tiles')
+  try {
+    const [m, src] = await Promise.all([loadBurin(), resolve(source || OPENFREEMAP)])
+    const ids = m.water_tiles(bounds.west, bounds.south, bounds.east, bounds.north, width, src.maxzoom, MAX_TILES)
+    const list = []
+    for (let i = 0; i < ids.length; i += 3) list.push([ids[i], ids[i + 1], ids[i + 2]])
+    const cached = list.filter(([z, x, y]) => tileCache.has(urlOf(src.template, z, x, y))).length
+    task?.setTotal(list.length)
+    const got = await Promise.all(list.map(([z, x, y]) => tile(src.template, z, x, y, progress).then((b) => {
+      task?.tick()
+      return b
+    })))
+    task?.ok(`z${list[0]?.[0] ?? '?'} · ${list.length - cached} new`)
+    return list.map(([z, x, y], i) => [z, x, y, got[i]])
+  } catch (e) {
+    task?.fail(String(e?.message || e))
+    progress?.log(`water: ${e?.message || e}`, 'error')
+    throw e
+  }
 }

@@ -8,7 +8,10 @@ import { drawBatches } from '../lib/burin'
 import { waterTiles } from '../lib/water'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg, strokeOf } from '../lib/crop'
+import { watchBoard } from '../lib/board'
+import { createProgress } from '../lib/progress'
 import { logTimings, timingsOn } from '../lib/timings'
+import LoadPanel from './LoadPanel'
 import { mapViewAtom, cameraRequestAtom, frameAtom, forceCpu } from '../state'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -71,7 +74,10 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
   }
 
   const [busy, setBusy] = useState(false)
-  const [busyMsg, setBusyMsg] = useState('')
+  const [load, setLoad] = useState(null)
+  const [loadTitle, setLoadTitle] = useState('')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const drawMs = useRef(new Map())
   const [downloadOpen, setDownloadOpen] = useState(false)
   const frameRef = useRef(frame)
   frameRef.current = frame
@@ -108,12 +114,15 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
     const outH = Math.max(64, Math.round(cssH * dpr * scale))
 
     setBusy(true)
-    setBusyMsg('Drawing…')
+    setLoadFailed(false)
+    setLoad({ tasks: [], log: [] })
+    setLoadTitle(`${outW}×${outH} px · ${list.length} batch${list.length > 1 ? 'es' : ''}`)
     onStatus({ phase: 'working', detail: 'Drawing…' })
-    const progress = (msg) => {
-      setBusyMsg(msg)
-      onStatus({ phase: 'working', detail: msg })
-    }
+    const progress = createProgress((state) => {
+      if (my === genRef.current) setLoad(state)
+    })
+    let drawTask = null
+    let stopBoard = () => {}
 
     try {
       const t0 = performance.now()
@@ -136,7 +145,11 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       const { width: demW, height: demH } = dem
       const tDem = performance.now()
 
-      progress('Drawing…')
+      // Timed against the last draw of the same document at the same size.
+      const drawKey = JSON.stringify([batchesRef.current, waterSpec, outW, outH])
+      drawTask = progress.task('draw', 'drawing')
+      const lastMs = drawMs.current.get(drawKey)
+      if (lastMs) drawTask.eta(lastMs)
       const result = await drawBatches(dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current, {
         nw_lon: bounds.west,
         nw_lat: bounds.north,
@@ -150,10 +163,17 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
           tiles,
           ...(depthGrid ? { depth: depthGrid } : {}),
         },
+        onBoard: (board, draws) => {
+          if (my !== genRef.current) return
+          stopBoard = watchBoard(board, draws, progress, { batches: list, water: waterSpec })
+        },
       })
+      stopBoard()
       const tBack = performance.now()
       const received = performance.timeOrigin + tBack
       if (my !== genRef.current || movingRef.current) return
+      drawMs.current.set(drawKey, tBack - tDem)
+      drawTask.ok(`${result.dashes} paths · ${result.threads} thread${result.threads > 1 ? 's' : ''}`)
       if (timingsOn) {
         // Two frames later the new SVG has been painted.
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -191,11 +211,12 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       console.error(e)
       onStatus({ phase: 'error', detail: String(e.message || e) })
       onDrawing(null)
+      stopBoard()
+      drawTask?.fail()
+      progress.log(String(e.message || e), 'error')
+      if (my === genRef.current) setLoadFailed(true)
     } finally {
-      if (my === genRef.current) {
-        setBusy(false)
-        setBusyMsg('')
-      }
+      if (my === genRef.current) setBusy(false)
     }
   }, [onDrawing, onStatus])
 
@@ -262,7 +283,7 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       clearTimeout(settleTimer.current)
       genRef.current += 1
       setBusy(false)
-      setBusyMsg('')
+      setLoadFailed(false)
       onDrawing(null)
       onStatus({ phase: 'exploring' })
     }
@@ -443,14 +464,9 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
         />
       )}
 
-      {busy && (
+      {(busy || loadFailed) && load && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <div className="flex w-56 flex-col items-center gap-3 border border-base-content bg-base-100 px-6 py-5">
-            <span className="loading loading-spinner loading-lg" />
-            <p className="w-full truncate text-center font-mono text-sm">
-              {busyMsg || 'Drawing…'}
-            </p>
-          </div>
+          <LoadPanel title={loadTitle} load={load} />
         </div>
       )}
 

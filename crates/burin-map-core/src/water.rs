@@ -10,6 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::depth::{depth_weight, WaterWhere};
 use crate::fields::{wobble, Fields};
 use crate::grid::{blur, gradient};
+use crate::pen::{Cap, Ink};
 use crate::rng::Rng;
 use crate::style::Style;
 use crate::Line;
@@ -38,6 +39,8 @@ pub enum Draw {
     Ripples,
     /// Stippling, denser towards the coast, as on Ortelius' maps.
     Dots,
+    /// A filled area; land batches only.
+    Fill,
 }
 
 /// One drawing pass on water.
@@ -51,6 +54,12 @@ pub struct WaterBatch {
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_expr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_expr: Option<String>,
+    #[serde(skip_serializing_if = "crate::style::is_zero")]
+    pub width_steps: u32,
+    #[serde(skip_serializing_if = "Cap::is_round")]
+    pub cap: Cap,
     pub follow: Follow,
     pub angle: f32,
     pub draw: Draw,
@@ -66,6 +75,20 @@ pub struct WaterBatch {
     pub style: Style,
 }
 
+impl WaterBatch {
+    pub fn ink(&self) -> Ink<'_> {
+        Ink {
+            stroke: self.style.batch_stroke,
+            layer: self.layer.as_deref(),
+            color: self.color.as_deref(),
+            color_expr: self.color_expr.as_deref(),
+            width_expr: self.width_expr.as_deref(),
+            width_steps: self.width_steps,
+            cap: self.cap,
+        }
+    }
+}
+
 impl Default for WaterBatch {
     fn default() -> Self {
         WaterBatch {
@@ -73,6 +96,9 @@ impl Default for WaterBatch {
             layer: None,
             color: None,
             color_expr: None,
+            width_expr: None,
+            width_steps: 0,
+            cap: Cap::Round,
             follow: Follow::Shore,
             angle: 0.0,
             draw: Draw::Lines,
@@ -91,6 +117,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
             layer: Option<String>,
             color: Option<String>,
             color_expr: Option<String>,
+            width_expr: Option<String>,
+            width_steps: u32,
+            cap: Cap,
             follow: Follow,
             angle: f32,
             draw: Draw,
@@ -105,6 +134,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
                     layer: None,
                     color: None,
                     color_expr: None,
+                    width_expr: None,
+                    width_steps: 0,
+                    cap: Cap::Round,
                     follow: Follow::Shore,
                     angle: 0.0,
                     draw: Draw::Lines,
@@ -114,6 +146,14 @@ impl<'de> Deserialize<'de> for WaterBatch {
             }
         }
         let g = Given::deserialize(d)?;
+        if g.draw == Draw::Fill {
+            return Err(serde::de::Error::custom(
+                "fills are land batches: put them in batches, with ground: sea for the water",
+            ));
+        }
+        if let Some(e) = &g.width_expr {
+            crate::color_expr::check_width(e).map_err(serde::de::Error::custom)?;
+        }
         let mut style = Style::drawn(g.draw);
         for (name, v) in g.style {
             // Unknown names are ignored, as they are in land styles.
@@ -124,6 +164,9 @@ impl<'de> Deserialize<'de> for WaterBatch {
             layer: g.layer,
             color: g.color,
             color_expr: g.color_expr,
+            width_expr: g.width_expr,
+            width_steps: g.width_steps,
+            cap: g.cap,
             follow: g.follow,
             angle: g.angle,
             draw: g.draw,
@@ -152,7 +195,7 @@ impl Style {
     /// Defaults for a water batch that draws `draw`.
     pub fn drawn(draw: Draw) -> Style {
         match draw {
-            Draw::Lines => Style::water(),
+            Draw::Lines | Draw::Fill => Style::water(),
             // Rows 9 px apart of strokes about 140 px long, waving gently by
             // hand over the whole sea, a little fuller near the coast.
             Draw::Ripples => Style {
@@ -210,9 +253,29 @@ pub struct Shoreline {
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_expr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_expr: Option<String>,
+    #[serde(skip_serializing_if = "crate::style::is_zero")]
+    pub width_steps: u32,
+    #[serde(skip_serializing_if = "Cap::is_round")]
+    pub cap: Cap,
     /// Missing parameters take [`Style::shoreline`]'s values.
     #[serde(deserialize_with = "shore_style")]
     pub style: Style,
+}
+
+impl Shoreline {
+    pub fn ink(&self) -> Ink<'_> {
+        Ink {
+            stroke: self.style.batch_stroke,
+            layer: self.layer.as_deref().or(Some("shoreline")),
+            color: self.color.as_deref(),
+            color_expr: self.color_expr.as_deref(),
+            width_expr: self.width_expr.as_deref(),
+            width_steps: self.width_steps,
+            cap: self.cap,
+        }
+    }
 }
 
 impl Default for Shoreline {
@@ -222,6 +285,9 @@ impl Default for Shoreline {
             layer: None,
             color: None,
             color_expr: None,
+            width_expr: None,
+            width_steps: 0,
+            cap: Cap::Round,
             style: Style::shoreline(),
         }
     }
@@ -502,9 +568,63 @@ pub fn wave_marks(
     };
     let lo = st.space.max(1.0) * st.space_light.min(st.space_dark).clamp(0.05, 4.0);
     let hi = st.space.max(1.0) * st.space_light.max(st.space_dark).clamp(0.05, 4.0);
+    scatter(w, h, st, b.draw, (lo, hi), open, spacing, |i| {
+        (tx[i], ty[i])
+    })
+}
 
-    // Dart throwing: jittered candidates in random order, each kept when no
-    // kept mark lies within its spacing.
+/// Dots on land: `space` px apart as the batch's fields set it — closer in
+/// shadow and on steep ground, as lines would be — wherever the batch may
+/// draw and the input reaches `dash_cutoff`. Each is `water_size` px across,
+/// turned along the batch's direction.
+pub fn land_dots(f: &crate::Fields, st: &Style) -> Vec<crate::Line> {
+    let (w, h) = (f.w, f.h);
+    let at = |p: [f32; 2]| -> Option<usize> {
+        let (x, y) = (p[0].round(), p[1].round());
+        (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
+            .then(|| y as usize * w + x as usize)
+    };
+    let open = |p: [f32; 2]| at(p).is_some_and(|i| f.walkable[i] && f.input[i] >= st.dash_cutoff);
+    let (lo, hi) = f
+        .space
+        .iter()
+        .zip(&f.walkable)
+        .filter(|(_, &k)| k)
+        .fold((f32::MAX, 0.0f32), |(a, b), (&s, _)| (a.min(s), b.max(s)));
+    if hi <= 0.0 {
+        return Vec::new();
+    }
+    scatter(
+        w,
+        h,
+        st,
+        Draw::Dots,
+        (lo.max(1.0), hi.max(1.0)),
+        open,
+        |i| f.space[i].max(1.0),
+        |i| (f.tx[i], f.ty[i]),
+    )
+}
+
+/// Dart throwing: jittered candidates in random order, each kept when no
+/// kept mark lies within its spacing, `lo`…`hi` px. A mark is kept only if
+/// all of it is `open`, turned along `dir`.
+#[allow(clippy::too_many_arguments)]
+fn scatter(
+    w: usize,
+    h: usize,
+    st: &Style,
+    draw: Draw,
+    (lo, hi): (f32, f32),
+    open: impl Fn([f32; 2]) -> bool,
+    spacing: impl Fn(usize) -> f32,
+    dir: impl Fn(usize) -> (f32, f32),
+) -> Vec<crate::Line> {
+    let at = |p: [f32; 2]| -> Option<usize> {
+        let (x, y) = (p[0].round(), p[1].round());
+        (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
+            .then(|| y as usize * w + x as usize)
+    };
     let mut rng = Rng::new(st.batch_seed.wrapping_add(0x3A7E));
     let pitch = (lo * 0.5).max(2.0);
     let (cols, rows) = (
@@ -558,10 +678,11 @@ pub fn wave_marks(
         let size = st.water_size.max(1.0) * (1.0 + jitter * rng.uniform(-0.5, 0.5) as f32);
         let turn = (jitter * 20.0 * rng.uniform(-1.0, 1.0) as f32).to_radians();
         let (s, c) = turn.sin_cos();
-        let (u, v) = (tx[i] * c - ty[i] * s, tx[i] * s + ty[i] * c);
+        let (tx, ty) = dir(i);
+        let (u, v) = (tx * c - ty * s, tx * s + ty * c);
         let m = u.hypot(v).max(1e-6);
         let (u, v) = (u / m, v / m);
-        let shape = mark(b.draw, size);
+        let shape = mark(draw, size);
         let placed: Vec<crate::Line> = shape
             .iter()
             .map(|l| {
@@ -585,7 +706,7 @@ pub fn wave_marks(
 /// One mark `size` px across, centred on the origin, along +x.
 fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
     match draw {
-        Draw::Lines | Draw::Ripples => Vec::new(),
+        Draw::Lines | Draw::Ripples | Draw::Fill => Vec::new(),
         Draw::Dots => vec![vec![[-size / 2.0, 0.0], [size / 2.0, 0.0]]],
     }
 }

@@ -89,6 +89,7 @@ fn main() {
         runs: vec![(Pen::default(), paths.len())],
         paths,
         lines,
+        fills: Vec::new(),
     };
     std::fs::write(&a[5], d.to_svg(None)).expect("write svg");
 }

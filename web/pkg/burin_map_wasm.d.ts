@@ -19,7 +19,8 @@ export class Drawing {
     readonly deg_per_px_lon: number;
     readonly ends: Uint32Array;
     /**
-     * GeoJSON MultiLineString FeatureCollection of the dashes.
+     * GeoJSON FeatureCollection: the dashes as one MultiLineString, then
+     * each fill as a MultiPolygon.
      */
     readonly geojson: string;
     readonly height: number;
@@ -78,6 +79,11 @@ export function initGpu(): Promise<string | undefined>;
 export function needsWaterDepth(spec_json: string): boolean;
 
 /**
+ * `progressBoard()`: the board, as a view on this module's memory.
+ */
+export function progressBoard(): Uint32Array;
+
+/**
  * (id, blurb) for each style group — section headers in the web UI.
  */
 export function style_groups(): any;
@@ -122,14 +128,15 @@ export interface InitOutput {
     readonly drawing_width: (a: number) => number;
     readonly initGpu: () => any;
     readonly needsWaterDepth: (a: number, b: number) => number;
+    readonly progressBoard: () => any;
     readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
     readonly water_tiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___js_sys_620190cd17e8d420___Function_fn_wasm_bindgen_13dab8c06ff4562a___JsValue_____wasm_bindgen_13dab8c06ff4562a___sys__Undefined___js_sys_620190cd17e8d420___Function_fn_wasm_bindgen_13dab8c06ff4562a___JsValue_____wasm_bindgen_13dab8c06ff4562a___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__25: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__26: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__27: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

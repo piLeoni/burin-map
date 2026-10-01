@@ -3,6 +3,9 @@
  * a Web Worker (burin.worker.js) for drawing.
  */
 
+import { pickLand } from './fill.js'
+import { pickInk } from './ink.js'
+
 let ready = null
 
 export async function loadBurin() {
@@ -64,6 +67,10 @@ function drawWorker() {
     worker.onmessage = ({ data }) => {
       const p = pending.get(data.id)
       if (!p) return
+      if (data.board) {
+        p.onBoard?.(data.board, data.draws)
+        return
+      }
       pending.delete(data.id)
       if (data.ok) p.resolve(data.result)
       else p.reject(new Error(data.error))
@@ -87,9 +94,11 @@ function drawWorker() {
  * @param {Array<{angle:number,style:Record<string,number>}>} batches
  * @param {{ nw_lon: number, nw_lat: number, deg_per_px_lon: number, deg_per_px_lat: number }} [geo]
  * @param {number | null} [mmPerPx] size the SVG in millimetres, for paper
- * @param {{ gpu?: boolean, water?: { spec: string, bounds: number[], tiles: Array<[number, number, number, Uint8Array]> } | null }} [opts]
+ * @param {{ gpu?: boolean, water?: { spec: string, bounds: number[], tiles: Array<[number, number, number, Uint8Array]> } | null,
+ *   onBoard?: (board: Uint32Array, draws: number) => void }} [opts]
  *   gpu: terrain fields on WebGPU, when available; water: the water part of the document (JSON), the grid's
- *   bounds [west, south, east, north] and the OpenMapTiles tiles covering them
+ *   bounds [west, south, east, north] and the OpenMapTiles tiles covering them; onBoard: called as the draw
+ *   begins with the engine's progress board (see board.js), when the engine shares its memory
  * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number,
  *   gpu: string | false | null, timings: Array<[string, number]>, sent: number }>} gpu: adapter used, false if
  *   asked for but unavailable, null if not asked; timings: ms per phase in the worker; sent: epoch ms at postMessage
@@ -98,11 +107,9 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opt
   const list = Array.isArray(batches) ? batches : []
   const json = JSON.stringify(list.map((b) => ({
     ...(typeof b?.name === 'string' && b.name.trim() ? { name: b.name } : {}),
-    ...(typeof b?.layer === 'string' && b.layer.trim() ? { layer: b.layer } : {}),
-    ...(typeof b?.color === 'string' && b.color.trim() ? { color: b.color } : {}),
-    ...(typeof b?.color_expr === 'string' && b.color_expr.trim() ? { color_expr: b.color_expr } : {}),
+    ...pickInk(b ?? {}),
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
-    ...(b?.ground === 'sea' ? { ground: 'sea' } : {}),
+    ...pickLand(b),
     style: Object.fromEntries(
       Object.entries(b?.style ?? {}).filter(
         ([, v]) => v != null && typeof v === 'number' && Number.isFinite(v),
@@ -111,7 +118,7 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opt
   })))
   const id = ++nextId
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    pending.set(id, { resolve, reject, onBoard: opts?.onBoard })
     const gpu = !!opts?.gpu
     const water = opts?.water ?? null
     drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu, water }, [elev.buffer])

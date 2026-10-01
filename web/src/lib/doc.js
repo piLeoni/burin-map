@@ -88,7 +88,9 @@ export function docToNote(doc) {
     else areaParts.push(`${short}${num(v)}`)
   }
 
-  const batchParts = doc.batches.map((b) => batchNote(b, [...(b.ground === 'sea' ? ['sea'] : []), `a${num(b.angle ?? 0)}`]))
+  const batchParts = doc.batches.map((b) =>
+    batchNote(b, [...(b.ground === 'sea' ? ['sea'] : []), ...(b.draw === 'dots' || b.draw === 'fill' ? [b.draw] : []), `a${num(b.angle ?? 0)}`]),
+  )
   const note = `${areaParts.join(',')}|${batchParts.join(';')}`
   if (!doc.water) return note
 
@@ -204,7 +206,7 @@ export function noteToDoc(note) {
 
 /**
  * One batch: `a` its angle, `n` its name, the style by short names; `sea` for a land batch drawn on the
- * seabed; `shore` / `map` and `ripples` / `dots` for water.
+ * seabed, `dots` or `fill` for what it draws; `shore` / `map` and `ripples` / `dots` for water.
  */
 function readBatch(seg) {
   let angle = 0
@@ -228,7 +230,7 @@ function readBatch(seg) {
       follow = tok
       continue
     }
-    if (tok === 'ripples' || tok === 'dots') {
+    if (tok === 'ripples' || tok === 'dots' || tok === 'fill') {
       draw = tok
       continue
     }
@@ -236,7 +238,9 @@ function readBatch(seg) {
     if (key === 'angle') angle = value
     else style[key] = value
   }
-  const b = follow ? { follow, ...(draw ? { draw } : {}), angle, style } : { angle, ...(ground ? { ground } : {}), style }
+  const b = follow
+    ? { follow, ...(draw ? { draw } : {}), angle, style }
+    : { angle, ...(ground ? { ground } : {}), ...(draw === 'dots' || draw === 'fill' ? { draw } : {}), style }
   return name ? { name, ...b } : b
 }
 

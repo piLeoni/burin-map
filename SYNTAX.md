@@ -77,8 +77,13 @@ batches:
 | `layer` | SVG layer id on export (`<g id="…">`); optional |
 | `color` | stroke colour as `#rgb` or `#rrggbb`; black when omitted |
 | `color_expr` | colour from a small expression; see [Colour expressions](#colour-expressions) |
+| `width_expr` | line width as a multiple of `batch_stroke`, from an expression; see [Line width and ends](#line-width-and-ends) |
+| `width_steps` | rounds those widths to this many pens, each its own layer; 0 (default) keeps every width |
+| `cap` | line ends: `round` (default), `round_inside`, `square` or `butt` |
 | `angle` | 0 follows the contour lines, 90 runs straight downhill |
 | `ground` | `land` (default) or `sea`: `sea` draws the seabed instead, and nothing on land |
+| `draw` | `lines` (default), `dots`: stippling, denser where lines would be (see [Land dots](#land-dots)), or `fill`: a flat area (see [Fills](#fills)) |
+| `where` | for a fill, the heights or depths it keeps to: `elev_min`, `elev_max`, `depth_min`, `depth_max`, in metres |
 | `style` | parameters, see below; those left out keep their defaults, except the terrain ones (see [Terrain carries over](#terrain-carries-over)) |
 
 `name` is only for you; `layer` is what plotters and SVG editors group by.
@@ -90,6 +95,54 @@ batches:
   - angle: 0
     ground: sea
     style: { space: 5, space_light: 3, input_blur: 8 }
+water:
+  shoreline: { lines: 1 }
+  batches: []
+```
+
+### Shade or height
+
+By default the shading sets how dense the lines are: dark slopes get them close, lit ones far apart. `input_height` blends in the height instead: at `1` the highest ground is darkest, at `-1` the lowest, and `0` (the default) is shade only. On a seabed batch `-1` darkens the deepest water, so one land batch at `0.4` and one `ground: sea` batch at `-0.5` read as a single relief across the coast, hills rising and the seabed falling away.
+
+```yaml
+batches:
+  - { angle: 0, style: { input_height: 0.4 } }
+  - { angle: 0, ground: sea, style: { space: 5, space_light: 3, input_blur: 8, input_height: -0.5 } }
+```
+
+### Land dots
+
+`draw: dots` stipples the land instead of tracing lines: the dots sit as close as lines would (`space`, `space_light`, `space_dark`, `space_steep`, `input_height`), and nothing is drawn where the input is below `dash_cutoff`. The dot size and clumping come from the water parameters `water_size` (default 1.2 on land) and `water_patches`, as for dots at sea: `mod_jitter` varies their size and `mod_wobble` bends them. Ripples are only for water.
+
+```yaml
+batches:
+  - angle: 0
+    draw: dots
+    style: { space: 3, space_light: 2.2, space_dark: 0.5, space_steep: 0.3, dash_cutoff: 0 }
+```
+
+### Fills
+
+`draw: fill` paints an area flat instead of drawing lines: the land, or with `ground: sea` the sea, optionally only between some heights or depths (`where`). The edge follows the same water outline as the shoreline, so a land fill and a sea fill meet exactly at the coast, and both are closed along the frame. The colour is `color` (or a plain `#hex` `color_expr`), light grey when left out; the SVG layer is `layer`, `fill` when left out.
+
+Layers stack in batch order, the first at the bottom: a fill covers whatever the batches before it drew, and the batches after it draw over it. Land batches come first, then the water batches, then the shoreline, so the water's lines are always above every fill. Batches with the same pen still share a layer, but never across a fill.
+
+| `where` key | Keeps the fill to |
+|---|---|
+| `elev_min` / `elev_max` | ground at least / at most this high, m |
+| `depth_min` / `depth_max` | sea floor at least / at most this deep, m |
+
+A limit left out is open. Depths come from the same elevation tiles as `ground: sea`. Of the style only `input_blur` matters: it smooths the band's edges, px (the coast is never smoothed); raise it where coarse elevation tiles leave steps. A fill's style is its own: it doesn't carry over to the batches after it (see [Terrain carries over](#terrain-carries-over)). Fills don't carry `angle`, and the width and cap settings mean nothing to them.
+
+A plotter has no use for fills; they are for the screen, print and SVG editors. The PNG paints them, the SVG has them as `<g fill="…" fill-rule="evenodd">` groups, and the GeoJSON adds one MultiPolygon feature per fill with its `fill` colour and `layer`.
+
+```yaml
+batches:
+  - { draw: fill, ground: sea, color: '#d6e6ef' }                                # all the sea
+  - { draw: fill, ground: sea, color: '#a0bfd5', where: { depth_min: 1000 } }    # darker past 1000 m
+  - { draw: fill, color: '#eef0df' }                                             # all the land
+  - { draw: fill, color: '#d8cfa4', where: { elev_min: 300 } }                   # warmer above 300 m
+  - { angle: 0, color: '#5c4630' }                                               # contours over the tints
 water:
   shoreline: { lines: 1 }
   batches: []
@@ -110,9 +163,9 @@ water:
 | `dist` | — | distance from the shore, px |
 | `depth` | — | metres below the surface (when depth is active) |
 | `tone` | shading input 0…1 (light/dark) | water tone from the field input |
-| `lerp(a, b, t)` | mix two colours; `t` 0…1 | same |
+| `lerp(a, b, t)` | mix two colours, or two numbers; `t` 0…1 | same |
 | `clamp(x, lo, hi)` | scalar | same |
-| `+ - * /` | on scalars | same |
+| `+ - * /`, `-x` | on scalars | same |
 
 Examples:
 
@@ -125,6 +178,38 @@ batches:
 ```
 
 Land batches with different colours stay separate in the SVG even when they share the same line width.
+
+### Line width and ends
+
+`batch_stroke` sets one width for a whole batch. `width_expr` varies it from dash to dash: it is a scalar built like the ones above, evaluated where each dash sits, and it multiplies `batch_stroke`. A long line is evaluated every 8 px or so, so it thickens and thins along its way, and so does its colour with `color_expr`. At 1 a dash is `batch_stroke` wide, at 2 twice that; at 0 or below it is left out. It works on land and water batches and on the shoreline, for lines and for dots alike: a dot is a very short line, so a wider stroke is a bigger dot.
+
+```yaml
+batches:
+  - angle: 0
+    width_expr: 'lerp(0.4, 2.5, clamp(elev / 300, 0, 1))'   # thin in the valleys, bold on the hills
+    width_steps: 3
+    layer: hills
+    style: { space: 6 }
+water:
+  shoreline: { lines: 1, width_expr: 'lerp(2, 0.8, clamp(dist / 40, 0, 1))' }
+  batches:
+    - follow: shore
+      draw: dots
+      width_expr: 'lerp(2.6, 0.5, clamp(dist / 150, 0, 1))'   # big dots at the coast, fine ones offshore
+```
+
+Each width is its own group in the SVG, rounded to a hundredth of a px. That suits the screen and print. For a pen plotter, `width_steps: 3` rounds the widths to 3, evenly spaced from the thinnest dash to the widest, each in its own layer named after the batch's `layer` (`hills-1`, `hills-2`, `hills-3`; `width-1`… without one), so each can get its own pen. Wide lines need room: raise `space` along with the width, or the darkest areas fill in.
+
+`cap` picks how the dashes end:
+
+| `cap` | Ends |
+|---|---|
+| `round` (default) | rounded, half the width past each end, like a pen |
+| `round_inside` | rounded, but within the ends: each dash is shortened by half its width, and one shorter than its width becomes a dot |
+| `square` | square, half the width past each end |
+| `butt` | flat, exactly at the ends |
+
+A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG editors. Dots want `round` or `square`: `butt` and `round_inside` shrink them.
 
 ### Land parameters
 
@@ -157,6 +242,7 @@ Land batches with different colours stay separate in the SVG even when they shar
 |  | `input_blur` | 1.8 | yes |
 |  | `input_broad_blur` | 11.5 | yes |
 |  | `input_broad` | 0.5 | yes |
+|  | `input_height` | 0 |  |
 | Sun | `sun_azimuth` | 315 | yes |
 |  | `sun_altitude` | 45 | yes |
 |  | `sun_exag` | 4 | yes |
@@ -170,7 +256,7 @@ Land batches with different colours stay separate in the SVG even when they shar
 
 ### Terrain carries over
 
-The terrain parameters (marked above: the `input_*` and `sun_*` groups, `space_light`, `space_dark`, `space_steep`, `space_steep_gamma`, `mod_wobble`, `mod_wobble_size`, `mod_smooth`) shape the terrain a batch follows. A batch that leaves one out takes it from the batch above; the first batch takes the default. Every other parameter always falls back to its default.
+The terrain parameters (marked above: the `input_*` and `sun_*` groups, `space_light`, `space_dark`, `space_steep`, `space_steep_gamma`, `mod_wobble`, `mod_wobble_size`, `mod_smooth`) shape the terrain a batch follows. A batch that leaves one out takes it from the batch above; the first batch takes the default. Every other parameter always falls back to its default. Fills follow no terrain, so they are skipped: they neither take these parameters nor hand them on.
 
 ```yaml
 batches:
@@ -231,6 +317,7 @@ With a `water` block, the water is downloaded from OpenStreetMap and decides whe
 | `follow` | `shore`: concentric lines along the coast; `map`: one direction over the whole map | `shore` |
 | `draw` | `lines` fill the water; `ripples` draw broken rows of hand-drawn waves; `dots` stipple it; see [Ripples and dots](#ripples-and-dots) | `lines` |
 | `angle` | with `shore`, 0 runs along the coast and 90 straight out to sea; with `map`, degrees clockwise from north | 0 |
+| `layer`, `color`, `color_expr`, `width_expr`, `width_steps`, `cap` | as on land; see [Colour expressions](#colour-expressions) and [Line width and ends](#line-width-and-ends) | |
 | `where` | optional depth window in metres (`depth_min`, `depth_max`); see [Depth](#depth) | |
 | `style` | parameters, see below | |
 
@@ -288,7 +375,7 @@ Lower `space_dark` (e.g. 0.5) means **closer together** near the shore, not wide
 
 Ink and tracing extent use `water_reach`; **line spacing** uses `space` and `water_space_reach` only. A second water batch at another angle (e.g. engraved sea at 90°) can cross the first in the depth-fade overlap — that reads as cross-hatching, not a broken `space`.
 
-**Depth** (metres below the surface) is optional. Nothing extra is downloaded unless a batch asks for depth *and* the document sets `bathymetry.source` to something other than `terrarium` / `auto` (GEBCO or a custom tile URL — not wired in the web app yet). By default, depth comes from the **same elevation mosaic** already fetched for the map (negative heights on water pixels). The depth grid is built only when a water batch has a `where` depth limit or a `color_expr` that uses `depth`.
+**Depth** (metres below the surface) is optional. Nothing extra is downloaded unless a batch asks for depth *and* the document sets `bathymetry.source` to something other than `terrarium` / `auto` (GEBCO or a custom tile URL — not wired in the web app yet). By default, depth comes from the **same elevation mosaic** already fetched for the map (negative heights on water pixels). The depth grid is built only when a water batch has a `where` depth limit or a `color_expr` or `width_expr` that uses `depth`.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|
@@ -430,6 +517,7 @@ water:
 | Field | What it does | Default |
 |---|---|---|
 | `lines` | how many: the shore, then more out to sea, `space` px apart | 1 |
+| `layer`, `color`, `color_expr`, `width_expr`, `width_steps`, `cap` | as on land; the layer is `shoreline` unless set | |
 | `style` | parameters, see below | one clean, solid line |
 
 ### Shoreline parameters
@@ -484,7 +572,7 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
 #d=at44.3035,9.2145,ts14x10|a0|l2,s4;shore,a0,wst10,wr30,s7
 ```
 
-- **Land**: `a0`, one batch at angle 0; `sea,a0` is a batch with `ground: sea`.
+- **Land**: `a0`, one batch at angle 0; `sea,a0` is a batch with `ground: sea`, `dots,a0` one with `draw: dots`, and `fill,a0` one with `draw: fill` (its colour and `where` stay out of the link, as the other ink settings do).
 - **Water**:
   - before the first `;` comes the shoreline: `l2,s4` is 2 lines, 4 px apart (`noshore` turns it off, `c…` picks the classes);
   - then one batch after each `;`: `shore,a0,wst10,wr30,s7`.

@@ -345,12 +345,15 @@ export default function Sidebar({ open, onClose, status, drawing }) {
                 <summary className={`${tool} w-full list-none ${schema ? '' : 'btn-disabled'}`} title="Replace the style and the area with a ready-made one">
                   Load ▾
                 </summary>
-                <ul className="menu dropdown-content z-20 mt-1 w-64 rounded-box border border-base-content/25 bg-base-100 p-1 shadow">
+                <ul className="menu dropdown-content z-20 mt-1 max-h-[60vh] w-64 flex-nowrap overflow-y-auto rounded-box border border-base-content/25 bg-base-100 p-1 shadow">
                   {PRESETS.map((p) => (
                     <li key={p.id}>
                       <button type="button" className="flex flex-col items-start gap-0" onClick={() => loadPreset(p)}>
                         <span className="font-mono text-[11px] font-bold">{p.label}</span>
                         <span className="text-[10px] opacity-50">{p.blurb}</span>
+                        <span className="text-[10px] opacity-70">
+                          {p.screen} on screen · {p.plot} to plot
+                        </span>
                       </button>
                     </li>
                   ))}

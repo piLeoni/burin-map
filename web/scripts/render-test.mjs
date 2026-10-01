@@ -155,7 +155,7 @@ const rustShorts = {
   mod_wave_even: 'mwe', input_flat: 'if',
   input_gain: 'ig', input_dark_gamma: 'idg', input_light_gain: 'ilg',
   input_light_floor: 'ilf', input_blur: 'ib', input_broad_blur: 'ibb',
-  input_broad: 'ibr', sun_azimuth: 'sa', sun_altitude: 'salt', sun_exag: 'sx',
+  input_broad: 'ibr', input_height: 'ih', sun_azimuth: 'sa', sun_altitude: 'salt', sun_exag: 'sx',
   engine_step: 'es', engine_min: 'em', engine_stop: 'esp', engine_fill: 'ef',
   batch_floor: 'bf', batch_stroke: 'bs', batch_seed: 'bseed',
   water_start: 'wst', water_reach: 'wr', water_fade: 'wf', water_size: 'ws', water_patches: 'wp',
@@ -166,7 +166,7 @@ for (const [full, short] of Object.entries(rustShorts)) {
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 43) missing.push(`expected 43 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 44) missing.push(`expected 44 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`
@@ -253,7 +253,7 @@ const schema = {
     .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
   groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
 }
-if (schema.params.length !== 45) missing.push(`views: read ${schema.params.length} params from style.rs`)
+if (schema.params.length !== 46) missing.push(`views: read ${schema.params.length} params from style.rs`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const model = {
   area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
@@ -306,6 +306,93 @@ for (const kind of kinds) {
   const D = await import('../src/lib/doc.js')
   const linked = D.noteToDoc(D.docToNote({ ...sea, water: { shoreline: { lines: 1 }, batches: [] } }))
   if (!same(linked.batches, sea.batches)) missing.push(`link loses ground ${JSON.stringify(linked.batches)}`)
+}
+
+// Colour, width and line ends survive both editor views, on land, at sea and on the shoreline.
+{
+  const ink = { color_expr: 'lerp(#000, #f00, tone)', width_expr: 'lerp(2, 0.5, clamp(elev / 500, 0, 1))', width_steps: 3, cap: 'round_inside' }
+  const inked = {
+    ...model,
+    batches: [{ angle: 0, style: { space: 3 }, ...ink }],
+    water: {
+      shoreline: { lines: 2, color: '#123456', cap: 'butt', style: {} },
+      batches: [{ follow: 'shore', draw: 'dots', angle: 0, style: {}, width_expr: 'lerp(3, 1, clamp(dist / 100, 0, 1))', cap: 'square' }],
+    },
+    notes: {},
+  }
+  for (const kind of ['yaml', 'json5']) {
+    const back = V.parseView(kind, V.renderView(kind, inked, schema), schema)
+    if (!same(back.batches, inked.batches)) missing.push(`views: ${kind} loses land ink ${JSON.stringify(back.batches)}`)
+    if (!same(back.water, inked.water)) missing.push(`views: ${kind} loses water ink ${JSON.stringify(back.water)}`)
+  }
+  let threw = false
+  try { V.parseView('yaml', 'batches:\n  - cap: pointy\n', schema) } catch { threw = true }
+  if (!threw) missing.push('views: a wrong cap should be an error')
+
+  const C = await import('../src/lib/crop.js')
+  const svg = '<svg viewBox="0 0 100 100"><g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
+    + '<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt" id="hills-1">\n<path d="M10 10 L90 10"/>\n</g>\n'
+    + '<g stroke="#000000" stroke-width="0.5">\n<path d="M10 20 L20 20"/>\n<path d="M200 200 L210 200"/>\n</g>\n</g></svg>\n'
+  const cut = C.cropSvg(svg, [0, 0, 50, 50], [50, 50])
+  if (!cut.includes('<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt" id="hills-1">') || !cut.includes('stroke-width="0.5"')) {
+    missing.push(`crop loses the pens ${cut}`)
+  }
+  if (cut.includes('M200')) missing.push('crop keeps a path outside the frame')
+}
+
+// A stippled land batch keeps `draw: dots` in the editor views and in a share link.
+{
+  const dots = { ...model, batches: [{ angle: 0, draw: 'dots', style: { space: 3, input_height: 0.5 } }], notes: {} }
+  for (const kind of ['yaml', 'json5']) {
+    const back = V.parseView(kind, V.renderView(kind, dots, schema), schema)
+    if (!same(back.batches, dots.batches)) missing.push(`views: ${kind} loses land dots ${JSON.stringify(back.batches)}`)
+  }
+  const D = await import('../src/lib/doc.js')
+  const linked = D.noteToDoc(D.docToNote({ ...dots, water: { shoreline: { lines: 1 }, batches: [] } }))
+  if (!same(linked.batches, dots.batches)) missing.push(`link loses land dots ${JSON.stringify(linked.batches)}`)
+}
+
+// Fills: `draw: fill` and its `where` survive the editor views; `where` is theirs alone.
+{
+  const filled = {
+    ...model,
+    batches: [
+      { angle: 0, ground: 'sea', draw: 'fill', where: { depth_min: 200 }, style: {}, color: '#aaccee' },
+      { angle: 0, draw: 'fill', style: { input_blur: 3 } },
+      { angle: 0, style: { space: 3 } },
+    ],
+    notes: {},
+  }
+  for (const kind of ['yaml', 'json5']) {
+    const text = V.renderView(kind, filled, schema)
+    const back = V.parseView(kind, text, schema)
+    if (!same(back.batches, filled.batches)) missing.push(`views: ${kind} loses fills ${JSON.stringify(back.batches)}`)
+    const first = text.slice(text.indexOf('batches'), text.indexOf('style'))
+    if (first.includes('angle')) missing.push(`views: ${kind} writes an angle for a fill`)
+  }
+  for (const [text, what] of [
+    ['batches:\n  - where: { elev_min: 10 }\n', 'where on a line batch'],
+    ['batches:\n  - draw: fill\n    where: { height: 10 }\n', 'an unknown where key'],
+    ['batches:\n  - angle: 0\nwater:\n  batches:\n    - draw: fill\n', 'a water fill'],
+  ]) {
+    let threw = false
+    try { V.parseView('yaml', text, schema) } catch { threw = true }
+    if (!threw) missing.push(`views: ${what} should be an error`)
+  }
+  const D = await import('../src/lib/doc.js')
+  const plain = { ...model, batches: [{ angle: 0, draw: 'fill', style: {} }], notes: {} }
+  const linked = D.noteToDoc(D.docToNote({ ...plain, water: { shoreline: { lines: 1 }, batches: [] } }))
+  if (!same(linked.batches, plain.batches)) missing.push(`link loses a fill ${JSON.stringify(linked.batches)}`)
+
+  const C = await import('../src/lib/crop.js')
+  const svg = '<svg viewBox="0 0 100 100"><g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
+    + '<g stroke="none" fill="#dddddd" fill-rule="evenodd" id="fill">\n<path d="M0 0 L100 0 L100 100 L0 100 Z M200 200 L210 200 L210 210 Z"/>\n</g>\n'
+    + '<g stroke="#000000" stroke-width="0.5">\n<path d="M10 20 L20 20"/>\n</g>\n</g></svg>\n'
+  const cut = C.cropSvg(svg, [10, 10, 50, 50], [40, 40])
+  if (!cut.includes('fill-rule="evenodd" id="fill">') || !/M0 0 L40 0 L40 40 L0 40 Z|L0 0[^"]*Z/.test(cut) || cut.includes('M200') || cut.includes('190')) {
+    missing.push(`crop mangles a fill ${cut}`)
+  }
+  if (C.strokeOf(svg) !== 0.5) missing.push('strokeOf should look past a fill')
 }
 
 // Water lists input_flat (its dashes use it) but no terrain-only parameters.
@@ -402,6 +489,33 @@ if (!same(shared.batches.map((b) => b.style), [{ space: 6 }, { space: 6, dash_li
 if (V.detectView('a.yml', '') !== 'yaml' || V.detectView('a.json', '') !== 'json5' || V.detectView('x', 'burin-map --s 5') !== 'cli' || V.detectView('x', '{"a":1}') !== 'json5' || V.detectView('x', 'batches:\n  - angle: 0') !== 'yaml') {
   missing.push('views: detectView')
 }
+
+// The loading panel: counted, timed and endless tasks, one begun after the
+// panel's clock last ticked, and the log.
+const { default: LoadPanel } = await import('../src/components/LoadPanel.jsx')
+const { createProgress } = await import('../src/lib/progress.js')
+let load = { tasks: [], log: [] }
+const tracker = createProgress((s) => { load = s })
+const tiles = tracker.task('elevation', 'elevation', 4, 'tiles')
+tiles.tick(3)
+tracker.task('water', 'water', 2, 'tiles').fail('z11 · 0 new')
+tracker.task('draw', 'drawing').eta(2000)
+tracker.task('terrain', 'terrain', 0, '', { child: true, wait: true })
+tracker.task('b1', '1 lines', 5, '', { child: true, wait: true }).step(2, 'trace')
+tracker.task('sea', 'seabed')
+tracker.log('elevation 10/1/2: HTTP 503, retry 1 in 0.5 s', 'warn')
+tracker.log('water 11/3/4: HTTP 500', 'error')
+await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+for (const t of load.tasks) t.t0 += 1000
+globalThis.requestAnimationFrame = () => 0
+const panelEl = document.createElement('div')
+const panelRoot = createRoot(panelEl)
+await act(async () => { panelRoot.render(createElement(LoadPanel, { title: '952×860 px · 3 batches', load })) })
+const panel = panelEl.textContent
+for (const want of ['3/4 tiles', '✗', 'z11 · 0 new', '/ ~2.0 s', '├ terrain', '└ 1 lines', 'trace · ', 'seabed', '! elevation 10/1/2', '✗ water 11/3/4']) {
+  if (!panel.includes(want)) missing.push(`load panel: "${want}" in ${JSON.stringify(panel)}`)
+}
+act(() => panelRoot.unmount())
 
 console.log('rendered', html.length, 'chars')
 if (errors.length) {

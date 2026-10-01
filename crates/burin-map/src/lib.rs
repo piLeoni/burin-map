@@ -106,9 +106,13 @@ impl Map {
             deg_per_px_lon,
             deg_per_px_lat,
         };
-        burin_map_core::geojson::to_geojson(&self.drawing.paths, pix_w, pix_h, |x, y| {
-            tr.to_lonlat(x, y)
-        })
+        burin_map_core::geojson::to_geojson_with_fills(
+            &self.drawing.paths,
+            &self.drawing.fills,
+            pix_w,
+            pix_h,
+            |x, y| tr.to_lonlat(x, y),
+        )
     }
 }
 
