@@ -349,10 +349,16 @@ fn trace_beside(f: &Fields, st: &Style, fixed: &[Line], open: &[Line]) -> (Vec<L
         } else {
             Vec::new()
         };
-        let whole: Line = l.iter().chain(&more).copied().collect();
-        t.stamp(&whole, lid);
-        seeds_beside(&mut queue, &whole, lid, seed_every);
+        t.stamp(&more, lid);
         added.push(more);
+    }
+    // Stamped only now: an arc with both ends at the seam would otherwise
+    // block its second end with its own body.
+    for (i, (l, more)) in open.iter().zip(&added).enumerate() {
+        let lid = OTHERS + (fixed.len() + i) as i32;
+        let whole: Line = l.iter().chain(more).copied().collect();
+        t.stamp(l, lid);
+        seeds_beside(&mut queue, &whole, lid, seed_every);
     }
 
     loop {
@@ -409,6 +415,10 @@ fn trace_beside(f: &Fields, st: &Style, fixed: &[Line], open: &[Line]) -> (Vec<L
 /// come as close to the boundary as the rule allows.
 const STRIPE_MARGIN_PX: f32 = 16.0;
 
+/// How far the stripes traced second may walk into their neighbours: a line
+/// carried on from the seam at a slant needs a step or two to leave them.
+const SEAM_OVERLAP_PX: f32 = 2.0;
+
 /// Evenly spaced streamlines, traced in parallel stripes.
 ///
 /// `trace_streamlines` already runs a whole line per thread, but it produces
@@ -435,6 +445,17 @@ pub fn trace_stripes(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
     }
     trace_columns(f, st, stripe)
 }
+
+/// The stripe width, in px, that cuts `f` into `count` stripes the way
+/// `trace_stripes` will, but none narrower than `MIN_STRIPE_PX`.
+pub fn stripe_width(f: &Fields, count: u32) -> i32 {
+    let across = if runs_across(f) { f.h } else { f.w } as i32;
+    let count = count.max(1) as i32;
+    ((across + count - 1) / count).max(MIN_STRIPE_PX)
+}
+
+/// Narrower stripes would reach past their neighbours into the next ones.
+const MIN_STRIPE_PX: i32 = 64;
 
 /// Whether the walkable field mostly points east-west.
 fn runs_across(f: &Fields) -> bool {
@@ -496,7 +517,7 @@ fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
         .par_iter()
         .flat_map_iter(|&s| {
             let (x0, x1) = cols(s);
-            let sub = slice_columns(f, x0, x1, STRIPE_MARGIN_PX);
+            let sub = slice_columns(f, x0, x1, STRIPE_MARGIN_PX, 0.0);
             let dx = (x0 as f32 - STRIPE_MARGIN_PX).max(0.0);
             shift(trace_streamlines(&sub, &seeded(s)), dx)
         })
@@ -518,7 +539,7 @@ fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
         .par_iter()
         .map(|&s| {
             let (x0, x1) = cols(s);
-            let sub = slice_columns(f, x0, x1, reach);
+            let sub = slice_columns(f, x0, x1, reach, SEAM_OVERLAP_PX);
             let lo = (x0 as f32 - reach).max(0.0);
             let hi = lo + sub.w as f32;
             let seam = |p: [f32; 2], q: [f32; 2]| {
@@ -594,7 +615,14 @@ fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
     }
 
     let seams: Vec<f32> = (1..n).map(|s| (s * stripe) as f32).collect();
-    join_at_seams(lines, &seams, st.space.max(3.0))
+    let reach = |p: [f32; 2]| {
+        let (x, y) = (
+            p[0].clamp(0.0, w as f32 - 1.0),
+            p[1].clamp(0.0, h as f32 - 1.0),
+        );
+        f.space[y as usize * w + x as usize].max(3.0)
+    };
+    join_at_seams(lines, &seams, reach)
 }
 
 /// A line's end at a seam: which end, where, the way it faces, and whether
@@ -602,9 +630,10 @@ fn trace_columns(f: &Fields, st: &Style, stripe: i32) -> Vec<Line> {
 type SeamEnd = (usize, [f32; 2], [f32; 2], bool);
 
 /// Strands cut by a stripe edge, joined up again: an end that runs into a
-/// seam meets the nearest end within `reach` px that leaves the other side
-/// the same way. A line waved or dashed afterwards then shows no seam.
-fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
+/// seam meets the nearest end within `reach` px (the spacing there) that
+/// leaves the other side the same way. A line waved or dashed afterwards
+/// then shows no seam.
+fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: impl Fn([f32; 2]) -> f32) -> Vec<Line> {
     if seams.is_empty() {
         return lines;
     }
@@ -627,7 +656,7 @@ fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
                 // Its side is the way it heads: a strand may stop a step
                 // past the seam.
                 let left = out[0] > 0.0;
-                if (p[0] - x).abs() <= 3.0 && out[0].abs() > 0.2 {
+                if (p[0] - x).abs() <= reach(p) && out[0].abs() > 0.2 {
                     at_seam[k].push((2 * i + tail as usize, p, out, left));
                 }
             }
@@ -638,7 +667,7 @@ fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
         for a in ends.iter().filter(|e| e.3) {
             for b in ends.iter().filter(|e| !e.3) {
                 let d = (a.1[0] - b.1[0]).hypot(a.1[1] - b.1[1]);
-                if d <= reach && a.2[0] * -b.2[0] + a.2[1] * -b.2[1] > 0.5 {
+                if d <= reach(a.1).max(reach(b.1)) && a.2[0] * -b.2[0] + a.2[1] * -b.2[1] > 0.5 {
                     pairs.push((d, a.0, b.0));
                 }
             }
@@ -646,8 +675,9 @@ fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
     }
     pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut partner = vec![usize::MAX; lines.len() * 2];
+    // A line may meet its own other end: carried on round, it closes.
     for (_, a, b) in pairs {
-        if partner[a] == usize::MAX && partner[b] == usize::MAX && a / 2 != b / 2 {
+        if partner[a] == usize::MAX && partner[b] == usize::MAX {
             partner[a] = b;
             partner[b] = a;
         }
@@ -677,6 +707,10 @@ fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
             let exit = if from_tail { 2 * i } else { 2 * i + 1 };
             match partner[exit] {
                 p if p != usize::MAX && !used[p / 2] => enter = p,
+                p if p == start => {
+                    chain.push(chain[0]);
+                    break;
+                }
                 _ => break,
             }
         }
@@ -685,9 +719,10 @@ fn join_at_seams(lines: Vec<Line>, seams: &[f32], reach: f32) -> Vec<Line> {
     out
 }
 
-/// `f` narrowed to columns `x0..x1` plus `pad` columns each side, whose
-/// `walkable` flags are cleared so the tracer reads outside but stays inside.
-fn slice_columns(f: &Fields, x0: i32, x1: i32, pad: f32) -> Fields {
+/// `f` narrowed to columns `x0..x1` plus `pad` columns each side. Beyond
+/// `over` columns each side `walkable` is cleared, so the tracer reads the
+/// rest of the padding but stays out of it.
+fn slice_columns(f: &Fields, x0: i32, x1: i32, pad: f32, over: f32) -> Fields {
     let (w, h) = (f.w, f.h);
     let lo = (x0 as f32 - pad).max(0.0) as usize;
     let hi = ((x1 as f32 + pad).round() as usize).min(w);
@@ -711,11 +746,9 @@ fn slice_columns(f: &Fields, x0: i32, x1: i32, pad: f32) -> Fields {
         out.space.extend_from_slice(&f.space[a..b]);
     }
     // The padding belongs to the neighbour: read it, but do not draw in it.
-    let inner = (x0 - lo as i32).max(0) as usize;
-    let inner_end = {
-        let x1 = x1 as usize;
-        (x1.saturating_sub(lo)).min(nw)
-    };
+    let over = over as i32;
+    let inner = (x0 - over - lo as i32).max(0) as usize;
+    let inner_end = (((x1 + over) as usize).saturating_sub(lo)).min(nw);
     for y in 0..h {
         let row = y * nw;
         for x in 0..inner.min(nw) {

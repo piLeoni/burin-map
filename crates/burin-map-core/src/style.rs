@@ -135,6 +135,7 @@ style! {
     engine: engine_min ("em"): f32 = 4.0, "leave out lines shorter than this, in px";
     engine: engine_stop ("esp"): f32 = 0.5, "end a line when it comes closer to another than this fraction of the spacing";
     engine: engine_fill ("ef"): f32 = 0.8, "start a new line in any gap wider than 2 × this × the spacing (1 turns it off)";
+    engine: engine_stripes ("estr"): u32 = 0, "trace in this many stripes side by side, all at once: faster, but solid lines can show where they meet; 1 in one piece, 0 stripes 256 px wide";
 
     batch: batch_floor ("bf"): f32 = 0.0, "this batch draws only where the shading input is at least this; 0 draws on all land";
     batch: batch_stroke ("bs"): f32 = 1.2, "line width, in px";
@@ -384,7 +385,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 46);
+        assert_eq!(Style::PARAMS.len(), 47);
     }
 
     #[test]

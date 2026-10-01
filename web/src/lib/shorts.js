@@ -46,6 +46,7 @@ export const PARAM_SHORTS = {
   engine_min: 'em',
   engine_stop: 'esp',
   engine_fill: 'ef',
+  engine_stripes: 'estr',
   batch_floor: 'bf',
   batch_stroke: 'bs',
   batch_seed: 'bseed',

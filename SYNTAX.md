@@ -250,6 +250,7 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 |  | `engine_min` | 4 |  |
 |  | `engine_stop` | 0.5 |  |
 |  | `engine_fill` | 0.8 |  |
+|  | `engine_stripes` | 0 |  |
 | Batch | `batch_floor` | 0 |  |
 |  | `batch_stroke` | 1.2 |  |
 |  | `batch_seed` | 1 |  |

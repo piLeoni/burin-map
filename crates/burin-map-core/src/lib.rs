@@ -528,11 +528,13 @@ fn trace_batch(
     let t0 = now();
     let phase = (st.mod_wave > 0.0 && st.mod_wave_even > 0.0)
         .then(|| wave::Phase::from_flow(&f.tx, &f.ty, f.w, f.h));
-    // Even waves show the faintest seam, so such a batch is traced whole.
-    let stripe = if whole || phase.is_some() {
-        f.w.max(f.h) as i32
-    } else {
-        crate::STRIPE
+    // Even waves show the faintest seam, so such a batch is traced whole
+    // unless the style asks for stripes.
+    let stripe = match st.engine_stripes {
+        _ if whole => f.w.max(f.h) as i32,
+        0 if phase.is_some() => f.w.max(f.h) as i32,
+        0 => crate::STRIPE,
+        n => streamlines::stripe_width(f, n),
     };
     let raw = trace_stripes(f, st, stripe);
     let stripe_ms = now() - t0;

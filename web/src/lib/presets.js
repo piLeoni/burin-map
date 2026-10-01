@@ -1,8 +1,10 @@
 const PENINSULA = { at: '37.66,-122.45', size_km: [36, 25] }
 const OFFSHORE = { at: '37.6,-122.85', size_km: [90, 63] }
 
-/** Continuous contours, sparse on flat ground: they read even on a featureless seabed. */
+/** Continuous contours, sparse on flat ground: they read even on a featureless seabed.
+ * Solid lines show where stripes meet, so they are traced in one piece. */
 const SEABED = {
+  engine_stripes: 1,
   space: 5,
   space_light: 3,
   space_dark: 0.9,
