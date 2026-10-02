@@ -12,12 +12,16 @@ use std::time::Instant;
 use clap::parser::ValueSource;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
+use burin_map_core::panel::Event;
+use burin_map_core::{Stage, Step};
+
 use crate::document::size_pair;
 use crate::geo::{parse_length_km, parse_scale};
-use crate::progress::latlon;
+use crate::panel::Panel;
+use crate::progress::{latlon, relief};
 use crate::{
     bounds_around, dem::projected_size, locate, Batch, Bounds, Document, Error, Frame, Progress,
-    Style, TileSource,
+    Style,
 };
 
 const PLACES: &[(&str, Bounds)] = &[
@@ -69,7 +73,7 @@ pub fn command() -> Command {
     };
     let mut cmd = Command::new("burin-map")
         .version(env!("CARGO_PKG_VERSION"))
-        .about("Pen-and-ink terrain map from SRTM elevation data.")
+        .about("Pen-and-ink terrain map from elevation tiles.")
         .after_help("Examples:\n  \
             burin-map --terrain-at \"Twin Peaks, San Francisco\" --terrain-size 20km --out-file sf.png\n  \
             burin-map --tp bern --s 5 --dl 0.3\n  \
@@ -391,52 +395,31 @@ impl Report {
     }
 
     fn progress(&self, p: &Progress) {
-        use crate::progress::{megabytes, thousands};
+        use crate::progress::thousands;
         match *p {
-            Progress::Tile {
-                name,
-                source,
-                done,
-                total,
-            } => {
-                let what = match source {
-                    TileSource::Cache => "from cache".to_string(),
-                    TileSource::Download(b) => format!("downloaded ({})", megabytes(b)),
-                    TileSource::Sea => "open sea".to_string(),
-                };
-                self.transient(
-                    "elevation",
-                    &format!("SRTM tile {done} of {total}: {name} {what}"),
-                );
+            Progress::Tile { done, total } => {
+                self.transient("elevation", &format!("terrain tile {done} of {total}"));
             }
             Progress::Elevation {
                 tiles,
-                downloaded,
-                bytes,
+                zoom,
                 width,
                 height,
                 px_m,
                 highest_m,
+                deepest_m,
                 secs,
                 ..
             } => {
                 let plural = if tiles == 1 { "" } else { "s" };
-                let src = match downloaded {
-                    0 => format!("{tiles} SRTM tile{plural}, all from cache"),
-                    d if d == tiles => format!(
-                        "{tiles} SRTM tile{plural} downloaded ({})",
-                        megabytes(bytes)
-                    ),
-                    d => format!(
-                        "{tiles} SRTM tiles: {d} downloaded ({}), {} from cache",
-                        megabytes(bytes),
-                        tiles - d
-                    ),
-                };
-                self.step("elevation", &src, Some(secs));
+                self.step(
+                    "elevation",
+                    &format!("{tiles} terrain tile{plural} at zoom {zoom}"),
+                    Some(secs),
+                );
                 self.detail(&format!(
-                    "projected onto {width} × {height} px, {px_m:.0} m per pixel, \
-                                      highest point {highest_m:.0} m"
+                    "projected onto {width} × {height} px, {px_m:.0} m per pixel, {}",
+                    relief(highest_m, deepest_m)
                 ));
             }
             Progress::WaterTile { done, total } => {
@@ -484,6 +467,7 @@ impl Report {
                 &format!("{} dashes", thousands(count as u64)),
                 Some(secs),
             ),
+            Progress::Step { .. } => {}
         }
     }
 }
@@ -565,14 +549,20 @@ where
     }
     let (bounds, frame, label) = area_and_frame(&m, &doc)?;
     let (wm, hm) = projected_size(&bounds);
-    let centre = latlon((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
-    r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
-    r.detail(&format!(
-        "{:.1} × {:.1} km around {centre}",
-        wm / 1000.0,
-        hm / 1000.0
-    ));
-    if batches.len() > 1 || batches[0].angle != 0.0 || batches[0].name.is_some() {
+    let (width_km, height_km) = (wm / 1000.0, hm / 1000.0);
+    let (lat, lon) = ((bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0);
+    let ground = burin_map_core::panel::ground(width_km, height_km, lat, lon);
+    let area = Event::Area {
+        width_km,
+        height_km,
+        lat,
+        lon,
+    };
+    if !r.live {
+        r.step("where", &format!("{BOLD}{label}{BOLD:#}"), None);
+        r.detail(&ground);
+    }
+    if !r.live && (batches.len() > 1 || batches[0].angle != 0.0 || batches[0].name.is_some()) {
         let desc: Vec<String> = batches
             .iter()
             .map(|b| match &b.name {
@@ -587,12 +577,7 @@ where
         ));
     }
 
-    let t = Instant::now();
-    let map = crate::draw_with_water(&bounds, &batches, doc.water.as_ref(), &frame, |p| {
-        r.progress(p)
-    })?;
     let out = PathBuf::from(m.get_one::<String>("out-file").unwrap());
-    let d = &map.drawing;
     let is_svg = out.extension().map(|e| e == "svg").unwrap_or(false);
     let (want_png, want_svg) = match m.get_one::<String>("out-format").map(|s| s.as_str()) {
         Some("png") => (true, false),
@@ -601,28 +586,73 @@ where
         Some(_) => (true, true),
         None => (!is_svg, is_svg),
     };
-    let mut files = Vec::new();
-    if want_png {
-        let png = out.with_extension("png");
-        std::fs::write(&png, map.to_png()?)?;
-        files.push((png, format!("{} × {} px", d.width, d.height)));
-    }
-    if want_svg {
-        let svg = out.with_extension("svg");
-        std::fs::write(&svg, map.to_svg())?;
-        let size = match map.mm_per_px {
-            Some(k) => format!("{:.0} × {:.0} mm", d.width as f64 * k, d.height as f64 * k),
-            None => format!("{} × {} px", d.width, d.height),
-        };
-        files.push((svg, size));
-    }
-    if want_png || want_svg {
-        // already handled above
-    }
-    if let Some(geojson_path) = m.get_one::<PathBuf>("out-geojson") {
-        let text = map.to_geojson(&bounds);
-        std::fs::write(geojson_path, text)?;
-        r.detail(&format!("GeoJSON written to {}", geojson_path.display()));
+
+    let t = Instant::now();
+    let water = doc.water.as_ref();
+    let panel = r.live.then(|| {
+        let rows: Vec<_> = burin_map_core::rows(
+            &batches,
+            water.map(|w| (&w.batches[..], w.shoreline.as_ref())),
+        )
+        .into_iter()
+        // The water row above builds the mask, while it fetches.
+        .filter(|row| row.step != Step::WaterMask && (want_svg || row.step != Step::Svg))
+        .collect();
+        let p = Panel::new(&label, water.is_some(), &rows);
+        p.event(area);
+        p
+    });
+    let svg_step = |stage| {
+        if let Some(p) = &panel {
+            p.progress(&Progress::Step {
+                step: Step::Svg,
+                stage,
+            });
+        }
+    };
+    let files = std::thread::scope(|s| {
+        if let Some(p) = &panel {
+            s.spawn(|| p.tick());
+        }
+        let done = (|| -> Result<_, Box<dyn std::error::Error>> {
+            let map = crate::draw_with_water(&bounds, &batches, water, &frame, |p| match &panel {
+                Some(panel) => panel.progress(p),
+                None => r.progress(p),
+            })?;
+            let d = &map.drawing;
+            let mut files = Vec::new();
+            if want_png {
+                let png = out.with_extension("png");
+                std::fs::write(&png, map.to_png()?)?;
+                files.push((png, format!("{} × {} px", d.width, d.height)));
+            }
+            if want_svg {
+                svg_step(Stage::Start);
+                let svg = out.with_extension("svg");
+                std::fs::write(&svg, map.to_svg())?;
+                svg_step(Stage::Done);
+                let size = match map.mm_per_px {
+                    Some(k) => format!("{:.0} × {:.0} mm", d.width as f64 * k, d.height as f64 * k),
+                    None => format!("{} × {} px", d.width, d.height),
+                };
+                files.push((svg, size));
+            }
+            if let Some(path) = m.get_one::<PathBuf>("out-geojson") {
+                std::fs::write(path, map.to_geojson(&bounds))?;
+                files.push((path.clone(), "GeoJSON".into()));
+            }
+            Ok(files)
+        })();
+        if let Some(p) = &panel {
+            for (path, size) in done.iter().flatten() {
+                p.message(format!("wrote {}  {size}", path.display()));
+            }
+            p.finish(done.is_ok());
+        }
+        done
+    })?;
+    if panel.is_some() {
+        return Ok(());
     }
     let mut out = anstream::stdout();
     for (i, (path, size)) in files.iter().enumerate() {

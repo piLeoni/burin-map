@@ -1,15 +1,15 @@
 /**
- * A terminal box with its title, and optionally controls, set into the top
- * border: ┌ title ──── aside ┐.
+ * A section of the sidebar: a title, optionally controls on its right, then
+ * the content. Sections after the first are set off by a rule above.
  */
 export default function Panel({ title, aside, className = '', children }) {
   return (
-    <section box-="square" className={`relative ${className}`}>
+    <section className={`border-black py-[1lh] not-first:border-t ${className}`}>
       {(title || aside) && (
-        <div className="pointer-events-none absolute inset-x-[1ch] top-0 flex h-[1lh] items-center gap-[1ch]">
-          {title && <span className="pointer-events-auto truncate bg-white px-[1ch] font-bold">{title}</span>}
-          {aside && <span className="pointer-events-auto ml-auto flex items-center bg-white px-[1ch]">{aside}</span>}
-        </div>
+        <header className="mb-[0.5lh] flex min-h-[1lh] shrink-0 items-center gap-[1ch]">
+          {title && <h2 className="truncate font-bold">{title}</h2>}
+          {aside && <div className="ml-auto flex items-center gap-[1ch]">{aside}</div>}
+        </header>
       )}
       {children}
     </section>

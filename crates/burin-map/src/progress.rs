@@ -3,33 +3,23 @@
 
 use std::fmt;
 
-#[derive(Clone, Copy, Debug)]
-pub enum TileSource {
-    Cache,
-    /// Downloaded, compressed size in bytes.
-    Download(u64),
-    /// No tile exists there: open sea.
-    Sea,
-}
-
 #[derive(Clone, Debug)]
-pub enum Progress<'a> {
-    /// One elevation tile ready; `done` of `total`.
+pub enum Progress {
+    /// One terrain tile ready; `done` of `total`.
     Tile {
-        name: &'a str,
-        source: TileSource,
         done: usize,
         total: usize,
     },
-    /// Elevation mosaicked and reprojected onto the output grid.
+    /// Terrain tiles of one zoom reprojected onto the output grid.
     Elevation {
         tiles: usize,
-        downloaded: usize,
-        bytes: u64,
+        zoom: u8,
         width: usize,
         height: usize,
         px_m: f64,
         highest_m: f32,
+        /// The sea floor's lowest point, below 0; 0 without sea.
+        deepest_m: f32,
         centre: (f64, f64),
         secs: f64,
     },
@@ -63,61 +53,23 @@ pub enum Progress<'a> {
         count: usize,
         secs: f64,
     },
+    /// A step of the drawing reached a stage, as the engine tells it.
+    Step {
+        step: burin_map_core::Step,
+        stage: burin_map_core::Stage,
+    },
 }
 
-/// "1,234,567".
-pub fn thousands(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
+pub use burin_map_core::panel::{latlon, relief, scale, thousands};
 
-/// "1:100,000": three significant figures, since whole pixels make the exact
-/// value drift a little from the one asked for (1:100,021).
-pub fn scale(n: f64) -> String {
-    let mag = 10f64.powi(n.log10().floor() as i32 - 2).max(1.0);
-    format!("1:{}", thousands(((n / mag).round() * mag) as u64))
-}
-
-pub fn megabytes(bytes: u64) -> String {
-    format!("{:.1} MB", bytes as f64 / 1e6)
-}
-
-/// "46.95°N 7.45°E".
-pub fn latlon(lat: f64, lon: f64) -> String {
-    format!(
-        "{:.2}°{} {:.2}°{}",
-        lat.abs(),
-        if lat >= 0.0 { 'N' } else { 'S' },
-        lon.abs(),
-        if lon >= 0.0 { 'E' } else { 'W' }
-    )
-}
-
-impl fmt::Display for Progress<'_> {
+impl fmt::Display for Progress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Progress::Tile { name, source, done, total } => {
-                let what = match source {
-                    TileSource::Cache => "from cache".to_string(),
-                    TileSource::Download(b) => format!("downloaded, {}", megabytes(b)),
-                    TileSource::Sea => "open sea, none".to_string(),
-                };
-                write!(f, "elevation tile {name} {what} ({done}/{total})")
-            }
-            Progress::Elevation { tiles, downloaded, bytes, width, height, px_m, highest_m, centre, secs } => {
-                write!(f, "elevation: {tiles} SRTM tile{}", if tiles == 1 { "" } else { "s" })?;
-                if downloaded > 0 {
-                    write!(f, " ({downloaded} downloaded, {})", megabytes(bytes))?;
-                }
-                write!(f, ", projected around {} onto {width} × {height} px, {px_m:.0} m per px, \
-                           highest point {highest_m:.0} m ({secs:.1} s)", latlon(centre.1, centre.0))
+            Progress::Tile { done, total } => write!(f, "elevation tile {done}/{total}"),
+            Progress::Elevation { tiles, zoom, width, height, px_m, highest_m, deepest_m, centre, secs } => {
+                write!(f, "elevation: {tiles} terrain tile{} at zoom {zoom}", if tiles == 1 { "" } else { "s" })?;
+                write!(f, ", projected around {} onto {width} × {height} px, {px_m:.0} m per px, {} ({secs:.1} s)",
+                    latlon(centre.1, centre.0), relief(highest_m, deepest_m))
             }
             Progress::WaterTile { done, total } => write!(f, "water tile {done}/{total}"),
             Progress::Water { share, secs } => {
@@ -131,21 +83,7 @@ impl fmt::Display for Progress<'_> {
             Progress::Dashes { count, secs } => {
                 write!(f, "dashes: {} ({secs:.1} s)", thousands(count as u64))
             }
+            Progress::Step { step, stage } => write!(f, "{step:?}: {stage:?}"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn formats() {
-        assert_eq!(thousands(1234567), "1,234,567");
-        assert_eq!(thousands(999), "999");
-        assert_eq!(latlon(46.95, -7.45), "46.95°N 7.45°W");
-        assert_eq!(scale(100_021.0), "1:100,000");
-        assert_eq!(scale(67_540.0), "1:67,500");
-        assert_eq!(scale(250.0), "1:250");
     }
 }

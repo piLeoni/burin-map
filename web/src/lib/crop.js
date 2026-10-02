@@ -134,9 +134,10 @@ export function cropSvg(svg, rect, paperMm) {
     }
     if (inside) body += `<g${pen.attrs}>\n${inside}</g>\n`
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${num(paperMm[0])}mm" height="${num(paperMm[1])}mm" viewBox="0 0 ${num(w)} ${num(h)}">`
-    + '<g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
-    + `${body}</g></svg>\n`
+  return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"'
+    + ` width="${num(paperMm[0])}mm" height="${num(paperMm[1])}mm" viewBox="0 0 ${num(w)} ${num(h)}"`
+    + ' fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
+    + `${body}</svg>\n`
 }
 
 /** The part of a drawing's FeatureCollection (lines, and fills as polygons) inside `[west, south, east, north]`. */

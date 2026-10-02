@@ -100,12 +100,25 @@ function drawWorker() {
  *   bounds [west, south, east, north] and the OpenMapTiles tiles covering them; onBoard: called as the draw
  *   begins with the engine's progress board (see board.js), when the engine shares its memory
  * @returns {Promise<{ svg: string, geojson: string, lines: number, dashes: number, ms: number, threads: number,
- *   gpu: string | false | null, timings: Array<[string, number]>, sent: number }>} gpu: adapter used, false if
- *   asked for but unavailable, null if not asked; timings: ms per phase in the worker; sent: epoch ms at postMessage
+ *   gpu: string | false | null, timings: Array<[string, number]>, sent: number, board: number[] }>} gpu: adapter used,
+ *   false if asked for but unavailable, null if not asked; timings: ms per phase in the worker; sent: epoch ms at
+ *   postMessage; board: the progress board as the draw left it
  */
 export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opts) {
+  const json = batchesJson(batches)
+  const id = ++nextId
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject, onBoard: opts?.onBoard })
+    const gpu = !!opts?.gpu
+    const water = opts?.water ?? null
+    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu, water }, [elev.buffer])
+  })
+}
+
+/** The batches as the engine reads them (JSON), for drawing and for its progress panel. */
+export function batchesJson(batches) {
   const list = Array.isArray(batches) ? batches : []
-  const json = JSON.stringify(list.map((b) => ({
+  return JSON.stringify(list.map((b) => ({
     ...(typeof b?.name === 'string' && b.name.trim() ? { name: b.name } : {}),
     ...pickInk(b ?? {}),
     angle: Number.isFinite(Number(b?.angle)) ? Number(b.angle) : 0,
@@ -116,11 +129,4 @@ export function drawBatches(elev, width, height, pxM, batches, geo, mmPerPx, opt
       ),
     ),
   })))
-  const id = ++nextId
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onBoard: opts?.onBoard })
-    const gpu = !!opts?.gpu
-    const water = opts?.water ?? null
-    drawWorker().postMessage({ id, elev, width, height, pxM, json, geo, mmPerPx, gpu, water }, [elev.buffer])
-  })
 }

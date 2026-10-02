@@ -58,7 +58,7 @@ await act(async () => {
 await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 
 const html = document.getElementById('root').innerHTML
-const checks = ['>YAML<', '>JSON5<', '>CLI<', 'load ▾', 'import', 'download', 'copy', 'link', 'in step with the map']
+const checks = ['>YAML<', '>JSON5<', '>CLI<', 'presets ▾', 'import', 'download', 'copy', 'share', 'Document', 'github']
 const missing = checks.filter((c) => !html.includes(c))
 if (html.includes('type="range"')) missing.push('the sliders should be gone')
 if (html.includes('Parameters')) missing.push('the Parameters tab should be gone')
@@ -330,12 +330,17 @@ for (const kind of kinds) {
   if (!threw) missing.push('views: a wrong cap should be an error')
 
   const C = await import('../src/lib/crop.js')
-  const svg = '<svg viewBox="0 0 100 100"><g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
-    + '<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt" id="hills-1">\n<path d="M10 10 L90 10"/>\n</g>\n'
-    + '<g stroke="#000000" stroke-width="0.5">\n<path d="M10 20 L20 20"/>\n<path d="M200 200 L210 200"/>\n</g>\n</g></svg>\n'
+  const layer = ' id="hills-1" inkscape:groupmode="layer" inkscape:label="hills-1"'
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"'
+    + ' viewBox="0 0 100 100" fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
+    + `<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt"${layer}>\n<path d="M10 10 L90 10"/>\n</g>\n`
+    + '<g stroke="#000000" stroke-width="0.5">\n<path d="M10 20 L20 20"/>\n<path d="M200 200 L210 200"/>\n</g>\n</svg>\n'
   const cut = C.cropSvg(svg, [0, 0, 50, 50], [50, 50])
-  if (!cut.includes('<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt" id="hills-1">') || !cut.includes('stroke-width="0.5"')) {
+  if (!cut.includes(`<g stroke="#ff0000" stroke-width="2" stroke-linecap="butt"${layer}>`) || !cut.includes('stroke-width="0.5"')) {
     missing.push(`crop loses the pens ${cut}`)
+  }
+  if (!cut.includes('xmlns:inkscape=') || /<svg[^>]*>\s*<g fill/.test(cut)) {
+    missing.push(`crop should keep layers at the root, with their namespace ${cut}`)
   }
   if (cut.includes('M200')) missing.push('crop keeps a path outside the frame')
 }
@@ -490,29 +495,29 @@ if (V.detectView('a.yml', '') !== 'yaml' || V.detectView('a.json', '') !== 'json
   missing.push('views: detectView')
 }
 
-// The loading panel: counted, timed and endless tasks, one begun after the
-// panel's clock last ticked, and the log.
+// The loading panel: the engine's own panel (the one the command line
+// shows), told what a draw does, laid out by LoadPanel.
 const { default: LoadPanel } = await import('../src/components/LoadPanel.jsx')
-const { createProgress } = await import('../src/lib/progress.js')
-let load = { tasks: [], log: [] }
-const tracker = createProgress((s) => { load = s })
-const tiles = tracker.task('elevation', 'elevation', 4, 'tiles')
-tiles.tick(3)
-tracker.task('water', 'water', 2, 'tiles').fail('z11 · 0 new')
-tracker.task('draw', 'drawing').eta(2000)
-tracker.task('terrain', 'terrain', 0, '', { child: true, wait: true })
-tracker.task('b1', '1 lines', 5, '', { child: true, wait: true }).step(2, 'trace')
-tracker.task('sea', 'seabed')
-tracker.log('elevation 10/1/2: HTTP 503, retry 1 in 0.5 s', 'warn')
-tracker.log('water 11/3/4: HTTP 500', 'error')
-await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-for (const t of load.tasks) t.t0 += 1000
+const wasm = await import('../pkg/burin_map_wasm.js')
+await wasm.default({ module_or_path: readFileSync(new URL('../pkg/burin_map_wasm_bg.wasm', import.meta.url)) })
+const engine = new wasm.Panel('952×860 px · 1 batch', '[{"angle":0,"style":{}}]', '{"shoreline":{"lines":1},"batches":[]}')
+engine.area(-122.5, 37.7, -122.4, 37.8, 0)
+engine.tile(3, 4, 0.2)
+engine.waterTile(2, 2, 0.3)
+engine.water(0.4)
+engine.message('elevation 10/1/2: HTTP 503, retry 1 in 0.5 s', true, 0.5)
+engine.elevation(new Float32Array([-40, 0, 120, 300]), 4, 12, 2, 2, 8.4, 0.6)
+const slots = Array.from(engine.slots())
+engine.board(slots[1], 2, 0.7)
+engine.board(slots[2], 2, 0.8)
+const view = JSON.parse(engine.view(1.0))
+engine.free()
 globalThis.requestAnimationFrame = () => 0
 const panelEl = document.createElement('div')
 const panelRoot = createRoot(panelEl)
-await act(async () => { panelRoot.render(createElement(LoadPanel, { title: '952×860 px · 3 batches', load })) })
+await act(async () => { panelRoot.render(createElement(LoadPanel, { view })) })
 const panel = panelEl.textContent
-for (const want of ['3/4 tiles', '✗', 'z11 · 0 new', '/ ~2.0 s', '├ terrain', '└ 1 lines', 'trace · ', 'seabed', '! elevation 10/1/2', '✗ water 11/3/4']) {
+for (const want of ['please wait', '✓ download', '4 tiles', '├ elevation', '4/4 tiles', 'zoom 12', '└ water', 'drawing', '├ terrain', '└ 1 lines', 'trace · ', 'messages', '0.0 s  8.8 × 11.1 km around 37.75°N 122.45°W', '0.5 s  elevation 10/1/2', 'highest point 300 m, sea floor down to 40 m']) {
   if (!panel.includes(want)) missing.push(`load panel: "${want}" in ${JSON.stringify(panel)}`)
 }
 act(() => panelRoot.unmount())

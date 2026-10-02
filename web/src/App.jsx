@@ -54,7 +54,6 @@ export default function App() {
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
           status={status}
-          drawing={drawing}
         />
       </div>
     </PasswordGate>

@@ -97,13 +97,6 @@ impl Map {
 
 fn logger(log: Option<Py<PyAny>>) -> impl Fn(&burin_map::Progress) + Sync {
     move |p: &burin_map::Progress| {
-        if let burin_map::Progress::Tile {
-            source: burin_map::TileSource::Cache,
-            ..
-        } = p
-        {
-            return;
-        }
         if let Some(f) = &log {
             Python::attach(|py| {
                 let _ = f.call1(py, (p.to_string(),));

@@ -156,7 +156,7 @@ writeFileSync("tp.svg", d.svg());
 
 ## How it works
 
-1. **Elevation.** SRTM tiles are mosaicked and reprojected to a transverse
+1. **Elevation.** Terrarium terrain tiles are read and reprojected to a transverse
    Mercator centred on the area, so pixels are square in metres, slopes are
    true and scale is exact at the centre.
 2. **Direction.** The terrain is heavily smoothed and its gradient turned by
@@ -295,7 +295,7 @@ burin-map --tp bern \
 ### Water
 
 Sea, lakes and rivers come from OpenStreetMap, through
-[watermask](https://github.com/piLeoni/watermask) and the
+[terramask](https://github.com/piLeoni/terramask) and the
 [OpenFreeMap](https://openfreemap.org) vector tiles. When a document has a
 `water` block, that mask, not the elevation, decides what is land, so polders
 below sea level and lakes above it come out right. The shoreline is stroked,
@@ -365,18 +365,24 @@ each group at its width.
 
 ## Data
 
-Elevation is SRTM 1 arc-second (≈30 m, 60°S–60°N), fetched from the
+Elevation is the Terrarium tiles of the
 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) open
-dataset and cached in `~/.cache/burin-map` (override with `BURIN_MAP_CACHE`).
-SRTM is courtesy of NASA/USGS; see the dataset's
+dataset, land heights and the sea floor alike, read through
+[terramask](https://github.com/piLeoni/terramask) and cached by it (override
+with `TERRAMASK_CACHE`). The command line and the browser use the same tiles.
+The zoom follows the output resolution, up to 15; where the deeper zooms
+flatten the sea to 0 m, the sea floor comes from zoom 10. The tiles combine
+SRTM, national surveys and bathymetry; see the dataset's
 [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md).
 
 Limits worth knowing:
 
-- Nothing above 60°N or below 60°S (Scandinavia's north, Alaska, Antarctica).
-- At 30 m, areas narrower than ~10–15 km start to show the data's grain.
-  SRTM also partly records trees and buildings, so cities and forests can
-  show relief that isn't ground.
+- Beyond 85° north or south there are no tiles.
+- Much of the land is SRTM underneath (≈30 m): areas narrower than ~10–15 km
+  start to show the data's grain, and cities and forests can show relief that
+  isn't ground.
+- The sea floor is a patchwork: detailed surveys near some coasts, coarse
+  grids offshore, and `ground: sea` batches show the seams.
 - Without a `water` block, sea is anything at or below 0.5 m, so land below
   sea level is left blank. With one, OpenStreetMap decides (see Water above).
 
@@ -388,7 +394,7 @@ That crate is the single source of truth. Thin shells sit around it:
 
 | Shell | Crate / folder | Role |
 | --- | --- | --- |
-| CLI + I/O | `crates/burin-map` | SRTM download, transverse Mercator, geocoding, PNG/SVG, `burin-map` command |
+| CLI + I/O | `crates/burin-map` | terrain and water through terramask, transverse Mercator, geocoding, PNG/SVG, `burin-map` command |
 | Python | `crates/burin-map-py` + `python/burin_map` | PyO3 bindings; the importable `burin_map` package |
 | Node | `crates/burin-map-node` + `node/` | napi-rs bindings; `require` / `import` and `npx burin-map` |
 | Web | `crates/burin-map-wasm` + `web/` | WASM bindings; React + Mapbox demo that draws the current view |
@@ -424,7 +430,7 @@ crates/burin-map-core/  the drawing engine: pure computation, no I/O
   order.rs              plotting order
   grid.rs, rng.rs       blur, gradient, percentiles; deterministic RNG
 crates/burin-map/       Rust library + `burin-map` command
-  dem.rs                SRTM download, cache, reprojection
+  dem.rs                terrain tiles (terramask), reprojection
   tmerc.rs              transverse Mercator
   geo.rs                addresses, coordinates, lengths, scales
   raster.rs             PNG

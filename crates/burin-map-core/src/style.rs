@@ -172,10 +172,11 @@ impl Ground {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Batch {
-    /// Optional label; only used for display (logs, the web app's cards).
+    /// What the batch is called: in progress reports, and as its layer
+    /// unless `layer` is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// SVG layer id for this batch's dashes; defaults to no separate layer.
+    /// The layer of this batch's dashes; defaults to its [`Batch::label`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
     /// Stroke colour as `#rgb` or `#rrggbb`. Black when omitted.
@@ -232,6 +233,22 @@ impl Batch {
             band: Band::default(),
             style,
         }
+    }
+
+    /// What batch `i` is called in progress reports, and its layer unless it
+    /// sets one: its `name`, else its `layer`, else as "2 dots".
+    pub fn label(&self, i: usize) -> String {
+        crate::progress::label(
+            self.name.as_deref(),
+            self.layer.as_deref(),
+            i,
+            self.draw.name(),
+        )
+    }
+
+    /// The layer batch `i` draws on: its `layer`, else its label.
+    pub fn layer_name(&self, i: usize) -> String {
+        self.layer.clone().unwrap_or_else(|| self.label(i))
     }
 
     pub fn ink(&self) -> Ink<'_> {

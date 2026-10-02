@@ -152,7 +152,7 @@ def projected_size(bounds: Bounds) -> tuple[float, float]:
 def draw(bounds: Bounds, style: Style | None = None, *,
          frame_size_mm: tuple[float] | tuple[float, float] | None = None,
          frame_pen_mm: float = 0.3, log: Callable[[str], None] | None = None) -> Drawing:
-    """Download SRTM elevation for `bounds` (west, south, east, north in degrees) and draw it.
+    """Download elevation for `bounds` (west, south, east, north in degrees) and draw it.
 
     `frame_size_mm` is the paper, `(side,)` for a square or `(width, height)`.
     The pen takes the place of `style.batch_stroke`, so every proportion of the

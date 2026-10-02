@@ -6,7 +6,7 @@
 
 mod board;
 
-use burin_map_core::{Batch, GeoTransform, Line, Stage, Style};
+use burin_map_core::{Batch, GeoTransform, Line, Progress, Stage, Step, Style};
 use js_sys::{Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::prelude::*;
 
@@ -324,15 +324,106 @@ pub fn water_tiles(
     max_tiles: u32,
 ) -> Vec<u32> {
     let b = [west, south, east, north];
-    let limits = watermask::ZoomLimits {
+    let limits = terramask::ZoomLimits {
         max_zoom,
         max_tiles: max_tiles as usize,
     };
-    let z = watermask::zoom_for(&b, width as usize, &limits);
-    watermask::tiles_for(&b, z)
+    let z = terramask::zoom_for(&b, width as usize, &limits);
+    terramask::tiles_for(&b, z)
         .into_iter()
         .flat_map(|t| [t.z as u32, t.x, t.y])
         .collect()
+}
+
+/// Web Mercator ends short of the poles.
+fn mercator_box(west: f64, south: f64, east: f64, north: f64) -> [f64; 4] {
+    const LAT: f64 = 85.0511;
+    [west, south.max(-LAT), east, north.min(LAT)]
+}
+
+/// The terrain tiles (Terrarium PNG) a north-up Web Mercator grid `width` px
+/// across the box needs, as flat `[z, x, y, …]`: the grid's own tiles at the
+/// zoom that matches it (zoomed out until there are at most `max_tiles`),
+/// then, deeper than zoom 10, their zoom-10 ancestors, which hold the sea
+/// floor those zooms flatten to 0 m. `x` may run past 2^z - 1 like
+/// [`water_tiles`].
+#[wasm_bindgen]
+pub fn terrain_tiles(
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+    width: u32,
+    max_tiles: u32,
+) -> Vec<u32> {
+    let b = mercator_box(west, south, east, north);
+    let limits = terramask::ZoomLimits {
+        max_zoom: terramask::TERRARIUM_MAX_ZOOM,
+        max_tiles: max_tiles as usize,
+    };
+    let z = terramask::zoom_for(&b, width as usize, &limits);
+    let ids = terramask::tiles_for(&b, z);
+    let mut up: Vec<terramask::TileId> = Vec::new();
+    if z > terramask::TERRARIUM_ZOOM {
+        up = ids
+            .iter()
+            .map(|t| t.ancestor(terramask::TERRARIUM_ZOOM))
+            .collect();
+        up.sort();
+        up.dedup();
+    }
+    ids.into_iter()
+        .chain(up)
+        .flat_map(|t| [t.z as u32, t.x, t.y])
+        .collect()
+}
+
+/// Metres on a north-up Web Mercator grid `width` × `height` over the box,
+/// row 0 at the top: the sea floor below 0, 0 where no tile reaches.
+/// `tiles` is an array of `[z, x, y, bytes]` as listed by [`terrain_tiles`],
+/// bytes empty where the source has none. The deepest zoom is the terrain;
+/// zoom-10 tiles under it give back the sea floor it flattens. Sampled with
+/// Catmull-Rom, like the command line.
+#[wasm_bindgen]
+pub fn elevation_grid(
+    tiles: js_sys::Array,
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+    width: u32,
+    height: u32,
+) -> Result<Vec<f32>, JsValue> {
+    let mut zooms: std::collections::BTreeMap<u8, terramask::Elevation> = Default::default();
+    for t in tiles.iter() {
+        let t = js_sys::Array::from(&t);
+        let n = |i| t.get(i).as_f64().unwrap_or(0.0) as u32;
+        let bytes = js_sys::Uint8Array::new(&t.get(3)).to_vec();
+        if bytes.is_empty() {
+            continue;
+        }
+        let id = terramask::TileId::new(n(0) as u8, n(1), n(2));
+        zooms
+            .entry(id.z)
+            .or_default()
+            .add_tile(id, &bytes)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    }
+    let mut terrain = zooms.pop_last().map(|(_, e)| e).unwrap_or_default();
+    if let Some(coarser) = zooms.get(&terramask::TERRARIUM_ZOOM) {
+        terrain.fill_sea(coarser);
+    }
+    let grid = terramask::Grid::new(
+        mercator_box(west, south, east, north),
+        width as usize,
+        height as usize,
+    );
+    Ok(terrain
+        .cubic(true)
+        .on(&grid)
+        .into_iter()
+        .map(|v| if v.is_finite() { v } else { 0.0 })
+        .collect())
 }
 
 /// What the page asks for on water; the document's `water` minus its source.
@@ -371,14 +462,11 @@ fn read_water(water: &JsValue, w: usize, h: usize) -> Result<Option<Wet>, JsValu
             "water.bounds needs [west, south, east, north]",
         ));
     };
-    let mut filter = watermask::Filter {
-        lines: Vec::new(),
-        ..Default::default()
+    let filter = match &spec.classes {
+        Some(c) => terramask::Filter::water(c, &[] as &[&str]),
+        None => terramask::Filter::water(terramask::Filter::DEFAULT_AREAS, &[] as &[&str]),
     };
-    if let Some(c) = &spec.classes {
-        filter.areas = c.clone();
-    }
-    let mut found = watermask::Water::new();
+    let mut found = terramask::Features::new();
     for t in js_sys::Array::from(&get("tiles")?).iter() {
         let t = js_sys::Array::from(&t);
         let n = |i| t.get(i).as_f64().unwrap_or(0.0) as u32;
@@ -386,13 +474,14 @@ fn read_water(water: &JsValue, w: usize, h: usize) -> Result<Option<Wet>, JsValu
         if bytes.is_empty() {
             continue;
         }
-        let id = watermask::TileId::new(n(0) as u8, n(1), n(2));
+        let id = terramask::TileId::new(n(0) as u8, n(1), n(2));
         found
             .add_tile(id, &bytes, &filter)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     }
-    let grid = watermask::Grid::new([west, south, east, north], w, h);
-    let mask = found.mask(&grid, &watermask::MaskOptions::default());
+    let grid = terramask::Grid::new([west, south, east, north], w, h);
+    let mask = found.mask(&grid, &terramask::MaskOptions::default());
+    board::share(mask.fraction());
     let depth_override = get("depth")
         .ok()
         .filter(|v| !v.is_undefined() && !v.is_null())
@@ -447,16 +536,16 @@ pub fn draw_batches(
     let batches = parse_batches(json)?;
     board::begin();
     if !(water.is_null() || water.is_undefined()) {
-        board::mark(board::WATER_MASK, Stage::Start);
+        board::Board.reach(Step::WaterMask, Stage::Start);
     }
     let t0 = now_ms();
     let wet = read_water(water, w, h)?;
     let mut timings = Vec::new();
     if wet.is_some() {
         timings.push(("water mask".to_string(), now_ms() - t0));
-        board::mark(board::WATER_MASK, Stage::Done);
+        board::Board.reach(Step::WaterMask, Stage::Done);
     }
-    board::mark(board::TERRAIN, Stage::Start);
+    board::Board.reach(Step::Terrain, Stage::Start);
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let sea = burin_map_core::sea_coverage(elev, coverage, &batches);
@@ -469,7 +558,7 @@ pub fn draw_batches(
         })
         .collect();
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
-    board::mark(board::TERRAIN, Stage::Done);
+    board::Board.reach(Step::Terrain, Stage::Done);
     let layer = layer(&wet);
     let (d, t) = burin_map_core::draw_fields_timed(
         &fields,
@@ -559,16 +648,16 @@ pub async fn draw_batches_gpu(
         .ok_or_else(|| JsValue::from_str("call initGpu() first"))?;
     board::begin();
     if !(water.is_null() || water.is_undefined()) {
-        board::mark(board::WATER_MASK, Stage::Start);
+        board::Board.reach(Step::WaterMask, Stage::Start);
     }
     let t0 = now_ms();
     let wet = read_water(&water, w, h)?;
     let mut timings = Vec::new();
     if wet.is_some() {
         timings.push(("water mask".to_string(), now_ms() - t0));
-        board::mark(board::WATER_MASK, Stage::Done);
+        board::Board.reach(Step::WaterMask, Stage::Done);
     }
-    board::mark(board::TERRAIN, Stage::Start);
+    board::Board.reach(Step::Terrain, Stage::Start);
     let t1 = now_ms();
     let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
     let sea = burin_map_core::sea_coverage(&elev, coverage, &batches);
@@ -581,7 +670,7 @@ pub async fn draw_batches_gpu(
         );
     }
     timings.push((terrain_label(fields.len(), "GPU"), now_ms() - t1));
-    board::mark(board::TERRAIN, Stage::Done);
+    board::Board.reach(Step::Terrain, Stage::Done);
     let layer = layer(&wet);
     let (d, t) = burin_map_core::draw_fields_timed(
         &fields,
@@ -603,12 +692,12 @@ fn finish(
     mm_per_px: Option<f32>,
 ) -> Drawing {
     let (width, height) = (d.width as u32, d.height as u32);
-    board::mark(board::SVG, Stage::Start);
+    board::Board.reach(Step::Svg, Stage::Start);
     let t = now_ms();
     let (pts, ends) = pack(&d.paths);
     let svg = d.to_svg(mm_per_px);
     timings.push(("svg".into(), now_ms() - t));
-    board::mark(board::SVG, Stage::Done);
+    board::Board.reach(Step::Svg, Stage::Done);
     let geo = read_geo(geo);
     Drawing {
         width,

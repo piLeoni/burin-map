@@ -20,6 +20,7 @@ pub mod geojson;
 pub mod gpu;
 mod grid;
 mod order;
+pub mod panel;
 mod pen;
 pub mod progress;
 mod rng;
@@ -37,7 +38,7 @@ pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Field
 pub use fills::{Band, Fill};
 pub use order::{pen_up_travel, plot_order};
 pub use pen::{Cap, Ink, Pen};
-pub use progress::{Progress, Stage, Step};
+pub use progress::{rows, Progress, Row, Stage, Step};
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
@@ -225,11 +226,26 @@ pub fn draw_batches_auto_with(
     batches: &[Batch],
     water: Option<&WaterLayer>,
 ) -> Drawing {
+    draw_batches_auto_told(elev, width, height, px_m, batches, water, &())
+}
+
+/// [`draw_batches_auto_with`], telling `progress` each step as it goes,
+/// the terrain fields included.
+pub fn draw_batches_auto_told(
+    elev: &[f32],
+    width: usize,
+    height: usize,
+    px_m: f32,
+    batches: &[Batch],
+    water: Option<&WaterLayer>,
+    progress: &dyn Progress,
+) -> Drawing {
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
     let coverage = water.map(|w| w.coverage);
     let sea = sea_coverage(elev, coverage, batches);
     let firsts = terrain_groups(batches).0;
+    progress.reach(Step::Terrain, Stage::Start);
     #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
     if let Some(g) = engine::device() {
         let fields: Vec<Fields> = firsts
@@ -239,7 +255,8 @@ pub fn draw_batches_auto_with(
                 g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, cov)
             })
             .collect();
-        return draw_fields_timed(&fields, batches, water, elev, || 0.0, &()).0;
+        progress.reach(Step::Terrain, Stage::Done);
+        return draw_fields_timed(&fields, batches, water, elev, || 0.0, progress).0;
     }
     let fields: Vec<Fields> = firsts
         .iter()
@@ -248,7 +265,8 @@ pub fn draw_batches_auto_with(
             build_fields_with(elev, width, height, px_m, &batches[i].style, cov)
         })
         .collect();
-    draw_fields_timed(&fields, batches, water, elev, || 0.0, &()).0
+    progress.reach(Step::Terrain, Stage::Done);
+    draw_fields_timed(&fields, batches, water, elev, || 0.0, progress).0
 }
 
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`): one per
@@ -372,16 +390,13 @@ fn trace_land(
             let mut st = b.style.clone();
             st.batch_seed = st.batch_seed.wrapping_add(i as u64 * 0x9E37_79B9);
             let at = |stage| progress.reach(Step::Batch(i), stage);
+            let layer = b.layer_name(i);
             let t0 = now();
             if b.draw == Draw::Fill {
                 at(Stage::Trace);
                 let (w, h) = (fields[0].w, fields[0].h);
                 let rings = fills::rings(b.ground, &b.band, elev, water, w, h, st.input_blur);
-                let pen = Pen::filling(
-                    b.color.as_deref(),
-                    b.color_expr.as_deref(),
-                    b.layer.as_deref().or(Some("fill")),
-                );
+                let pen = Pen::filling(b.color.as_deref(), b.color_expr.as_deref(), Some(&layer));
                 at(Stage::Done);
                 return (Vec::new(), vec![(pen, rings)], [now() - t0, 0.0, 0.0, 0.0]);
             }
@@ -406,7 +421,11 @@ fn trace_land(
                 dist: None,
                 depth: None,
             };
-            let ink = color_expr::colorize_paths(paths, &b.ink(), &ctx);
+            let ink = Ink {
+                layer: Some(&layer),
+                ..b.ink()
+            };
+            let ink = color_expr::colorize_paths(paths, &ink, &ctx);
             at(Stage::Done);
             (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
@@ -443,6 +462,11 @@ fn trace_water(
         .map(|(i, b)| {
             let st = seeded(i, b).style;
             let at = |stage| progress.reach(Step::Water(i), stage);
+            let layer = b.layer_name(i);
+            let ink = Ink {
+                layer: Some(&layer),
+                ..b.ink()
+            };
             let t0 = now();
             if b.draw != water::Draw::Lines {
                 at(Stage::Trace);
@@ -459,7 +483,7 @@ fn trace_water(
                 };
                 let f = water::water_fields(wl.coverage, &dist, depth, w, h, &b);
                 let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
-                let ink = color_expr::colorize_paths(plot_order(marks), &b.ink(), &ctx);
+                let ink = color_expr::colorize_paths(plot_order(marks), &ink, &ctx);
                 at(Stage::Done);
                 return (Vec::new(), ink, [ms, 0.0, 0.0, 0.0]);
             }
@@ -495,7 +519,7 @@ fn trace_water(
                 &b.r#where,
             );
             let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
-            let ink = color_expr::colorize_paths(paths, &b.ink(), &ctx);
+            let ink = color_expr::colorize_paths(paths, &ink, &ctx);
             at(Stage::Done);
             (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
@@ -648,15 +672,17 @@ impl Drawing {
             ),
             None => format!(r#"width="{w}" height="{h}""#),
         };
+        // Layers are the root's children, or Inkscape would see plain groups.
         let mut s = format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" {size} viewBox="0 0 {w} {h}"><g fill="none" stroke-linecap="round" stroke-linejoin="round">"##
+            r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="{INKSCAPE}" {size} viewBox="0 0 {w} {h}" fill="none" stroke-linecap="round" stroke-linejoin="round">"##
         );
         s.push('\n');
-        let id = |pen: &Pen| {
+        let mut ids = std::collections::HashMap::<String, usize>::new();
+        let mut id = |pen: &Pen| {
             pen.layer
                 .as_deref()
-                .filter(|id| !id.is_empty())
-                .map(svg_id)
+                .filter(|l| !l.is_empty())
+                .map(|l| svg_layer(l, &mut ids))
                 .unwrap_or_default()
         };
         for layer in self.layers() {
@@ -714,13 +740,18 @@ impl Drawing {
             }
             s.push_str("</g>\n");
         }
-        s.push_str("</g></svg>\n");
+        s.push_str("</svg>\n");
         s
     }
 }
 
-fn svg_id(name: &str) -> String {
-    let safe: String = name
+const INKSCAPE: &str = "http://www.inkscape.org/namespaces/inkscape";
+
+/// The attributes that make a group the layer `name`: an id made of what ids
+/// allow, unique among `used`, and the name as written for Inkscape and the
+/// plotters that read its layers.
+fn svg_layer(name: &str, used: &mut std::collections::HashMap<String, usize>) -> String {
+    let mut id: String = name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -730,7 +761,19 @@ fn svg_id(name: &str) -> String {
             }
         })
         .collect();
-    format!(r#" id="{safe}""#)
+    if !id.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        id.insert_str(0, "layer-");
+    }
+    let n = used.entry(id.clone()).or_default();
+    *n += 1;
+    if *n > 1 {
+        id = format!("{id}-{n}");
+    }
+    let label = name
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('"', "&quot;");
+    format!(r#" id="{id}" inkscape:groupmode="layer" inkscape:label="{label}""#)
 }
 
 #[cfg(test)]
@@ -888,10 +931,14 @@ mod tests {
         }
         assert!(wet > 50 && dry > 50, "lines on both: {wet} wet, {dry} dry");
 
-        // The shoreline's own width is another pen, plotted after the rest.
-        let pens: Vec<_> = d.pens().map(|(pen, run)| (pen.stroke, run.len())).collect();
-        assert_eq!(pens.len(), 2, "{pens:?}");
-        assert_eq!(pens[1].0, 2.5);
+        // Land, sea and shoreline each on its layer, the shoreline last.
+        let pens: Vec<_> = d
+            .pens()
+            .map(|(pen, run)| (pen.layer.clone().unwrap(), pen.stroke, run.len()))
+            .collect();
+        let layers: Vec<_> = pens.iter().map(|p| p.0.as_str()).collect();
+        assert_eq!(layers, ["1 lines", "1 sea lines", "shoreline"], "{pens:?}");
+        assert_eq!(pens[2].1, 2.5);
         assert_eq!(d.runs.last().unwrap().1, d.paths.len());
         let svg = d.to_svg(None);
         assert!(svg.contains(r#"stroke-width="2.5""#) && svg.contains(r#"stroke-width="1.2""#));
@@ -960,7 +1007,21 @@ mod tests {
             .map(|s| &s[..s.find('"').unwrap()])
             .collect();
         assert_eq!(widths.len(), 3, "{widths:?}");
-        assert!(svg.contains(r#"stroke-linecap="butt" id="width-1""#));
+        assert!(svg.contains(
+            r#"stroke-linecap="butt" id="layer-1_lines-1" inkscape:groupmode="layer" inkscape:label="1 lines-1""#
+        ));
+    }
+
+    #[test]
+    fn layer_ids_are_valid_and_unique() {
+        let mut used = Default::default();
+        assert_eq!(
+            svg_layer("hills", &mut used),
+            r#" id="hills" inkscape:groupmode="layer" inkscape:label="hills""#
+        );
+        assert!(svg_layer("hills", &mut used).starts_with(r#" id="hills-2""#));
+        assert!(svg_layer("2 \"sea\" & co", &mut used)
+            .ends_with(r#"id="layer-2__sea____co" inkscape:groupmode="layer" inkscape:label="2 &quot;sea&quot; &amp; co""#));
     }
 
     #[test]
@@ -996,7 +1057,8 @@ mod tests {
         assert!(at("#aabbcc") < at("#eeeeee"));
         assert!(at("#eeeeee") < at(r##"stroke="#000000""##));
         assert!(at("#cccccc") < svg.rfind(r##"stroke="#000000""##).unwrap());
-        assert!(svg.contains(r#"fill-rule="evenodd" id="fill""#));
+        assert!(svg.contains(r#"fill-rule="evenodd" id="layer-1_fill""#));
+        assert!(svg.contains(r#"inkscape:label="4 fill""#));
         assert!(d.fills.iter().all(|f| !f.rings.is_empty()));
         let gj = geojson::to_geojson_with_fills(&d.paths, &d.fills, 200.0, 200.0, |x, y| (x, -y));
         assert_eq!(gj.matches("MultiPolygon").count(), 3);

@@ -81,23 +81,20 @@ async function tile(template, z, x, y, progress) {
  * @param {ReturnType<import('./progress.js').createProgress>} [progress]
  */
 export async function waterTiles(bounds, width, source, progress) {
-  const task = progress?.task('water', 'water', 0, 'tiles')
   try {
     const [m, src] = await Promise.all([loadBurin(), resolve(source || OPENFREEMAP)])
     const ids = m.water_tiles(bounds.west, bounds.south, bounds.east, bounds.north, width, src.maxzoom, MAX_TILES)
     const list = []
     for (let i = 0; i < ids.length; i += 3) list.push([ids[i], ids[i + 1], ids[i + 2]])
-    const cached = list.filter(([z, x, y]) => tileCache.has(urlOf(src.template, z, x, y))).length
-    task?.setTotal(list.length)
+    let done = 0
+    progress?.waterTile(0, list.length)
     const got = await Promise.all(list.map(([z, x, y]) => tile(src.template, z, x, y, progress).then((b) => {
-      task?.tick()
+      progress?.waterTile(++done, list.length)
       return b
     })))
-    task?.ok(`z${list[0]?.[0] ?? '?'} · ${list.length - cached} new`)
+    progress?.water()
     return list.map(([z, x, y], i) => [z, x, y, got[i]])
   } catch (e) {
-    task?.fail(String(e?.message || e))
-    progress?.log(`water: ${e?.message || e}`, 'error')
-    throw e
+    throw new Error(`water: ${e?.message || e}`)
   }
 }

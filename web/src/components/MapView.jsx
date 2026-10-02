@@ -4,7 +4,7 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { bathymetryNeedsNetworkFetch, fetchBathymetryGrid, waterSpecNeedsDepth } from '../lib/bathymetry'
 import { buildDem } from '../lib/dem'
-import { drawBatches } from '../lib/burin'
+import { batchesJson, drawBatches, loadBurin } from '../lib/burin'
 import { waterTiles } from '../lib/water'
 import { FIT_PAD, MAX_EDGE, groundKm, groundWidthAt, sig3 } from '../lib/frame'
 import { cropGeojson, cropSvg, strokeOf } from '../lib/crop'
@@ -20,6 +20,11 @@ const SETTLE_MS = 90
 /* ---------------------------------------------------------------- */
 /*  MapView                                                          */
 /* ---------------------------------------------------------------- */
+
+function fmtCount(n) { return Number(n).toLocaleString() }
+
+/** wgpu names its backends like BrowserWebGpu. */
+function gpuName(g) { return /webgpu/i.test(g) ? 'WebGPU' : g }
 
 function isUserGesture(e) {
   return !!(e && e.originalEvent)
@@ -75,9 +80,8 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
 
   const [busy, setBusy] = useState(false)
   const [load, setLoad] = useState(null)
-  const [loadTitle, setLoadTitle] = useState('')
   const [loadFailed, setLoadFailed] = useState(false)
-  const drawMs = useRef(new Map())
+  const progressRef = useRef(null)
   const [downloadOpen, setDownloadOpen] = useState(false)
   const frameRef = useRef(frame)
   frameRef.current = frame
@@ -113,26 +117,32 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
     const outW = Math.max(64, Math.round(cssW * dpr * scale))
     const outH = Math.max(64, Math.round(cssH * dpr * scale))
 
+    const wet = waterRef.current
+    const bathy = bathymetryRef.current
+    const waterSpec = wet && {
+      classes: wet.classes,
+      shoreline: wet.shoreline,
+      batches: wet.batches,
+    }
     setBusy(true)
     setLoadFailed(false)
-    setLoad({ tasks: [], log: [] })
-    setLoadTitle(`${outW}×${outH} px · ${list.length} batch${list.length > 1 ? 'es' : ''}`)
-    onStatus({ phase: 'working', detail: 'Drawing…' })
-    const progress = createProgress((state) => {
-      if (my === genRef.current) setLoad(state)
-    })
-    let drawTask = null
+    setLoad(null)
+    onStatus({ phase: 'working' })
+    progressRef.current?.close()
+    let progress = null
     let stopBoard = () => {}
 
     try {
       const t0 = performance.now()
-      const wet = waterRef.current
-      const bathy = bathymetryRef.current
-      const waterSpec = wet && {
-        classes: wet.classes,
-        shoreline: wet.shoreline,
-        batches: wet.batches,
-      }
+      const m = await loadBurin()
+      if (my !== genRef.current) return
+      const title = `${outW}×${outH} px · ${list.length} batch${list.length > 1 ? 'es' : ''}`
+      const panel = new m.Panel(title, batchesJson(list), waterSpec ? JSON.stringify(waterSpec) : undefined)
+      progress = createProgress(panel, (view) => {
+        if (my === genRef.current) setLoad(view)
+      })
+      progressRef.current = progress
+      progress.area(bounds)
       const needsDepth = waterSpec && waterSpecNeedsDepth(waterSpec)
       const [dem, tiles, depthGrid] = await Promise.all([
         buildDem(bounds, outW, outH, progress),
@@ -145,11 +155,6 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       const { width: demW, height: demH } = dem
       const tDem = performance.now()
 
-      // Timed against the last draw of the same document at the same size.
-      const drawKey = JSON.stringify([batchesRef.current, waterSpec, outW, outH])
-      drawTask = progress.task('draw', 'drawing')
-      const lastMs = drawMs.current.get(drawKey)
-      if (lastMs) drawTask.eta(lastMs)
       const result = await drawBatches(dem.elev, dem.width, dem.height, dem.pxM, batchesRef.current, {
         nw_lon: bounds.west,
         nw_lat: bounds.north,
@@ -165,15 +170,17 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
         },
         onBoard: (board, draws) => {
           if (my !== genRef.current) return
-          stopBoard = watchBoard(board, draws, progress, { batches: list, water: waterSpec })
+          stopBoard = watchBoard(board, draws, progress)
         },
       })
       stopBoard()
       const tBack = performance.now()
       const received = performance.timeOrigin + tBack
       if (my !== genRef.current || movingRef.current) return
-      drawMs.current.set(drawKey, tBack - tDem)
-      drawTask.ok(`${result.dashes} paths · ${result.threads} thread${result.threads > 1 ? 's' : ''}`)
+      // Whatever the board showed last, or all of it where it isn't shared.
+      for (const slot of progress.slots()) progress.board(slot, result.board[slot] ?? 0)
+      progress.dashes(result.dashes)
+      progress.finish(true)
       if (timingsOn) {
         // Two frames later the new SVG has been painted.
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -212,10 +219,11 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       onStatus({ phase: 'error', detail: String(e.message || e) })
       onDrawing(null)
       stopBoard()
-      drawTask?.fail()
-      progress.log(String(e.message || e), 'error')
+      progress?.log(String(e.message || e), 'error')
+      progress?.finish(false)
       if (my === genRef.current) setLoadFailed(true)
     } finally {
+      if (my !== genRef.current) progress?.close()
       if (my === genRef.current) setBusy(false)
     }
   }, [onDrawing, onStatus])
@@ -311,7 +319,7 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       readyRef.current = true
       movingRef.current = false
       persistView()
-      onStatus({ phase: 'working', detail: 'Drawing…' })
+      onStatus({ phase: 'working' })
       convertRef.current()
     })
 
@@ -466,11 +474,19 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
 
       {(busy || loadFailed) && load && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <LoadPanel title={loadTitle} load={load} />
+          <LoadPanel view={load} />
         </div>
       )}
 
       {downloadOpen && <FrameOverlay frame={frame} map={mapRef.current} />}
+
+      {drawing && !busy && (
+        <p className="pointer-events-none absolute top-2 left-2 z-20 bg-white px-[1ch] text-black/60 tabular-nums">
+          {fmtCount(drawing.lines)} lines · {fmtCount(drawing.dashes)} dashes · {drawing.ms} ms
+          {drawing.threads > 1 && ` · ${drawing.threads} threads`}
+          {typeof drawing.gpu === 'string' && ` · ${gpuName(drawing.gpu)}`}
+        </p>
+      )}
 
       <div className="safe-fab safe-fab-lg absolute left-4 z-20">
         <DownloadMenu
@@ -564,10 +580,11 @@ function NumInput({ value, onCommit, label, className = 'w-[7ch]' }) {
   )
 }
 
-function FlagRow({ flag, children }) {
+/** One branch of the frame's tree, like the steps under a task in LoadPanel. */
+function FlagRow({ flag, last = false, children }) {
   return (
     <div className="flex items-center gap-[1ch]">
-      <span className="mr-auto">{flag}</span>
+      <span className="mr-auto whitespace-pre">{last ? '└' : '├'} {flag}</span>
       {children}
     </div>
   )
@@ -608,78 +625,92 @@ function DownloadMenu({ open, onOpenChange, drawing, frame, setFrame, exportSvg,
     setFrame({ ...frame, [key]: next })
   }
 
+  if (!open) {
+    return (
+      <button type="button" aria-expanded={false} size-="small" onClick={() => onOpenChange(true)}>
+        download ▴
+      </button>
+    )
+  }
+
   return (
-    <div className="flex flex-col-reverse items-start gap-2">
-      <button type="button" aria-expanded={open} size-="small" onClick={() => onOpenChange(!open)}>
-        download {open ? '▾' : '▴'}
+    <div className="flex w-[44ch] max-w-[calc(100vw-2rem)] flex-col gap-1 border border-black bg-white p-3 font-mono text-[11px] leading-snug text-black [--font-size:11px] [--line-height:1.375]">
+      <button
+        type="button"
+        aria-expanded
+        size-="small"
+        variant-="background0"
+        className="mb-1 w-full justify-start px-0 hover:no-underline"
+        title="Close (Esc)"
+        onClick={() => onOpenChange(false)}
+      >
+        <span className="font-bold">download</span>
+        <span className="truncate opacity-50">&nbsp;▸ the frame on the map</span>
+        <span className="ml-auto pl-[1ch]">▾</span>
       </button>
 
-      {open && (
-        <div box-="square" className="flex w-[44ch] flex-col gap-[0.5lh] bg-white">
-          <div role="tablist" className="flex">
-            {[['land', '--terrain-size'], ['paper', '--frame-size']].map(([id, flag]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={frame.mode === id}
-                size-="small"
-                variant-={frame.mode === id ? 'foreground0' : 'background1'}
-                className="flex-1"
-                onClick={() => setMode(id)}
-              >
-                {flag}
-              </button>
-            ))}
-          </div>
+      <div role="tablist" className="flex gap-[2ch]">
+        {['land', 'paper'].map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={frame.mode === id}
+            size-="small"
+            variant-="background0"
+            className={`px-0 ${frame.mode === id ? '' : 'opacity-50 hover:opacity-100'}`}
+            onClick={() => setMode(id)}
+          >
+            {frame.mode === id ? '●' : '○'} {id === 'land' ? 'ground' : 'paper'}
+          </button>
+        ))}
+      </div>
 
-          <FlagRow flag={frame.mode === 'land' ? '--terrain-size' : '--frame-size'}>
-            <NumInput label="Width" value={size?.[0]} onCommit={(v) => setSize(0, v)} />
-            <span className="opacity-40">×</span>
-            <NumInput label="Height" value={size?.[1]} onCommit={(v) => setSize(1, v)} />
-            <span className="w-5 opacity-50">{frame.mode === 'land' ? 'km' : 'mm'}</span>
-          </FlagRow>
-          <FlagRow flag="--export-scale">
-            <span className="opacity-50">1:</span>
-            <NumInput label="Scale" className="w-[10ch]" value={frame.scale} onCommit={(v) => setFrame({ ...frame, scale: v })} />
-            <span className="w-5" />
-          </FlagRow>
-          <FlagRow flag="--pen-width">
-            <NumInput label="Pen width" value={frame.pen_width} onCommit={(v) => setFrame({ ...frame, pen_width: v })} />
-            <span className="w-5 opacity-50">mm</span>
-          </FlagRow>
+      <FlagRow flag={frame.mode === 'land' ? '--terrain-size' : '--frame-size'}>
+        <NumInput label="Width" value={size?.[0]} onCommit={(v) => setSize(0, v)} />
+        <span className="opacity-40">×</span>
+        <NumInput label="Height" value={size?.[1]} onCommit={(v) => setSize(1, v)} />
+        <span className="w-5 opacity-50">{frame.mode === 'land' ? 'km' : 'mm'}</span>
+      </FlagRow>
+      <FlagRow flag="--export-scale">
+        <span className="opacity-50">1:</span>
+        <NumInput label="Scale" className="w-[10ch]" value={frame.scale} onCommit={(v) => setFrame({ ...frame, scale: v })} />
+        <span className="w-5" />
+      </FlagRow>
+      <FlagRow flag="--pen-width" last>
+        <NumInput label="Pen width" value={frame.pen_width} onCommit={(v) => setFrame({ ...frame, pen_width: v })} />
+        <span className="w-5 opacity-50">mm</span>
+      </FlagRow>
 
-          {ground && paper && (
-            <p className="tabular-nums opacity-50">
-              {frame.mode === 'land'
-                ? `paper ${sig3(paper[0])} × ${sig3(paper[1])} mm`
-                : `ground ${sig3(ground[0])} × ${sig3(ground[1])} km`}
-              {lineMm > 0 && ` · lines ${sig3(lineMm)} mm`}
-            </p>
-          )}
-
-          <div className="grid grid-cols-2 gap-[1ch] border-t border-black/15 pt-[0.5lh]">
-            <button
-              type="button"
-              size-="small"
-              disabled={!drawing?.svg}
-              onClick={() => save(exportSvg(), 'image/svg+xml', 'burin-map.svg')}
-            >
-              svg
-            </button>
-            <button
-              type="button"
-              size-="small"
-              variant-="background1"
-              disabled={!drawing?.geojson}
-              onClick={() => save(exportGeojson(), 'application/geo+json', 'burin-map.geojson')}
-            >
-              geojson
-            </button>
-          </div>
-          {!drawing?.svg && <p className="opacity-50">waiting for the drawing…</p>}
-        </div>
+      {ground && paper && (
+        <p className="pl-[2ch] tabular-nums opacity-50">
+          {frame.mode === 'land'
+            ? `paper ${sig3(paper[0])} × ${sig3(paper[1])} mm`
+            : `ground ${sig3(ground[0])} × ${sig3(ground[1])} km`}
+          {lineMm > 0 && ` · lines ${sig3(lineMm)} mm`}
+        </p>
       )}
+
+      <div className="mt-1 grid grid-cols-2 gap-[1ch] border-t border-black pt-2">
+        <button
+          type="button"
+          size-="small"
+          disabled={!drawing?.svg}
+          onClick={() => save(exportSvg(), 'image/svg+xml', 'burin-map.svg')}
+        >
+          svg
+        </button>
+        <button
+          type="button"
+          size-="small"
+          variant-="background1"
+          disabled={!drawing?.geojson}
+          onClick={() => save(exportGeojson(), 'application/geo+json', 'burin-map.geojson')}
+        >
+          geojson
+        </button>
+      </div>
+      {!drawing?.svg && <p className="opacity-50">waiting for the drawing…</p>}
     </div>
   )
 }

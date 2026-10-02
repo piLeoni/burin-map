@@ -43,6 +43,18 @@ pub enum Draw {
     Fill,
 }
 
+impl Draw {
+    /// As written in a document.
+    pub fn name(self) -> &'static str {
+        match self {
+            Draw::Lines => "lines",
+            Draw::Ripples => "ripples",
+            Draw::Dots => "dots",
+            Draw::Fill => "fill",
+        }
+    }
+}
+
 /// One drawing pass on water.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WaterBatch {
@@ -76,6 +88,22 @@ pub struct WaterBatch {
 }
 
 impl WaterBatch {
+    /// What water batch `i` is called in progress reports, and its layer
+    /// unless it sets one: its `name`, else its `layer`, else as "2 sea dots".
+    pub fn label(&self, i: usize) -> String {
+        crate::progress::label(
+            self.name.as_deref(),
+            self.layer.as_deref(),
+            i,
+            &format!("sea {}", self.draw.name()),
+        )
+    }
+
+    /// The layer water batch `i` draws on: its `layer`, else its label.
+    pub fn layer_name(&self, i: usize) -> String {
+        self.layer.clone().unwrap_or_else(|| self.label(i))
+    }
+
     pub fn ink(&self) -> Ink<'_> {
         Ink {
             stroke: self.style.batch_stroke,
@@ -268,7 +296,7 @@ impl Shoreline {
     pub fn ink(&self) -> Ink<'_> {
         Ink {
             stroke: self.style.batch_stroke,
-            layer: self.layer.as_deref().or(Some("shoreline")),
+            layer: self.layer.as_deref().or(Some(crate::progress::SHORELINE)),
             color: self.color.as_deref(),
             color_expr: self.color_expr.as_deref(),
             width_expr: self.width_expr.as_deref(),
@@ -357,7 +385,7 @@ pub struct WaterLayer<'a> {
 
 /// Distance to the shore in px, positive on water, and the shoreline.
 pub fn shore(coverage: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<crate::Line>) {
-    let m = watermask::Mask {
+    let m = terramask::Mask {
         width: w,
         height: h,
         coverage: coverage.to_vec(),
@@ -784,7 +812,7 @@ pub fn ripples(
                         .iter()
                         .map(|&d| (0.5 + d - level).clamp(0.0, 1.0))
                         .collect();
-                    watermask::Mask {
+                    terramask::Mask {
                         width: w,
                         height: h,
                         coverage,
@@ -1071,7 +1099,7 @@ pub fn shore_rings(
             .iter()
             .map(|&d| (0.5 + d - level).clamp(0.0, 1.0))
             .collect();
-        let outlines = watermask::Mask {
+        let outlines = terramask::Mask {
             width: w,
             height: h,
             coverage: cov,
@@ -1133,7 +1161,7 @@ pub fn shoreline(
                     .iter()
                     .map(|&d| (0.5 + d - level).clamp(0.0, 1.0))
                     .collect();
-                watermask::Mask {
+                terramask::Mask {
                     width: w,
                     height: h,
                     coverage,

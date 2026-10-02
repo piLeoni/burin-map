@@ -23,7 +23,7 @@ repository = "https://github.com/piLeoni/burin-map"
 burin-map-core = { path = "crates/burin-map-core", version = "0.1.0" }
 burin-map = { path = "crates/burin-map", version = "0.1.0" }
 # Without its HTTP client: the core only reads tiles, the CLI turns `fetch` on.
-watermask = { version = "0.2", default-features = false }
+terramask = { version = "0.1.2", default-features = false }
 
 [profile.release]
 opt-level = 3

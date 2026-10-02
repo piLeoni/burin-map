@@ -88,7 +88,7 @@ batches:
 
 `name` is only for you; `layer` is what plotters and SVG editors group by.
 
-`ground: sea` turns the map inside out: the batch traces the seabed's depth like hills, and land is left blank. The water outline decides where the sea is, so give the document a `water` block (a `shoreline` and no water batches draws just the coast); without one, sea is wherever the elevation is at or below 0.5 m. The depth comes from the same elevation tiles, which carry bathymetry in the web app (Terrarium); the command line's SRTM data has none, so there the seabed is flat.
+`ground: sea` turns the map inside out: the batch traces the seabed's depth like hills, and land is left blank. The water outline decides where the sea is, so give the document a `water` block (a `shoreline` and no water batches draws just the coast); without one, sea is wherever the elevation is at or below 0.5 m. The depth comes from the same elevation tiles (Terrarium), which carry bathymetry, in the web app and on the command line alike.
 
 ```yaml
 batches:

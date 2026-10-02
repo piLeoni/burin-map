@@ -3,7 +3,6 @@ import { useAtom, useSetAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
 import { EDITOR_THEME, defineEditorTheme, editorFont, registerCliLanguage } from '../lib/editorTheme'
 import { loadBurin } from '../lib/burin'
-import { clearServiceWorkers } from '../lib/devCache'
 import { PRESETS } from '../lib/presets'
 import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
@@ -16,12 +15,10 @@ import {
 const PHASE_LABEL = {
   loading: 'Starting…',
   working: 'Drawing…',
-  ready: 'Up to date',
+  ready: 'Up to date!',
   exploring: 'Redraws when you stop',
   error: 'Something went wrong',
 }
-
-function fmtCount(n) { return Number(n).toLocaleString() }
 
 /** Read a document from the URL fragment, then clear it: the state lives in the app, not the address bar. */
 function takeDocFromHash() {
@@ -64,15 +61,14 @@ function batchesFromV1(params) {
 
 const FRESH = [{ angle: 0, style: {} }]
 
-/** WebTUI button looks: a grey key, and one that only shows on hover. */
+/** WebTUI button looks: a grey key. */
 const KEY = { 'size-': 'small', 'variant-': 'background1' }
-const QUIET = { 'size-': 'small', 'variant-': 'background0', className: 'opacity-50 hover:opacity-100' }
 
 /* ---------------------------------------------------------------- */
 /*  Sidebar — the document as YAML, JSON5 or a command               */
 /* ---------------------------------------------------------------- */
 
-export default function Sidebar({ open, onClose, status, drawing }) {
+export default function Sidebar({ open, onClose, status }) {
   const [schema, setSchema] = useState(null)   // { params, groups } from the engine
   const [batches, setBatches] = useAtom(styleAtom)
   const [water, setWater] = useAtom(waterAtom)
@@ -260,58 +256,37 @@ export default function Sidebar({ open, onClose, status, drawing }) {
   }, [schema])
 
   const statusText = status.detail || PHASE_LABEL[status.phase] || status.phase
-  const loud = status.phase === 'error' || status.phase === 'working'
+  const failed = status.phase === 'error'
 
   return (
     <aside
-      className={`fixed inset-x-0 bottom-0 z-40 flex h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-black bg-white px-1 py-[0.5lh] transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:w-[28rem] lg:shrink-0 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
+      className={`fixed inset-x-0 bottom-0 z-40 flex h-[85vh] min-h-0 w-full min-w-0 flex-col border-t border-black bg-white px-[2ch] transition-transform duration-200 lg:static lg:z-auto lg:h-full lg:w-[28rem] lg:shrink-0 lg:translate-y-0 lg:pointer-events-auto lg:border-t-0 lg:border-l ${
         open ? 'translate-y-0' : 'pointer-events-none translate-y-full'
       }`}
     >
-      {/* Mobile header */}
-      <div className="flex shrink-0 items-center justify-between px-[1ch] lg:hidden">
-        <span className="font-bold">BurinMap</span>
-        <button type="button" aria-label="Close" {...KEY} onClick={onClose}>✕</button>
-      </div>
-
       <Panel
         title="BurinMap"
         className="shrink-0"
-        aside={import.meta.env.DEV && (
-          <button
-            type="button"
-            {...QUIET}
-            title="Dev only: remove service workers and their caches, then reload, so the latest WASM is used. The document is kept."
-            onClick={() => clearServiceWorkers()}
-          >
-            clear cache
-          </button>
+        aside={(
+          <>
+            <a is-="button" {...KEY} href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer" title="burin-map on GitHub">
+              github ↗
+            </a>
+            <button type="button" aria-label="Close" {...KEY} className="lg:hidden" onClick={onClose}>✕</button>
+          </>
         )}
       >
         <p className="opacity-60">
           Terrain drawn as engraved lines. Pan or zoom the map; the view is
-          redrawn when you stop. An online demo of{' '}
-          <a className="underline" href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer">burin-map</a>,
-          a terrain engine written in Rust, also available as a command-line
-          tool and as Python and Node libraries. Here the same engine runs in
-          your browser, compiled to WebAssembly.
+          redrawn when you stop. An online demo of burin-map, a terrain
+          engine written in Rust, also available as a command-line tool and
+          as Python and Node libraries. Here the same engine runs in your
+          browser, compiled to WebAssembly.
         </p>
-        <div className="mt-[1lh] flex items-center gap-[1ch]">
-          <span className="truncate tabular-nums opacity-60">
-            {drawing
-              ? `${fmtCount(drawing.lines)} lines · ${fmtCount(drawing.dashes)} dashes · ${drawing.ms} ms`
-                + (drawing.threads > 1 ? ` · ${drawing.threads} threads` : '')
-                + (typeof drawing.gpu === 'string' ? ` · ${drawing.gpu}` : '')
-              : '-'}
-          </span>
-          <span is-="badge" variant-={loud ? 'foreground0' : 'background1'} className="ml-auto shrink-0 lowercase">
-            {status.phase === 'error' ? `✗ ${statusText}` : statusText}
-          </span>
-        </div>
       </Panel>
 
       <Panel
-        title={dirty ? 'document ●' : 'document'}
+        title={dirty ? 'Document ●' : 'Document'}
         className="flex min-h-0 flex-1 flex-col"
         aside={(
           <span role="tablist" className="flex">
@@ -338,13 +313,16 @@ export default function Sidebar({ open, onClose, status, drawing }) {
           <button type="button" {...KEY} title={`Save as burin-map.${VIEWS[view].ext}`} disabled={!shown} onClick={download}>
             download
           </button>
+          <button type="button" {...KEY} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
+            share
+          </button>
           {/* Static, so the menu opens under the whole row rather than this button. */}
           <details ref={presetMenuRef} is-="popover" className="static">
             <summary is-="button" {...KEY} aria-disabled={!schema} title="Replace the style and the area with a ready-made one">
-              load ▾
+              presets ▾
             </summary>
-            <div box-="square" className="z-30 w-full bg-white">
-              <ul className="max-h-[60vh] overflow-y-auto">
+            <div className="z-30 w-full border border-black bg-white">
+              <ul className="max-h-[60vh] divide-y divide-black overflow-y-auto">
                 {PRESETS.map((p) => (
                   <li key={p.id}>
                     <button
@@ -363,9 +341,6 @@ export default function Sidebar({ open, onClose, status, drawing }) {
               </ul>
             </div>
           </details>
-          <button type="button" {...KEY} title="Copy a link that opens this map and these batches (without comments)" disabled={!schema} onClick={copyLink}>
-            link
-          </button>
           <input
             ref={fileRef}
             type="file"
@@ -381,8 +356,11 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         )}
 
         <div className="mt-[1lh] flex shrink-0 items-center gap-[1ch]">
-          <span className={`mr-auto truncate ${dirty ? 'font-bold' : 'opacity-50'}`}>
-            {dirty ? 'edited, not applied' : 'in step with the map'}
+          <span
+            className={`mr-auto truncate ${dirty || failed ? 'font-bold' : 'opacity-60'}`}
+            title={dirty ? undefined : statusText}
+          >
+            {dirty ? 'Edited, not applied' : failed ? `✗ ${statusText}` : statusText}
           </span>
           <button type="button" {...KEY} disabled={!dirty} onClick={revertDraft}>
             revert
@@ -393,7 +371,7 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         </div>
         {error && <p className="mt-[0.5lh] shrink-0 font-bold break-words">✗ {error}</p>}
 
-        <div className="relative mt-[0.5lh] min-h-0 flex-1 overflow-hidden border-t border-black/15 pt-[0.5lh]">
+        <div className="relative mt-[0.5lh] min-h-0 flex-1 overflow-hidden border-t border-black pt-[0.5lh]">
           {shown && (
             <button
               type="button"
@@ -443,8 +421,8 @@ export default function Sidebar({ open, onClose, status, drawing }) {
         </div>
       </Panel>
 
-      <p className="shrink-0 px-[1ch] opacity-40">
-        Elevation: AWS Terrain Tiles. Basemap: Mapbox.
+      <p className="shrink-0 border-t border-black py-[0.5lh]">
+        <span className="opacity-40">Elevation: AWS Terrain Tiles. Basemap: Mapbox.</span>
       </p>
     </aside>
   )

@@ -146,7 +146,7 @@ pub fn style_from_json(json: String) -> Result<String> {
     Ok(serde_json::to_string(&batches).unwrap_or_default())
 }
 
-/// Download SRTM for the lon/lat box and draw it.
+/// Download elevation for the lon/lat box and draw it.
 #[napi]
 pub fn draw(
     west: f64,

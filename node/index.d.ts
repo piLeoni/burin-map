@@ -26,7 +26,7 @@ export declare class Drawing {
 /** Lon/lat box of roughly `width_km` × `height_km` centred on `(lat, lon)`. */
 export declare function boundsAround(lat: number, lon: number, widthKm: number, heightKm: number): [number, number, number, number]
 
-/** Download SRTM for the lon/lat box and draw it. */
+/** Download elevation for the lon/lat box and draw it. */
 export declare function draw(west: number, south: number, east: number, north: number, style?: object | undefined | null, frameSizeMm?: Array<number> | undefined | null, framePenMm?: number | undefined | null): Drawing
 
 /** Draw any elevation grid (metres, row 0 = north). Values ≤ 0.5 m are sea. */

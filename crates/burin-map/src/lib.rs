@@ -1,4 +1,4 @@
-//! burin-map: pen-and-ink terrain maps from SRTM elevation.
+//! burin-map: pen-and-ink terrain maps from terrain tiles.
 //!
 //! The drawing engine is `burin-map-core` (pure computation, also built for WASM);
 //! this crate adds everything around it: geocoding, elevation download and
@@ -17,6 +17,7 @@ pub mod cli;
 pub mod dem;
 pub mod document;
 pub mod geo;
+mod panel;
 pub mod progress;
 pub mod raster;
 pub mod tmerc;
@@ -28,7 +29,7 @@ pub use burin_map_core::{
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use document::{AreaDoc, Document, LandDoc, WaterDoc};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
-pub use progress::{Progress, TileSource};
+pub use progress::Progress;
 
 #[derive(Debug)]
 pub enum Error {
@@ -119,7 +120,7 @@ impl Map {
 #[cfg(feature = "gpu")]
 pub use burin_map_core::engine;
 
-/// Download SRTM elevation for `bounds` and draw it with a single batch.
+/// Download elevation for `bounds` and draw it with a single batch.
 pub fn draw(
     bounds: &Bounds,
     style: &Style,
@@ -129,7 +130,7 @@ pub fn draw(
     draw_batches(bounds, &[Batch::along(style.clone())], frame, progress)
 }
 
-/// Download SRTM and draw with one or more batch passes (see `Batch`).
+/// Download elevation and draw with one or more batch passes (see `Batch`).
 pub fn draw_batches(
     bounds: &Bounds,
     batches: &[Batch],
@@ -185,14 +186,21 @@ pub fn draw_with_water(
             batches: &doc.batches,
         });
 
+    struct Steps<'a>(&'a (dyn Fn(&Progress) + Sync));
+    impl burin_map_core::Progress for Steps<'_> {
+        fn reach(&self, step: burin_map_core::Step, stage: burin_map_core::Stage) {
+            (self.0)(&Progress::Step { step, stage });
+        }
+    }
     let t = Instant::now();
-    let drawing = burin_map_core::draw_batches_auto_with(
+    let drawing = burin_map_core::draw_batches_auto_told(
         &dem.elev,
         w,
         h,
         dem.px_m as f32,
         batches,
         layer.as_ref(),
+        &Steps(&progress),
     );
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });

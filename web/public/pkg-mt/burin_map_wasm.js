@@ -147,6 +147,163 @@ export class Drawing {
 if (Symbol.dispose) Drawing.prototype[Symbol.dispose] = Drawing.prototype.free;
 
 /**
+ * The engine's progress panel (`burin_map_core::panel`), the one the command
+ * line shows: the page tells it what happens, with the seconds since the
+ * draw began, and shows what [`Panel::view`] returns.
+ */
+export class Panel {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PanelFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_panel_free(ptr, 0);
+    }
+    /**
+     * The area drawn, `[west, south, east, north]` in degrees.
+     * @param {number} west
+     * @param {number} south
+     * @param {number} east
+     * @param {number} north
+     * @param {number} now
+     */
+    area(west, south, east, north, now) {
+        wasm.panel_area(this.__wbg_ptr, west, south, east, north, now);
+    }
+    /**
+     * What the board says in `slot`.
+     * @param {number} slot
+     * @param {number} value
+     * @param {number} now
+     */
+    board(slot, value, now) {
+        wasm.panel_board(this.__wbg_ptr, slot, value, now);
+    }
+    /**
+     * The drawing holds `count` dashes.
+     * @param {number} count
+     * @param {number} now
+     */
+    dashes(count, now) {
+        wasm.panel_dashes(this.__wbg_ptr, count, now);
+    }
+    /**
+     * The elevation grid, from `tiles` tiles at `zoom`.
+     * @param {Float32Array} elev
+     * @param {number} tiles
+     * @param {number} zoom
+     * @param {number} width
+     * @param {number} height
+     * @param {number} px_m
+     * @param {number} now
+     */
+    elevation(elev, tiles, zoom, width, height, px_m, now) {
+        const ptr0 = passArrayF32ToWasm0(elev, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.panel_elevation(this.__wbg_ptr, ptr0, len0, tiles, zoom, width, height, px_m, now);
+    }
+    /**
+     * The drawing, and whatever still runs, as done (`ok`) or failed.
+     * @param {boolean} ok
+     * @param {number} now
+     */
+    finish(ok, now) {
+        wasm.panel_finish(this.__wbg_ptr, ok, now);
+    }
+    /**
+     * A line for the messages; `warn` when something went wrong on the way.
+     * @param {string} text
+     * @param {boolean} warn
+     * @param {number} now
+     */
+    message(text, warn, now) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.panel_message(this.__wbg_ptr, ptr0, len0, warn, now);
+    }
+    /**
+     * A panel for drawing `title`: these batches (JSON, as for
+     * `draw_batches`) and, with water, this water spec (JSON, as `water.spec`).
+     * @param {string} title
+     * @param {string} json
+     * @param {string | null} [water_spec]
+     */
+    constructor(title, json, water_spec) {
+        const ptr0 = passStringToWasm0(title, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(water_spec) ? 0 : passStringToWasm0(water_spec, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.panel_new(ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        PanelFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The board slots to read while the draw runs.
+     * @returns {Uint32Array}
+     */
+    slots() {
+        const ret = wasm.panel_slots(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * An elevation tile in; `done` of `total`.
+     * @param {number} done
+     * @param {number} total
+     * @param {number} now
+     */
+    tile(done, total, now) {
+        wasm.panel_tile(this.__wbg_ptr, done, total, now);
+    }
+    /**
+     * What to show, as JSON: `{ head, title, rows: [{ state, mark, name,
+     * child, bar: [lead, full, rest] | null, detail }], name_width,
+     * bar_width, messages: [{ at, text, warn }], earlier }`.
+     * @param {number} now
+     * @returns {string}
+     */
+    view(now) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.panel_view(this.__wbg_ptr, now);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * A water tile in; `done` of `total`.
+     * @param {number} done
+     * @param {number} total
+     * @param {number} now
+     */
+    waterTile(done, total, now) {
+        wasm.panel_waterTile(this.__wbg_ptr, done, total, now);
+    }
+    /**
+     * Every water tile in.
+     * @param {number} now
+     */
+    water(now) {
+        wasm.panel_water(this.__wbg_ptr, now);
+    }
+}
+if (Symbol.dispose) Panel.prototype[Symbol.dispose] = Panel.prototype.free;
+
+/**
  * Draw an elevation grid: metres, row 0 = north, square pixels of `px_m`
  * metres. `elev` is a Float32Array (or any TypedArray view) of length
  * `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
@@ -221,6 +378,32 @@ export function draw_batches_gpu(elev, width, height, px_m, json, geo, mm_per_px
 }
 
 /**
+ * Metres on a north-up Web Mercator grid `width` × `height` over the box,
+ * row 0 at the top: the sea floor below 0, 0 where no tile reaches.
+ * `tiles` is an array of `[z, x, y, bytes]` as listed by [`terrain_tiles`],
+ * bytes empty where the source has none. The deepest zoom is the terrain;
+ * zoom-10 tiles under it give back the sea floor it flattens. Sampled with
+ * Catmull-Rom, like the command line.
+ * @param {Array<any>} tiles
+ * @param {number} west
+ * @param {number} south
+ * @param {number} east
+ * @param {number} north
+ * @param {number} width
+ * @param {number} height
+ * @returns {Float32Array}
+ */
+export function elevation_grid(tiles, west, south, east, north, width, height) {
+    const ret = wasm.elevation_grid(tiles, west, south, east, north, width, height);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * `initGpu()`: set up WebGPU for [`draw_batches_gpu`]. Resolves to the
  * adapter description, or `undefined` when WebGPU isn't available.
  * @returns {Promise<string | undefined>}
@@ -286,6 +469,28 @@ export function style_params() {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * The terrain tiles (Terrarium PNG) a north-up Web Mercator grid `width` px
+ * across the box needs, as flat `[z, x, y, …]`: the grid's own tiles at the
+ * zoom that matches it (zoomed out until there are at most `max_tiles`),
+ * then, deeper than zoom 10, their zoom-10 ancestors, which hold the sea
+ * floor those zooms flatten to 0 m. `x` may run past 2^z - 1 like
+ * [`water_tiles`].
+ * @param {number} west
+ * @param {number} south
+ * @param {number} east
+ * @param {number} north
+ * @param {number} width
+ * @param {number} max_tiles
+ * @returns {Uint32Array}
+ */
+export function terrain_tiles(west, south, east, north, width, max_tiles) {
+    const ret = wasm.terrain_tiles(west, south, east, north, width, max_tiles);
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
 }
 
 /**
@@ -1046,33 +1251,33 @@ function __wbg_get_imports(memory) {
             arg0.writeBuffer(arg1, arg2, getArrayU8FromWasm0(arg3, arg4), arg5, arg6);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 280, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 345, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 345, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 409, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue__core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 347, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 411, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___futures__task__wait_async_polyfill__MessageEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("GPUDevice")], shim_idx: 278, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("GPUDevice")], shim_idx: 343, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("any")], shim_idx: 278, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__34);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("any")], shim_idx: 343, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__48);
             return ret;
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("undefined")], shim_idx: 278, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__35);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("undefined")], shim_idx: 343, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__49);
             return ret;
         },
         __wbindgen_generic_0000000000000007: function(arg0) {
@@ -1113,7 +1318,7 @@ function __wbg_get_imports(memory) {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
-        memory: memory || new WebAssembly.Memory({initial:19,maximum:65536,shared:true}),
+        memory: memory || new WebAssembly.Memory({initial:20,maximum:65536,shared:true}),
     };
     return {
         __proto__: null,
@@ -1143,15 +1348,15 @@ function wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bin
     }
 }
 
-function wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__34(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__34(arg0, arg1, arg2);
+function wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__48(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__48(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__35(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__35(arg0, arg1, arg2);
+function wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__49(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__49(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
@@ -1172,6 +1377,9 @@ const __wbindgen_enum_GpuTextureFormat = ["r8unorm", "r8snorm", "r8uint", "r8sin
 const DrawingFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_drawing_free(ptr, 1));
+const PanelFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_panel_free(ptr, 1));
 const wbg_rayon_PoolBuilderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wbg_rayon_poolbuilder_free(ptr, 1));

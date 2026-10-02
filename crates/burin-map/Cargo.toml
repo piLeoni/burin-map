@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Pen-and-ink terrain maps from SRTM elevation data"
+description = "Pen-and-ink terrain maps from elevation tiles"
 publish = false
 
 [[bin]]
@@ -22,10 +22,12 @@ anstyle = "1"
 burin-map-core = { workspace = true }
 clap = { version = "4", features = ["string"] }
 serde = { version = "1", features = ["derive"] }
-flate2 = "1"
 png = "0.17"
 serde_json = "1"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 ureq = { version = "2", features = ["json"] }
 json5 = "1.3.1"
-watermask = { workspace = true, features = ["fetch"] }
+terramask = { workspace = true, features = ["fetch", "dem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

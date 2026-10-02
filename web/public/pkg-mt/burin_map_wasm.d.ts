@@ -44,6 +44,67 @@ export class Drawing {
 }
 
 /**
+ * The engine's progress panel (`burin_map_core::panel`), the one the command
+ * line shows: the page tells it what happens, with the seconds since the
+ * draw began, and shows what [`Panel::view`] returns.
+ */
+export class Panel {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The area drawn, `[west, south, east, north]` in degrees.
+     */
+    area(west: number, south: number, east: number, north: number, now: number): void;
+    /**
+     * What the board says in `slot`.
+     */
+    board(slot: number, value: number, now: number): void;
+    /**
+     * The drawing holds `count` dashes.
+     */
+    dashes(count: number, now: number): void;
+    /**
+     * The elevation grid, from `tiles` tiles at `zoom`.
+     */
+    elevation(elev: Float32Array, tiles: number, zoom: number, width: number, height: number, px_m: number, now: number): void;
+    /**
+     * The drawing, and whatever still runs, as done (`ok`) or failed.
+     */
+    finish(ok: boolean, now: number): void;
+    /**
+     * A line for the messages; `warn` when something went wrong on the way.
+     */
+    message(text: string, warn: boolean, now: number): void;
+    /**
+     * A panel for drawing `title`: these batches (JSON, as for
+     * `draw_batches`) and, with water, this water spec (JSON, as `water.spec`).
+     */
+    constructor(title: string, json: string, water_spec?: string | null);
+    /**
+     * The board slots to read while the draw runs.
+     */
+    slots(): Uint32Array;
+    /**
+     * An elevation tile in; `done` of `total`.
+     */
+    tile(done: number, total: number, now: number): void;
+    /**
+     * What to show, as JSON: `{ head, title, rows: [{ state, mark, name,
+     * child, bar: [lead, full, rest] | null, detail }], name_width,
+     * bar_width, messages: [{ at, text, warn }], earlier }`.
+     */
+    view(now: number): string;
+    /**
+     * A water tile in; `done` of `total`.
+     */
+    waterTile(done: number, total: number, now: number): void;
+    /**
+     * Every water tile in.
+     */
+    water(now: number): void;
+}
+
+/**
  * Draw an elevation grid: metres, row 0 = north, square pixels of `px_m`
  * metres. `elev` is a Float32Array (or any TypedArray view) of length
  * `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
@@ -66,6 +127,16 @@ export function draw_batches(elev: Float32Array, width: number, height: number, 
  * [`init_gpu`] first). Lines come out slightly different from the CPU path.
  */
 export function draw_batches_gpu(elev: Float32Array, width: number, height: number, px_m: number, json: string, geo: any, mm_per_px: number | null | undefined, water: any): Promise<Drawing>;
+
+/**
+ * Metres on a north-up Web Mercator grid `width` × `height` over the box,
+ * row 0 at the top: the sea floor below 0, 0 where no tile reaches.
+ * `tiles` is an array of `[z, x, y, bytes]` as listed by [`terrain_tiles`],
+ * bytes empty where the source has none. The deepest zoom is the terrain;
+ * zoom-10 tiles under it give back the sea floor it flattens. Sampled with
+ * Catmull-Rom, like the command line.
+ */
+export function elevation_grid(tiles: Array<any>, west: number, south: number, east: number, north: number, width: number, height: number): Float32Array;
 
 /**
  * `initGpu()`: set up WebGPU for [`draw_batches_gpu`]. Resolves to the
@@ -100,6 +171,16 @@ export function style_groups(): any;
 export function style_params(): any;
 
 /**
+ * The terrain tiles (Terrarium PNG) a north-up Web Mercator grid `width` px
+ * across the box needs, as flat `[z, x, y, …]`: the grid's own tiles at the
+ * zoom that matches it (zoomed out until there are at most `max_tiles`),
+ * then, deeper than zoom 10, their zoom-10 ancestors, which hold the sea
+ * floor those zooms flatten to 0 m. `x` may run past 2^z - 1 like
+ * [`water_tiles`].
+ */
+export function terrain_tiles(west: number, south: number, east: number, north: number, width: number, max_tiles: number): Uint32Array;
+
+/**
  * Water tiles to fetch for a north-up Web Mercator grid `width` px across the
  * box, flat: z, x, y, z, x, y, … Across the 180° meridian x runs past
  * 2^z - 1; wrap it for the URL, but hand it back as it is.
@@ -122,6 +203,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly __wbg_drawing_free: (a: number, b: number) => void;
+    readonly __wbg_panel_free: (a: number, b: number) => void;
     readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
     readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
     readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => [number, number, number];
@@ -140,12 +222,26 @@ export interface InitOutput {
     readonly drawing_svg: (a: number) => [number, number];
     readonly drawing_timings: (a: number) => any;
     readonly drawing_width: (a: number) => number;
+    readonly elevation_grid: (a: any, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly initGpu: () => any;
     readonly initThreadPool: (a: number) => any;
     readonly needsWaterDepth: (a: number, b: number) => number;
+    readonly panel_area: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly panel_board: (a: number, b: number, c: number, d: number) => void;
+    readonly panel_dashes: (a: number, b: number, c: number) => void;
+    readonly panel_elevation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly panel_finish: (a: number, b: number, c: number) => void;
+    readonly panel_message: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly panel_new: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly panel_slots: (a: number) => [number, number];
+    readonly panel_tile: (a: number, b: number, c: number, d: number) => void;
+    readonly panel_view: (a: number, b: number) => [number, number];
+    readonly panel_water: (a: number, b: number) => void;
+    readonly panel_waterTile: (a: number, b: number, c: number, d: number) => void;
     readonly progressBoard: () => any;
     readonly style_groups: () => [number, number, number];
     readonly style_params: () => [number, number, number];
+    readonly terrain_tiles: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly water_tiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly wbg_rayon_poolbuilder_build: (a: number) => void;
     readonly wbg_rayon_poolbuilder_mainJS: (a: number) => any;
@@ -155,8 +251,8 @@ export interface InitOutput {
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined___js_sys_3eb0eb5c2e5854c9___Function_fn_wasm_bindgen_6b83e68b973024d4___JsValue_____wasm_bindgen_6b83e68b973024d4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue__core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__34: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__35: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__48: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___sys__JsNullable_wgpu_e195cbd6f832a32a___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_9a364347cfd915f1___result__Result_____wasm_bindgen_6b83e68b973024d4___JsError___true__49: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___js_sys_3eb0eb5c2e5854c9___futures__task__wait_async_polyfill__MessageEvent______true_: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_6b83e68b973024d4___convert__closures_____invoke___wasm_bindgen_6b83e68b973024d4___JsValue______true_: (a: number, b: number, c: any) => void;
     readonly memory: WebAssembly.Memory;

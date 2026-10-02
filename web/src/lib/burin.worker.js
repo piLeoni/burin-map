@@ -79,6 +79,8 @@ self.onmessage = async ({ data }) => {
     const result = {
       svg, geojson, lines: d.lines, dashes: d.dashes, ms: d.ms, threads, timings,
       gpu: data.gpu ? (adapter ?? false) : null, sent: performance.timeOrigin + performance.now(),
+      // Taken again: the memory may have grown under the first view.
+      board: m.progressBoard ? Array.from(m.progressBoard()) : [],
     }
     d.free()
     self.postMessage({ id, ok: true, result })
