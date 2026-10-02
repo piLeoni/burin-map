@@ -1579,8 +1579,6 @@ dependencies = [
 [[package]]
 name = "terramask"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3eaa878faebf85a8aef0f2a8f4819594c0f9c8c12700c4700100b286d972737"
 dependencies = [
  "flate2",
  "i_overlay",
