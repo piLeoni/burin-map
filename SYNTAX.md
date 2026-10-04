@@ -1,6 +1,6 @@
 # burin-map document syntax
 
-A document describes a whole drawing. Write it in YAML or JSON5 in the web editor, or pass it to the CLI with `--style-file`.
+A document describes a whole drawing. Write it in YAML or JSON5 in the web editor, pass it to the CLI with `--style-file`, or write it as a **JavaScript** document in the web editor's JS view (see [JavaScript documents](#5-javascript-documents) below).
 
 There are four kinds of block:
 
@@ -578,3 +578,44 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
   - before the first `;` comes the shoreline: `l2,s4` is 2 lines, 4 px apart (`noshore` turns it off, `c…` picks the classes);
   - then one batch after each `;`: `shore,a0,wst10,wr30,s7`.
   - a batch that draws ripples or dots says so after `shore` / `map`: `map,ripples,a90`.
+
+---
+
+## 5. JavaScript documents
+
+The web editor's **JS** view takes the same drawing as a script. It builds the
+document with `burin.atlas()`, adds a call per pass, and hands it to the
+engine:
+
+```js
+const doc = burin.atlas()
+
+// the sea floor, pale to blue, deepening every 100 m
+const sea = ["#d6e6ef", "#a9c6db", "#7ba3c0"]
+for (let i = 0; i < sea.length; i++)
+  doc.batch(burin.fill({ ground: "sea", color: sea[i], where: { depthMin: i * 100 } }))
+
+// contours coloured by the shading, and the coast
+doc.batch(burin.batch({ angle: 0, shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) }))
+doc.shore(burin.shore({ color: "#1d3a52" }))
+doc.draw()
+```
+
+- `burin.batch(options)` — one land pass: the same keys as a YAML batch
+  (`angle`, `ground`, `draw`, `color`, `shade`, `width`, `where`, `style`, and
+  any parameter by name). `burin.fill(options)` is `draw: "fill"`.
+- `burin.water(kind, options)` — a pass over the sea; `kind` is `"lines"`,
+  `"ripples"` or `"dots"`. `burin.shore(options)` — the shoreline.
+- `burin.atlas()` — the document under construction; `.batch`, `.water` and
+  `.shore` append in draw order, and `.draw()` returns it for the engine
+  (`.json()` returns it as JSON without drawing).
+- The fields `burin.elev`, `burin.tone`, `burin.dist` and `burin.depth`, and
+  the helpers `burin.lerp`, `rgb`, `clamp`, `smoothstep`, `step`, `abs`,
+  `floor`, `ceil`, `round`, `min`, `max` and `mix`, build the same colour and
+  width trees the YAML view writes as `color_expr` / `width_expr`.
+
+The script runs in a sandbox — no clock, no network, no `Math.random` — so the
+same script always draws the same map. A saved atlas reads back with both the
+camelCase names a script writes (`elevMin`) and the snake_case ones a document
+saves (`elev_min`), so the JS view and the other three are views of one
+document.

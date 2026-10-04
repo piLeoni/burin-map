@@ -554,15 +554,39 @@ Every `area` field maps to a CLI flag (`at`↔`--terrain-at`, `size_km`↔
 document fills in whatever was left unset. A bare `[ { "angle": …, "style": … } ]`
 array is also accepted. Style parameters left out keep their defaults.
 
-The web app edits the document as text, in one of three views of the same
-state: **YAML**, **JSON5**, or **CLI** (a bash script that runs `burin-map`,
-one flag per line). Every parameter is listed: the ones you set carry their
+The web app edits the document as text, in one of four views of the same
+state: **YAML**, **JSON5**, **CLI** (a bash script that runs `burin-map`,
+one flag per line), or **JS** (a JavaScript document that builds the drawing,
+one `burin.batch` per pass). Every parameter is listed: the ones you set carry
+their
 default in a comment, the others are commented out at their default, so
 uncommenting a line sets it. Your
 own comments — above a setting, at the end of its line, or at the top — are
 kept when you switch views. **Apply** (⌘/Ctrl + Enter) draws the edit;
 dragging the map updates `at`. **Download** saves the current view
-(`burin-map.yaml`, `.json5` or `.sh`); **Import** reads any of the three.
+(`burin-map.yaml`, `.json5`, `.sh` or `.js`); **Import** reads any of the four.
+
+The **JS** view is a script — loops, expressions, comments — that builds the
+same document the others write out:
+
+```js
+const doc = burin.atlas()
+// a belt for every 100 m, a loop the other views cannot hold
+for (const [lo, hi] of [[0, 100], [100, 200], [200, 400]])
+  doc.batch(burin.fill({ color: "#cbb589", where: { elevMin: lo, elevMax: hi } }))
+doc.shore(burin.shore({ color: "#1d3a52" }))
+doc.draw()
+```
+
+`burin.batch`, `burin.fill`, `burin.water` and `burin.shore` take the same
+options as the other views; `burin.lerp`, `clamp` and the rest build colour
+and width trees from the fields (`burin.elev`, `burin.tone`, `burin.dist`,
+`burin.depth`). It is the same document draw.land reads through
+`lines.terrain`, so a style written here means the same thing there. The
+editor autocompletes against `burin.d.ts`; the interpreter
+(`burin-map-script`, over Boa) runs in its own WASM module, loaded only when a
+document runs, with no clock, no randomness and capped loops, so the same
+script always draws the same map.
 
 **Link** copies a `#d=…` URL for the current camera and batches (without
 comments), using a compact notation of the CLI's own short names:
