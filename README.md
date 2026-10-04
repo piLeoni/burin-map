@@ -58,6 +58,7 @@ cargo install --path crates/burin-map      # → ~/.cargo/bin/burin-map
 ```
 
 ```bash
+burin-map --script presets/contours.js --out-file bay.png --out-format both
 burin-map --terrain-place san-francisco --out-file bay.png --out-format both
 burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 14km --out-file tp.png
 burin-map --tat "37.8716,-122.2727" --ts 12km 8km --of berkeley.png
@@ -118,6 +119,11 @@ d = burin_map.draw(area, frame_size_mm=(297, 420), frame_pen_mm=0.3, log=print)
 
 # Any elevation grid you already have (metres, square pixels, row 0 = north)
 d = burin_map.draw_elevation(elev, px_m=30.0)
+
+# Run a document (JavaScript) and get the graph it builds, as a dict:
+doc = burin_map.evaluate(open("presets/contours.js").read())
+doc["atlas"]          # the batches and water passes the engine draws, in order
+doc["area"]           # the area the script asked for, or None
 ```
 
 Elevation is downloaded on demand (see [Data](#data)); addresses are looked
@@ -152,6 +158,9 @@ writeFileSync("tp.svg", d.svg());
 
 // Or any elevation grid you already have (metres, row 0 = north):
 // const d = drawElevation(elevFloat32Array, width, height, pxM, { space: 6 });
+
+// Run a document (JavaScript) and get the graph it builds, as JSON:
+// const { atlas, area } = JSON.parse(evaluate(readFileSync("presets/contours.js", "utf8")));
 ```
 
 ## How it works
@@ -301,17 +310,13 @@ Sea, lakes and rivers come from OpenStreetMap, through
 below sea level and lakes above it come out right. The shoreline is stroked,
 and each water batch fills the water with its own lines:
 
-```yaml
-batches:                 # the land, as before (`land: { batches: … }` is the long form)
-  - angle: 0
-water:
-  classes: [ocean, lake] # default: ocean, lake, river, dock
-  shoreline: true        # stroke the shoreline
-  batches:
-    - follow: shore      # lines along the coast, fading out to sea
-      style: { space: 4, water_reach: 60 }
-    - follow: map        # hatching in one direction: degrees clockwise from north
-      angle: 70
+```js
+burin.batch({ angle: 0 })         // the land, drawn first
+burin.water({ classes: ["ocean", "lake"] })   // default: ocean, lake, river, dock
+burin.water("lines", { follow: "shore", style: { space: 4, water_reach: 60 } })
+burin.water("lines", { follow: "map", angle: 70 })   // hatching clockwise from north
+burin.shore()                     // stroke the shoreline
+burin.draw()
 ```
 
 Water batches take the same style parameters as land ones, minus those that
@@ -319,14 +324,13 @@ need terrain (`sun_*`, most of `input_*`, `space_steep*`, `batch_floor`), plus
 three of their own: `water_start` (gap to the first line), `water_reach` (how
 far out the lines go, in px) and `water_fade`. There is no seabed: on water the
 tone that shading gives on land is the distance from the shore, so `*_dark`
-applies near the coast and `*_light` further out. On the
-command line the block is one JSON argument: `--water '{"batches":[{"follow":"shore"}]}'`.
+applies near the coast and `*_light` further out.
 
 A water batch can also cover the open sea with something other than lines:
-`draw: ripples` (broken rows of hand-drawn waves, as in Olaus Magnus' Carta
-Marina) or `dots` (stippling, closer near the coast, as on Ortelius' maps).
-`water_patches` gathers either in patches (0 evenly, 1 a few patches).
-See [SYNTAX.md](SYNTAX.md#ripples-and-dots).
+`burin.water("ripples", …)` (broken rows of hand-drawn waves, as in Olaus
+Magnus' Carta Marina) or `"dots"` (stippling, closer near the coast, as on
+Ortelius' maps). `water_patches` gathers either in patches (0 evenly, 1 a few
+patches). See [SYNTAX.md](SYNTAX.md#ripples-and-dots).
 
 Any line can wave as if drawn by hand: `mod_wave` px to either side, about
 once every `mod_wave_size` px, on land, water or the shoreline. With
@@ -335,20 +339,21 @@ once every `mod_wave_size` px, on land, water or the shoreline. With
 dense, swirling currents over the sea. See
 [SYNTAX.md](SYNTAX.md#hand-drawn-waves).
 
-The shoreline takes the land's modifiers too. Instead of `true`, give it
-`lines` and a `style`:
+The shoreline takes the land's modifiers too. Give `burin.shore` its `lines`
+and a `style`:
 
-```yaml
-water:
-  shoreline:
-    lines: 2             # the shore, then one more `space` px out to sea
-    style:
-      space: 5
-      dash_dark: 0.7     # dashed: ink at the shore, as on dark ground
-      dash_light: 0.35   # further lines fade towards this, over water_reach
-      mod_wobble: 25     # wanders as if drawn by hand
-      mod_smooth: 2      # rounds off the pixel steps
-      batch_stroke: 2    # its own line width
+```js
+burin.shore({
+  lines: 2,               // the shore, then one more `space` px out to sea
+  style: {
+    space: 5,
+    dash_dark: 0.7,       // dashed: ink at the shore, as on dark ground
+    dash_light: 0.35,     // further lines fade towards this, over water_reach
+    mod_wobble: 25,       // wanders as if drawn by hand
+    mod_smooth: 2,        // rounds off the pixel steps
+    batch_stroke: 2,      // its own line width
+  },
+})
 ```
 
 [`examples/bay-contours.json5`](examples/bay-contours.json5) puts it together:
@@ -429,6 +434,10 @@ crates/burin-map-core/  the drawing engine: pure computation, no I/O
   dashes.rs             lines → dashes following the input
   order.rs              plotting order
   grid.rs, rng.rs       blur, gradient, percentiles; deterministic RNG
+  script/               the typed graph: Batch, WaterBatch, Shoreline, Atlas
+crates/burin-map-script/  the JS document front end (over Boa), sandboxed
+  library.js            the `burin.*` vocabulary a script calls
+crates/burin-map-script-wasm/  that interpreter as its own WASM module
 crates/burin-map/       Rust library + `burin-map` command
   dem.rs                terrain tiles (terramask), reprojection
   tmerc.rs              transverse Mercator
@@ -438,6 +447,7 @@ crates/burin-map/       Rust library + `burin-map` command
 crates/burin-map-py/    Python bindings (PyO3), built by maturin
 crates/burin-map-node/  Node bindings (napi-rs), built from `node/`
 crates/burin-map-wasm/  WebAssembly bindings (wasm-bindgen)
+presets/                ready-made documents, used by the CLI and the web page
 python/burin_map/       the Python package: a thin layer over the bindings
 python/tests/           Python API tests
 node/                   npm package: loader, `cli.js` for `npx`, native `.node`
@@ -445,6 +455,7 @@ web/                    React + DaisyUI (wireframe) + Mapbox + WASM overlay
   src/                  UI and terrarium → DEM stitching
   public/pkg/           wasm-pack output (served statically)
   public/pkg-mt/        the same, multi-threaded (needs cross-origin isolation)
+  public/pkg-script/    the interpreter, loaded only when a script runs
   build-wasm.sh         build both WASM packages
   serve.sh              build WASM + `npm run dev` (Vite proxies elevation tiles)
 examples/               PNG gallery for the README, and example documents
@@ -452,6 +463,12 @@ examples/               PNG gallery for the README, and example documents
 
 Each module opens with a comment explaining its step. The engine has no
 dependencies at all, so the same code builds for the browser.
+
+The engine never sees a language. By the time anything draws, what it reads is
+one thing: **a graph of typed operations** — the atlas. Rust builds it with the
+typed API, Python and Node with `evaluate(script)`, the CLI with `--script`, the
+web page by running a script in `pkg-script`. JS is the web UI's front end
+because that is what runs in a browser, not a universal format.
 
 ## WebAssembly
 
@@ -530,63 +547,63 @@ isolation headers, so the worker uses the threaded engine and the status line
 shows the thread count. Without isolation, or if `pkg-mt/` fails to load, it
 falls back to the single-threaded one.
 
-### Documents and share links
+### Documents
 
-A *document* describes a whole drawing: where (`area`) and how (`batches`).
-The CLI reads it as JSON5 — plain JSON works too, and so do comments, trailing
-commas and unquoted keys — with `--style-json` / `--style-file`, so a file
-from the web app can be fed straight to the command line, and vice versa.
+A *document* describes a whole drawing: where to put it and how to draw it.
+It is written in **JavaScript** — a small script that calls `burin.*` and ends
+with `burin.draw()`. Running the script builds a *graph* of typed operations
+(the *atlas*: the batches and water passes the engine draws, in order); by the
+time anything is drawn, the interpreter is gone and only that graph remains.
 
-```json5
+The CLI runs a document with `--script`, and the web page edits the same file.
+`--style-json` / `--style-file` still read a saved atlas (JSON5), but a script
+is the main path — a document that needs a loop needs a language.
+
+```bash
+burin-map --script presets/contours.js --out-file sf.png
+```
+
+`presets/` holds ready-made documents (`contours.js`, `contour-belts.js`,
+`downhill.js`, `layer-tints.js`, `scripted-hills.js`, `sea-depth.js`), shipped
+as the web app's presets too. A document's `burin.area({…})` sets where to
+draw, exactly like a CLI flag; explicit flags always win.
+
+```js
 // Twin Peaks, two passes
-{
-  "area": { "at": "Twin Peaks, San Francisco", "size_km": [8, 8] },
-  "batches": [
-    { "angle": 0,  "style": { "space": 7, "mod_breaks": 0.1 } },
-    { "angle": 90, "style": { "space": 7, "mod_breaks": 0.85, "batch_floor": 0.45 } },  // steep ground
-  ],
-}
+burin.area({ at: "Twin Peaks, San Francisco", size_km: [8, 8] })
+burin.batch({ angle: 0,  style: { space: 7, mod_breaks: 0.1 } })
+burin.batch({ angle: 90, style: { space: 7, mod_breaks: 0.85, batch_floor: 0.45 } })  // steep ground
+burin.draw()
 ```
 
 Every `area` field maps to a CLI flag (`at`↔`--terrain-at`, `size_km`↔
 `--terrain-size`, `size_mm`↔`--frame-size`, `scale`↔`--export-scale`,
-`pen_mm`↔`--pen-width`, …). Explicit command-line flags always win; the
-document fills in whatever was left unset. A bare `[ { "angle": …, "style": … } ]`
-array is also accepted. Style parameters left out keep their defaults.
+`pen_mm`↔`--pen-width`, …).
 
-The web app edits the document as text, in one of four views of the same
-state: **YAML**, **JSON5**, **CLI** (a bash script that runs `burin-map`,
-one flag per line), or **JS** (a JavaScript document that builds the drawing,
-one `burin.batch` per pass). Every parameter is listed: the ones you set carry
-their
-default in a comment, the others are commented out at their default, so
-uncommenting a line sets it. Your
-own comments — above a setting, at the end of its line, or at the top — are
-kept when you switch views. **Apply** (⌘/Ctrl + Enter) draws the edit;
-dragging the map updates `at`. **Download** saves the current view
-(`burin-map.yaml`, `.json5`, `.sh` or `.js`); **Import** reads any of the four.
-
-The **JS** view is a script — loops, expressions, comments — that builds the
-same document the others write out:
+A document is a real language, so it can hold what a data format cannot:
 
 ```js
-const doc = burin.atlas()
-// a belt for every 100 m, a loop the other views cannot hold
+// a belt for every 100 m of height and depth — a loop the flat formats never had
 for (const [lo, hi] of [[0, 100], [100, 200], [200, 400]])
-  doc.batch(burin.fill({ color: "#cbb589", where: { elevMin: lo, elevMax: hi } }))
-doc.shore(burin.shore({ color: "#1d3a52" }))
-doc.draw()
+  burin.batch({ draw: "fill", color: "#cbb589", where: { elevMin: lo, elevMax: hi } })
+burin.shore({ color: "#1d3a52" })
+burin.draw()
 ```
 
-`burin.batch`, `burin.fill`, `burin.water` and `burin.shore` take the same
-options as the other views; `burin.lerp`, `clamp` and the rest build colour
-and width trees from the fields (`burin.elev`, `burin.tone`, `burin.dist`,
-`burin.depth`). It is the same document draw.land reads through
-`lines.terrain`, so a style written here means the same thing there. The
-editor autocompletes against `burin.d.ts`; the interpreter
-(`burin-map-script`, over Boa) runs in its own WASM module, loaded only when a
-document runs, with no clock, no randomness and capped loops, so the same
-script always draws the same map.
+`burin.batch`, `burin.water` and `burin.shore` take the same options the engine
+reads; `burin.lerp`, `clamp` and the rest build colour and width trees from the
+fields (`burin.elev`, `burin.tone`, `burin.dist`, `burin.depth`). It is the
+same graph draw.land reads through `lines.terrain`, so a style written here
+means the same thing there. The editor autocompletes against `burin.d.ts`; the
+interpreter (`burin-map-script`, over Boa) runs in its own WASM module, loaded
+only when a document runs, with no clock, no randomness and capped loops, so
+the same script always draws the same map. It never sees geometry: by the time
+anything draws, only the atlas is left.
+
+The web app edits the document as text in one view — the script itself. Your
+comments are the document's, and stay. **Apply** (⌘/Ctrl + Enter) runs the
+edit; dragging the map updates `at`. **Download** saves `burin-map.js`;
+**Import** reads a `.js` document (or a `#d=…` link).
 
 **Link** copies a `#d=…` URL for the current camera and batches (without
 comments), using a compact notation of the CLI's own short names:

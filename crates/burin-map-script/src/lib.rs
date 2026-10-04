@@ -7,14 +7,13 @@
 //! the atlas is left.
 //!
 //! ```js
-//! burin
-//!   .atlas()
-//!   .batch(burin.batch({ shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) }))
-//!   .water(burin.water("dots"))
-//!   .draw();
+//! burin.batch({ shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) });
+//! burin.water("dots", { color: "#9db4c0" });
+//! burin.shore();
+//! burin.draw();
 //! ```
 //!
-//! This is the same document format draw.land reads through `burin.terrain`,
+//! This is the same document shape draw.land reads through `lines.terrain`,
 //! so a style written for one page draws the same in the other.
 //!
 //! Every error (a syntax error, a wrong argument, a bad atlas) comes back as
@@ -69,9 +68,23 @@ impl fmt::Display for ScriptError {
 
 impl std::error::Error for ScriptError {}
 
+/// What a script built: the atlas (the batches and water passes, in draw
+/// order) and, when the script set one, the area it is meant for.
+pub struct Document {
+    pub atlas: Value,
+    pub area: Option<Value>,
+}
+
 /// Run `source` and return the atlas it built, as JSON.
 pub fn evaluate(source: &str) -> Result<Value, ScriptError> {
+    evaluate_document(source).map(|d| d.atlas)
+}
+
+/// Run `source` and return the whole document: the atlas, and the area the
+/// script set with `burin.area(...)`, if it did.
+pub fn evaluate_document(source: &str) -> Result<Document, ScriptError> {
     SAVED.with(|s| *s.borrow_mut() = None);
+    AREA.with(|a| *a.borrow_mut() = None);
     FAILURE.with(|f| *f.borrow_mut() = None);
     let mut ctx = Context::default();
     let limits = ctx.runtime_limits_mut();
@@ -80,15 +93,19 @@ pub fn evaluate(source: &str) -> Result<Value, ScriptError> {
     install(&mut ctx).map_err(|e| ScriptError { message: format!("library: {e}"), at: None })?;
     let script = Source::from_bytes(source).with_path(std::path::Path::new(SCRIPT_PATH));
     ctx.eval(script).map_err(|e| script_error(e, source, &mut ctx))?;
-    SAVED.with(|s| s.borrow_mut().take()).ok_or_else(|| ScriptError {
+    let atlas = SAVED.with(|s| s.borrow_mut().take()).ok_or_else(|| ScriptError {
         message: "the script never called .draw() or .json() on an atlas".into(),
         at: None,
-    })
+    })?;
+    let area = AREA.with(|a| a.borrow_mut().take());
+    Ok(Document { atlas, area })
 }
 
 thread_local! {
     /// The atlas JSON the script last handed over.
     static SAVED: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
+    /// The area the script asked for, from `burin.area({...})`.
+    static AREA: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The sandbox, the natives and the library.
@@ -96,11 +113,12 @@ fn install(ctx: &mut Context) -> JsResult<()> {
     ctx.eval(Source::from_bytes(
         "delete globalThis.Date; delete Math.random; delete globalThis.WeakRef; delete globalThis.FinalizationRegistry;",
     ))?;
-    let natives: [(&str, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 6] = [
+    let natives: [(&str, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 7] = [
         ("batch", 1, native_batch),
         ("water", 1, native_water),
         ("shore", 1, native_shore),
         ("parameters", 0, native_parameters),
+        ("area", 1, native_area),
         ("atlas", 1, native_atlas),
         ("draw", 1, native_draw),
     ];
@@ -189,6 +207,14 @@ fn native_shore(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<Js
 /// `B.parameters()`: the style catalogue, as JSON.
 fn native_parameters(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::from(js_string!(burin_map_core::script::parameters().to_string())))
+}
+
+/// `B.area(json)`: where to draw, checked and kept as the document's area.
+fn native_area(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+    let v = json_arg(args, 0, ctx)?;
+    burin_map_core::script::area_from(&v).map_err(|e| fail(ctx, e))?;
+    AREA.with(|a| *a.borrow_mut() = Some(v.clone()));
+    to_js(&v, ctx)
 }
 
 /// `B.atlas(json)`: a whole list, checked, and saved as the document.

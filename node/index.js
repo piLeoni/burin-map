@@ -779,10 +779,13 @@ function __napiStampBindingTarget(exportsObject, target) {
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
 module.exports.Drawing = nativeBinding.Drawing
+module.exports.atlasFromJson = nativeBinding.atlasFromJson
 module.exports.boundsAround = nativeBinding.boundsAround
+module.exports.burinParameters = nativeBinding.burinParameters
 module.exports.draw = nativeBinding.draw
 module.exports.drawElevation = nativeBinding.drawElevation
 module.exports.engine = nativeBinding.engine
+module.exports.evaluate = nativeBinding.evaluate
 module.exports.forceCpu = nativeBinding.forceCpu
 module.exports.locate = nativeBinding.locate
 module.exports.projectedSize = nativeBinding.projectedSize

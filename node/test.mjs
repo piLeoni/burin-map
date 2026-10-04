@@ -1,11 +1,41 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { boundsAround, drawElevation, styleParams, version } from './index.js'
+import { readFileSync } from 'node:fs'
+import { boundsAround, drawElevation, evaluate, styleParams, version } from './index.js'
 
 test('version and style params', () => {
   assert.equal(version(), '0.1.0')
   const params = styleParams()
   assert.ok(params.some(([name]) => name === 'space'))
+})
+
+test('evaluate runs a document script and returns its atlas', () => {
+  const script = `
+    burin.area({ at: '46,7.7', size_km: [8, 6] })
+    burin.batch({ angle: 0, style: { space: 5 } })
+    burin.water('dots', { color: '#9db4c0' })
+    burin.shore()
+    burin.draw()
+  `
+  const { atlas, area } = JSON.parse(evaluate(script))
+  assert.equal(atlas.length, 3)
+  assert.equal(atlas[0].angle, 0)
+  assert.equal(atlas[1].kind, 'water')
+  assert.equal(atlas[2].kind, 'shore')
+  assert.deepEqual(area, { at: '46,7.7', size_km: [8, 6] })
+})
+
+test('a mistake in a document comes back with its position', () => {
+  assert.throws(() => evaluate('burin.batch({ angle: "x" })\nburin.draw()'), /line 1 column 12/)
+  assert.throws(() => evaluate('burin.draw()'), /nothing to draw/)
+})
+
+test('every shipped preset runs', () => {
+  for (const name of ['contours', 'contour-belts', 'downhill', 'layer-tints', 'scripted-hills', 'sea-depth']) {
+    const script = readFileSync(new URL(`../presets/${name}.js`, import.meta.url), 'utf8')
+    const { atlas } = JSON.parse(evaluate(script))
+    assert.ok(Array.isArray(atlas) && atlas.length > 0, `${name} built no atlas`)
+  }
 })
 
 test('drawElevation produces a drawing', () => {

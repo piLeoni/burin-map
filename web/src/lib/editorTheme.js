@@ -1,8 +1,8 @@
 /**
  * A greyscale theme for the editor, in step with the black-and-white page:
- * what is what is told by tone, weight and slant, not by colour. Names (YAML
- * and JSON keys, CLI flags) are black and bold, values mid-grey, help text
- * light and italic, punctuation lightest.
+ * what is what is told by tone, weight and slant, not by colour. Names (JS
+ * keys, `burin` methods) are black and bold, values mid-grey, help text light
+ * and italic, punctuation lightest.
  *
  * Built without inheriting from `vs`: its token rules are more specific than
  * ours (`string.value.json`, `keyword.json`, …) and would bring colour back.
@@ -11,15 +11,8 @@
 export const EDITOR_THEME = 'burin-grey'
 
 /**
- * The CLI view is a bash script we write ourselves (see views.js). Monaco's
- * shell tokenizer takes the indentation before `--flag` as its own token and
- * then misses the flag, so the names would read as plain text.
- */
-export const CLI_LANGUAGE = 'burin-cli'
-
-/**
- * The JS view is a burin document: JavaScript, with `burin` and its methods as
- * the vocabulary that matters. Monaco's own JS tokenizer does the strings,
+ * A burin document is JavaScript, with `burin` and its methods as the
+ * vocabulary that matters. Monaco's own JS tokenizer does the strings,
  * numbers and comments; this adds the names.
  */
 export const DOC_LANGUAGE = 'burin-doc'
@@ -35,7 +28,7 @@ export function registerDocLanguage(monaco, types) {
           [/\/\/.*$/, 'comment'],
           [/"[^"]*"|'[^']*'|`[^`]*`/, 'string'],
           [/\bburin\b/, 'type'],
-          [/\b(atlas|batch|fill|water|shore|draw|json|parameters)\b(?=\s*\()/, 'attribute.name'],
+          [/\b(area|batch|fill|water|shore|draw|json|parameters)\b(?=\s*\()/, 'attribute.name'],
           [/\b(elev|tone|dist|depth|lerp|rgb|clamp|smoothstep|step|abs|floor|ceil|round|min|max|mix)\b/, 'attribute.name'],
           [/\b(const|let|var|for|of|in|if|else|return|function|=>|new|throw)\b/, 'keyword'],
           [/-?\d+(\.\d+)?/, 'number'],
@@ -65,24 +58,6 @@ export function registerDocLanguage(monaco, types) {
     js.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false })
     if (types) js.addExtraLib(types, 'file:///burin.d.ts')
   }
-}
-
-export function registerCliLanguage(monaco) {
-  if (monaco.languages.getLanguages().some((l) => l.id === CLI_LANGUAGE)) return
-  monaco.languages.register({ id: CLI_LANGUAGE })
-  monaco.languages.setMonarchTokensProvider(CLI_LANGUAGE, {
-    tokenizer: {
-      root: [
-        [/#.*$/, 'comment'],
-        [/--[\w-]+/, 'attribute.name'],
-        [/"[^"]*"|'[^']*'/, 'string'],
-        [/\$\{[^}]*\}/, 'variable'],
-        [/-?\d+(\.\d+)?/, 'number'],
-        [/[()=,]/, 'delimiter'],
-        [/[^\s#()=,"']+/, ''],
-      ],
-    },
-  })
 }
 
 const NAME = '000000'

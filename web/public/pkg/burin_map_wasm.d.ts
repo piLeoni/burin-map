@@ -105,6 +105,11 @@ export class Panel {
 }
 
 /**
+ * The style parameters, as the editor's completion and help want them.
+ */
+export function burinParameters(): any;
+
+/**
  * Draw an elevation grid: metres, row 0 = north, square pixels of `px_m`
  * metres. `elev` is a Float32Array (or any TypedArray view) of length
  * `width × height`. Values ≤ 0.5 m are sea. `style` is an object of
@@ -113,6 +118,13 @@ export class Panel {
  * when present, `.geojson` will contain geographic coordinates.
  */
 export function draw(elev: Float32Array, width: number, height: number, px_m: number, style: any, geo: any): Drawing;
+
+/**
+ * Draw an atlas a script built: `atlas` is its list of batches and water
+ * passes, the same JSON `burin-map-script` hands back and the CLI's `--script`
+ * draws.
+ */
+export function draw_atlas(elev: Float32Array, width: number, height: number, px_m: number, atlas: string, geo: any, mm_per_px: number | null | undefined, water: any): Drawing;
 
 /**
  * Draw with multiple batch passes — accepts a JSON string of `Vec<Batch>`.
@@ -191,7 +203,9 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_drawing_free: (a: number, b: number) => void;
     readonly __wbg_panel_free: (a: number, b: number) => void;
+    readonly burinParameters: () => [number, number, number];
     readonly draw: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
+    readonly draw_atlas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => [number, number, number];
     readonly draw_batches: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => [number, number, number];
     readonly draw_batches_gpu: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any, i: number, j: any) => any;
     readonly drawing_dashes: (a: number) => number;
@@ -231,8 +245,8 @@ export interface InitOutput {
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___js_sys_620190cd17e8d420___Function_fn_wasm_bindgen_13dab8c06ff4562a___JsValue_____wasm_bindgen_13dab8c06ff4562a___sys__Undefined___js_sys_620190cd17e8d420___Function_fn_wasm_bindgen_13dab8c06ff4562a___JsValue_____wasm_bindgen_13dab8c06ff4562a___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__40: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__41: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__42: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_13dab8c06ff4562a___convert__closures_____invoke___wasm_bindgen_13dab8c06ff4562a___sys__JsNullable_wgpu_6427849c780d150b___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_ed718c3d60ebd546___result__Result_____wasm_bindgen_13dab8c06ff4562a___JsError___true__43: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

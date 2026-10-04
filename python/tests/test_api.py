@@ -92,3 +92,33 @@ def test_coordinates_and_bounds():
 def test_bad_input_raises(island):
     with pytest.raises(ValueError):
         draw_elevation(island[0], PX_M)
+
+
+def test_evaluate_runs_a_document():
+    """A document is a script; `evaluate` is the front end that runs it."""
+    doc = burin_map.evaluate(
+        "burin.area({ at: '46,7.7', size_km: [8, 6] })\n"
+        "burin.batch({ angle: 0, style: { space: 5 } })\n"
+        "burin.water('dots', { color: '#9db4c0' })\n"
+        "burin.shore()\n"
+        "burin.draw()\n"
+    )
+    assert [b.get("kind") for b in doc["atlas"]] == [None, "water", "shore"]
+    assert doc["atlas"][0]["angle"] == 0
+    assert doc["area"] == {"at": "46,7.7", "size_km": [8, 6]}
+
+
+def test_evaluate_reports_a_mistake_with_its_position():
+    with pytest.raises(ValueError, match=r"line 1 column 12"):
+        burin_map.evaluate('burin.batch({ angle: "x" })\nburin.draw()')
+    with pytest.raises(ValueError, match="nothing to draw"):
+        burin_map.evaluate("burin.draw()")
+
+
+def test_every_shipped_preset_runs():
+    from pathlib import Path
+
+    presets = Path(__file__).resolve().parents[2] / "presets"
+    for name in ("contours", "contour-belts", "downhill", "layer-tints", "scripted-hills", "sea-depth"):
+        doc = burin_map.evaluate((presets / f"{name}.js").read_text())
+        assert isinstance(doc["atlas"], list) and doc["atlas"], f"{name} built no atlas"

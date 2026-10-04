@@ -15,7 +15,7 @@ use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use burin_map_core::panel::Event;
 use burin_map_core::{Stage, Step};
 
-use crate::document::size_pair;
+use crate::document::{size_pair, AreaDoc};
 use crate::geo::{parse_length_km, parse_scale};
 use crate::panel::Panel;
 use crate::progress::{latlon, relief};
@@ -52,6 +52,7 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("out-file", "of", Takes::One),
     ("out-format", "fmt", Takes::One),
     ("out-geojson", "", Takes::One),
+    ("script", "", Takes::One),
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
     ("water", "", Takes::One),
@@ -75,12 +76,12 @@ pub fn command() -> Command {
         .version(env!("CARGO_PKG_VERSION"))
         .about("Pen-and-ink terrain map from elevation tiles.")
         .after_help("Examples:\n  \
+            burin-map --script presets/contours.js --out-file sf.png\n  \
             burin-map --terrain-at \"Twin Peaks, San Francisco\" --terrain-size 20km --out-file sf.png\n  \
             burin-map --tp bern --s 5 --dl 0.3\n  \
             burin-map --terrain-place bern --batch --space 6 --mod-breaks 0.1 \\\n  \
             \x20   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45\n  \
-            burin-map --tat Zermatt --fs 297 420 --esc 1:50000 --fmt svg\n  \
-            burin-map --style-json '{\"area\":{\"place\":\"bern\"},\"batches\":[{\"angle\":90}]}'")
+            burin-map --tat Zermatt --fs 297 420 --esc 1:50000 --fmt svg")
         .next_help_heading("Terrain — the ground to draw")
         .arg(global("terrain-place").value_name("NAME").default_value("san-francisco")
             .value_parser(PLACES.iter().map(|p| p.0).collect::<Vec<_>>()).help("named area"))
@@ -112,6 +113,10 @@ pub fn command() -> Command {
         .arg(global("force-cpu").action(ArgAction::SetTrue)
             .help("build the terrain fields on the CPU even when a GPU is available. Slower, but \
                    bit-for-bit reproducible, unlike the GPU"))
+        .next_help_heading("Document — what to draw")
+        .arg(global("script").value_name("PATH").value_parser(value_parser!(PathBuf))
+            .help("a JavaScript document (`.js`): it builds the batches and water passes the engine \
+                   draws, and may set the area like a JSON document. The main path"))
         .next_help_heading("Batch — parallel drawing passes")
         .arg(Arg::new("batch").long("batch").short('b').action(ArgAction::Append).num_args(0)
             .help("start a pass (may repeat). Flags after each --batch apply to that pass until the \
@@ -122,7 +127,8 @@ pub fn command() -> Command {
         .arg(Arg::new("batch-name").long("batch-name").visible_alias("bn").value_name("NAME")
             .help("label for this batch, shown in the log"))
         .arg(global("style-file").value_name("PATH").value_parser(value_parser!(PathBuf))
-            .help("JSON or JSON5 document (comments allowed) with an optional area block and the batch passes"))
+            .help("JSON or JSON5 document (comments allowed) with an optional area block and the batch \
+                   passes; an escape hatch for a saved atlas, not the main path — see --script"))
         .arg(global("style-json").value_name("JSON")
             .help("inline JSON or JSON5 document (or a bare list of batches)"))
         .next_help_heading("Water — sea, lakes and rivers from OpenStreetMap")
@@ -484,9 +490,24 @@ where
         .try_get_matches_from(prefix)
         .unwrap_or_else(|e| e.exit());
 
-    // Parse the document (from --style-json / --style-file) once. A bare
-    // batch array is accepted too, so older invocations keep working.
-    let mut doc: Document = if let Some(json) = m.get_one::<String>("style-json") {
+    // A script is a front end: run it first, and the atlas it builds becomes
+    // the document. The other flags stay overridable, exactly as with JSON.
+    let mut doc: Document = if let Some(path) = m.get_one::<PathBuf>("script") {
+        let source = std::fs::read_to_string(path)
+            .map_err(|e| Error::Input(format!("reading {}: {e}", path.display())))?;
+        let built = burin_map_script::evaluate_document(&source)
+            .map_err(|e| Error::Input(format!("{}: {e}", path.display())))?;
+        let area = match built.area {
+            None => None,
+            Some(v) => Some(
+                serde_json::from_value::<AreaDoc>(v)
+                    .map_err(|e| Error::Input(format!("{}: area: {e}", path.display())))?,
+            ),
+        };
+        let atlas = burin_map_core::script::atlas_from(&built.atlas)
+            .map_err(|e| Error::Input(format!("{}: {e}", path.display())))?;
+        atlas_into_document(atlas, area)
+    } else if let Some(json) = m.get_one::<String>("style-json") {
         Document::parse(json).map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?
     } else if let Some(path) = m.get_one::<PathBuf>("style-file") {
         let s = std::fs::read_to_string(path)
@@ -670,6 +691,28 @@ where
         t.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+/// The atlas a script built, as the document the CLI draws: its batches, and
+/// its water passes when it has any. `area`, when the script set one, is the
+/// area block the command line falls back to.
+fn atlas_into_document(
+    atlas: burin_map_core::atlas::Atlas,
+    area: Option<AreaDoc>,
+) -> Document {
+    let water = atlas.water.map(|w| crate::WaterDoc {
+        classes: None,
+        shoreline: w.shoreline,
+        source: None,
+        batches: w.batches,
+    });
+    Document {
+        area,
+        batches: atlas.batches,
+        land: None,
+        water,
+        bathymetry: None,
+    }
 }
 
 /// Style from the flags before the first `--batch`: defaults, overridden by

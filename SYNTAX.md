@@ -1,6 +1,17 @@
 # burin-map document syntax
 
-A document describes a whole drawing. Write it in YAML or JSON5 in the web editor, pass it to the CLI with `--style-file`, or write it as a **JavaScript** document in the web editor's JS view (see [JavaScript documents](#5-javascript-documents) below).
+A document describes a whole drawing, and a document is a **JavaScript script**:
+it calls `burin.*` and ends with `burin.draw()`, and running it builds a *graph*
+of typed operations (the *atlas*) — the batches and water passes the engine
+draws, in order. The CLI runs it with `--script`; the web editor edits the same
+kind of file. See [JavaScript documents](#5-javascript-documents) for the
+vocabulary.
+
+A saved atlas — the graph by itself, without the script — is still read as
+**JSON5** with `--style-file` / `--style-json`, as an escape hatch for a drawing
+you kept rather than a document you write. Its shape is the same four blocks
+below; every example is given both as a script (the main path) and, where it
+matters, as the atlas JSON.
 
 There are four kinds of block:
 
@@ -12,6 +23,18 @@ There are four kinds of block:
 ---
 
 ## Full example
+
+```js
+burin.area({ at: "44.3035,9.2145", size_km: [14, 10] })
+
+burin.batch({ angle: 0, style: { space: 4.8 } })
+
+burin.water("lines", { follow: "shore", style: { water_start: 10, water_reach: 30, space: 7 } })
+burin.shore({ lines: 2, style: { space: 4 } })
+burin.draw()
+```
+
+The same drawing as a saved atlas (`--style-file`):
 
 ```yaml
 area:
@@ -558,7 +581,14 @@ Only those that mean something on a line that is already drawn.
 
 ## On the command line
 
-The `water` block is one JSON argument:
+Run a document with `--script`:
+
+```bash
+burin-map --script presets/contours.js --out-file bay.png
+```
+
+A saved atlas is still one JSON argument to `--water`, or a `--style-file` /
+`--style-json` document:
 
 ```bash
 burin-map --terrain-at "44.3035,9.2145" --terrain-size 14km \
@@ -583,39 +613,42 @@ A `#d=…` link has three sections separated by `|`: area, land and water. For e
 
 ## 5. JavaScript documents
 
-The web editor's **JS** view takes the same drawing as a script. It builds the
-document with `burin.atlas()`, adds a call per pass, and hands it to the
-engine:
+A document is a script: it calls `burin.*` and ends with `burin.draw()`. Each
+call appends one entry to the drawing, in order, so what you write is what the
+engine draws:
 
 ```js
-const doc = burin.atlas()
-
 // the sea floor, pale to blue, deepening every 100 m
 const sea = ["#d6e6ef", "#a9c6db", "#7ba3c0"]
 for (let i = 0; i < sea.length; i++)
-  doc.batch(burin.fill({ ground: "sea", color: sea[i], where: { depthMin: i * 100 } }))
+  burin.batch({ ground: "sea", draw: "fill", color: sea[i], where: { depthMin: i * 100 } })
 
 // contours coloured by the shading, and the coast
-doc.batch(burin.batch({ angle: 0, shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) }))
-doc.shore(burin.shore({ color: "#1d3a52" }))
-doc.draw()
+burin.batch({ angle: 0, shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) })
+burin.shore({ color: "#1d3a52" })
+burin.draw()
 ```
 
-- `burin.batch(options)` — one land pass: the same keys as a YAML batch
+- `burin.batch(options)` — one land pass: the same keys as an atlas batch
   (`angle`, `ground`, `draw`, `color`, `shade`, `width`, `where`, `style`, and
-  any parameter by name). `burin.fill(options)` is `draw: "fill"`.
+  any parameter by name). `draw: "fill"` makes it a flat fill.
 - `burin.water(kind, options)` — a pass over the sea; `kind` is `"lines"`,
   `"ripples"` or `"dots"`. `burin.shore(options)` — the shoreline.
-- `burin.atlas()` — the document under construction; `.batch`, `.water` and
-  `.shore` append in draw order, and `.draw()` returns it for the engine
-  (`.json()` returns it as JSON without drawing).
+- `burin.area(options)` — where to draw: the same fields as the area block.
+- `burin.draw()` — hand the built drawing to the engine. `burin.json()` returns
+  it as JSON instead (what a saved atlas is), and `burin.parameters()` is the
+  parameter catalogue.
 - The fields `burin.elev`, `burin.tone`, `burin.dist` and `burin.depth`, and
   the helpers `burin.lerp`, `rgb`, `clamp`, `smoothstep`, `step`, `abs`,
   `floor`, `ceil`, `round`, `min`, `max` and `mix`, build the same colour and
-  width trees the YAML view writes as `color_expr` / `width_expr`.
+  width trees that a saved atlas writes as `color_expr` / `width_expr`.
 
-The script runs in a sandbox — no clock, no network, no `Math.random` — so the
-same script always draws the same map. A saved atlas reads back with both the
-camelCase names a script writes (`elevMin`) and the snake_case ones a document
-saves (`elev_min`), so the JS view and the other three are views of one
-document.
+Calls accumulate; there is no builder object to hold. A loop, a condition or a
+function is why this is code and not a data format — "a belt for every 100 m",
+"union these areas", "the same pass for each of these angles".
+
+The script runs in a sandbox — no clock, no network, no `Math.random`, capped
+loops and recursion — so the same script always draws the same map. A saved
+atlas reads back with both the camelCase names a script writes (`elevMin`) and
+the snake_case ones an atlas saves (`elev_min`), so a drawing and the script
+that made it are two views of one thing.

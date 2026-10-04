@@ -131,6 +131,20 @@ fn style_from_json(_py: Python<'_>, json: &str) -> PyResult<String> {
     Ok(serde_json::to_string_pretty(&batches).unwrap_or_default())
 }
 
+/// Run a burin-map document (JavaScript) and return `{"atlas": [...],
+/// "area": {...} | null}` as JSON: the batches and water passes the engine
+/// draws, in order. This is what the CLI's `--script` and the web page run;
+/// the interpreter is a front end and the atlas is the document.
+#[pyfunction]
+fn evaluate(script: &str) -> PyResult<String> {
+    let document = burin_map_script::evaluate_document(script)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let mut out = serde_json::Map::new();
+    out.insert("atlas".into(), document.atlas);
+    out.insert("area".into(), document.area.unwrap_or(serde_json::Value::Null));
+    Ok(serde_json::Value::Object(out).to_string())
+}
+
 /// (id, blurb) for each style group.
 #[pyfunction]
 fn style_groups() -> Vec<(&'static str, &'static str)> {
@@ -298,6 +312,7 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(style_params, m)?)?;
     m.add_function(wrap_pyfunction!(style_groups, m)?)?;
     m.add_function(wrap_pyfunction!(style_from_json, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     m.add_function(wrap_pyfunction!(locate, m)?)?;
     m.add_function(wrap_pyfunction!(bounds_around, m)?)?;
     m.add_function(wrap_pyfunction!(projected_size, m)?)?;

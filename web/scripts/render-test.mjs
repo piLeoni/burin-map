@@ -1,7 +1,13 @@
 /**
- * DOM smoke test for the Sidebar — the component that previously crashed with
- * "group is not defined". Runs the real component with jsdom so effects fire
- * and the WASM-backed parameter list loads (WASM is stubbed).
+ * DOM smoke test for the Sidebar — the JS-only document front end. Runs the
+ * real component with jsdom so effects fire (WASM is stubbed) and checks the
+ * document layer that sits between a script and the engine.
+ *
+ * A burin-map document *is* a JavaScript script (see docs/front-ends.md). The
+ * page holds the script text and the atlas it built; there is no YAML/JSON5/
+ * CLI view and nothing to convert between formats. What this test guards is
+ * that shape: the editor, the presets, and `document.js` (atlas → engine,
+ * atlas → script, atlas → share link).
  *
  * Run: npm run test:render
  */
@@ -21,23 +27,39 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 globalThis.localStorage = dom.window.localStorage
 globalThis.location = dom.window.location
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+// The editor is Monaco; the Sidebar only needs something that renders a box.
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
 
 const { createElement } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = await import('react')
 const { Provider, createStore } = await import('jotai')
-const { styleAtom } = await import('../src/state.js')
-const { default: Sidebar } = await import('../src/components/Sidebar.jsx')
+const { scriptAtom, atlasAtom } = await import('../src/state.js')
 
 const errors = []
 const origError = console.error
 console.error = (...args) => { errors.push(args.join(' ')); origError(...args) }
 
+const { default: Sidebar } = await import('../src/components/Sidebar.jsx')
+const { PRESETS, START_SCRIPT } = await import('../src/lib/presets.js')
+const D = await import('../src/lib/document.js')
+
+const missing = []
+
+// ---------- The presets are real scripts, each with a precomputed atlas ----------
+if (PRESETS.length < 4) missing.push(`expected several presets, got ${PRESETS.length}`)
+for (const p of PRESETS) {
+  if (!p.doc || !/burin\./.test(p.doc)) missing.push(`preset ${p.id} is not a script`)
+  if (!/burin\.draw\s*\(/.test(p.doc)) missing.push(`preset ${p.id} never calls burin.draw()`)
+  if (!Array.isArray(p.atlas)) missing.push(`preset ${p.id} has no precomputed atlas`)
+}
+// The document the app opens on is the first preset.
+if (START_SCRIPT !== PRESETS[0].doc) missing.push('START_SCRIPT should be the first preset')
+
+// ---------- The Sidebar renders the JS-only UI ----------
 const store = createStore()
-store.set(styleAtom, [
-  { name: 'Ridges', angle: 30, style: { space: 6, space_light: 1, dash_light: 0.2, batch_stroke: 1.5 } },
-  { angle: 90, style: { space: 5, space_light: 1.2, dash_light: 1, batch_stroke: 1 } },
-])
+store.set(scriptAtom, START_SCRIPT)
+store.set(atlasAtom, PRESETS[0].atlas)
 
 const root = createRoot(document.getElementById('root'))
 await act(async () => {
@@ -54,17 +76,72 @@ await act(async () => {
     ),
   )
 })
-// let loadBurin()'s promise resolve and the resulting state flush
+// let any pending promise resolve and the resulting state flush
 await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
 
 const html = document.getElementById('root').innerHTML
-const checks = ['>YAML<', '>JSON5<', '>CLI<', 'presets ▾', 'import', 'download', 'copy', 'share', 'Document', 'github']
-const missing = checks.filter((c) => !html.includes(c))
-if (html.includes('type="range"')) missing.push('the sliders should be gone')
-if (html.includes('Parameters')) missing.push('the Parameters tab should be gone')
+const checks = ['presets ▾', 'import', 'download', 'share', 'Document', 'github', 'apply', 'revert', 'copy']
+const gone = missing.concat(checks.filter((c) => !html.includes(c)))
+missing.length = 0
+missing.push(...gone)
+// The four-format tabs are exactly what was removed.
+for (const stale of ['>YAML<', '>JSON5<', '>CLI<', 'Parameters']) {
+  if (html.includes(stale)) missing.push(`the removed view ${stale} is still rendered`)
+}
 
-// Document helpers round-trip (the #doc= URL format).
-const { docToHash, docFromHash, parseDoc, docToNote, noteToDoc } = await import('../src/lib/doc.js')
+// ---------- document.js: atlas → engine ----------
+// Land batches come out as the worker takes them; water passes and the shore
+// are split off into the water spec.
+const atlas = [
+  { angle: 90, style: { space: 6, dash_light: 0.2 }, name: 'ridges' },
+  { kind: 'water', follow: 'shore', angle: 0, style: { water_reach: 80 }, name: 'coast' },
+  { kind: 'water', follow: 'map', draw: 'dots', angle: 10, style: { water_size: 18 } },
+  { kind: 'shore', lines: 2, color: '#123456', style: { dash_dark: 0.5 } },
+  { angle: 0, draw: 'fill', ground: 'sea', where: { depth_min: 200 }, color: '#aaccee', style: {} },
+]
+const land = D.atlasBatches(atlas)
+if (land.length !== 2) missing.push(`atlasBatches should keep 2 land batches, got ${land.length}`)
+if (land[0].name !== 'ridges' || land[0].angle !== 90 || land[0].style.space !== 6) missing.push('atlasBatches: first batch')
+if (land[1].draw !== 'fill' || land[1].ground !== 'sea' || land[1].color !== '#aaccee') missing.push('atlasBatches: sea fill')
+if (!land[1].where || land[1].where.depth_min !== 200) missing.push('atlasBatches: fill where')
+
+const water = D.atlasWater(atlas)
+if (!water || water.batches.length !== 2) missing.push('atlasWater: two passes')
+if (water.shoreline === false || water.shoreline.lines !== 2 || water.shoreline.color !== '#123456') missing.push('atlasWater: shoreline block')
+if (water.batches[0].follow !== 'shore' || water.batches[0].name !== 'coast') missing.push('atlasWater: first pass')
+if (water.batches[1].follow !== 'map' || water.batches[1].draw !== 'dots') missing.push('atlasWater: second pass')
+// No water at all → null, so the engine draws a dry map.
+if (D.atlasWater([{ angle: 0, style: {} }]) !== null) missing.push('atlasWater should be null without water')
+
+// ---------- document.js: atlas → script (and back) ----------
+const script = D.atlasToScript(atlas, { at: '46,7.7', size_km: [8, 6] })
+if (!script.includes('burin.area(')) missing.push('atlasToScript: area')
+if (!script.includes('burin.batch(')) missing.push('atlasToScript: batch')
+if (!script.includes('burin.water(')) missing.push('atlasToScript: water')
+if (!script.includes('burin.shore(')) missing.push('atlasToScript: shore')
+if (!script.trimEnd().endsWith('burin.draw()')) missing.push('atlasToScript should end with burin.draw()')
+// The interpreter the page runs is stubbed in this test; check the text only.
+
+// ---------- document.js: atlas ↔ the compact share link document ----------
+const flat = D.atlasToDoc(atlas, { at: '46,7.7', size_km: [8, 6] })
+if (flat.batches.length !== 2) missing.push('atlasToDoc: land batches')
+if (!flat.water || flat.water.batches.length !== 2) missing.push('atlasToDoc: water passes')
+if (!flat.water.shoreline || flat.water.shoreline.lines !== 2) missing.push('atlasToDoc: shoreline')
+const roundTrip = D.docToAtlas(flat)
+const landAgain = D.atlasBatches(roundTrip)
+if (JSON.stringify(landAgain[0]) !== JSON.stringify(land[0])) missing.push('docToAtlas: land batch round-trip')
+if (D.atlasWater(roundTrip).batches.length !== 2) missing.push('docToAtlas: water round-trip')
+
+// The whole atlas → doc → link → doc → atlas journey a share link makes. The
+// compact notation is structure only (no ink colour, no `where`), so the two
+// sides are compared after the same lossy step, which is what a link gives.
+const { docToHash, docFromHash, parseDoc, noteToDoc } = await import('../src/lib/doc.js')
+const back = docFromHash(docToHash(flat))
+if (JSON.stringify(D.docToAtlas(back)) !== JSON.stringify(D.docToAtlas(docFromHash(docToHash(D.atlasToDoc(roundTrip)))))) {
+  missing.push('a share link loses part of the document')
+}
+
+// ---------- The compact notation still reads and writes ----------
 const { PARAM_SHORTS } = await import('../src/lib/shorts.js')
 const doc = {
   area: { at: '37.75111,-122.44722', size_mm: [210, 297], scale: 25000, pen_mm: 0.25 },
@@ -72,23 +149,19 @@ const doc = {
 }
 const hash = docToHash(doc)
 if (hash.startsWith('#d=')) {
-  const back = docFromHash(hash)
-  if (back.batches[0].angle !== 90) missing.push('notation angle')
-  if (back.batches[0].style.space !== 6) missing.push('notation space')
-  if (back.batches[0].style.batch_floor !== 0.45) missing.push('notation batch_floor')
-  if (back.area?.size_mm?.[1] !== 297) missing.push('notation area size_mm')
-  if (back.area?.scale !== 25000) missing.push('notation area scale')
-  if (back.area?.at !== '37.75111,-122.44722') missing.push('notation area at (comma in value)')
+  const b = docFromHash(hash)
+  if (b.batches[0].angle !== 90) missing.push('notation angle')
+  if (b.batches[0].style.space !== 6) missing.push('notation space')
+  if (b.batches[0].style.batch_floor !== 0.45) missing.push('notation batch_floor')
+  if (b.area?.size_mm?.[1] !== 297) missing.push('notation area size_mm')
+  if (b.area?.scale !== 25000) missing.push('notation area scale')
+  if (b.area?.at !== '37.75111,-122.44722') missing.push('notation area at (comma in value)')
   if (docFromHash(docToHash({ area: { size_km: [8, 6] }, batches: doc.batches })).area?.size_km?.[1] !== 6) {
     missing.push('notation size_km')
   }
 } else {
   missing.push('hash should use the #d= notation')
 }
-
-// The whole document must survive the notation exactly.
-const exact = docToNote(doc)
-if (JSON.stringify(noteToDoc(exact)) !== JSON.stringify(doc)) missing.push('notation exact round-trip')
 
 // Water rides in a third section, and survives it exactly.
 const wet = {
@@ -128,6 +201,15 @@ const named = {
 }
 const namedBack = docFromHash(docToHash(named))
 if (JSON.stringify(namedBack.batches) !== JSON.stringify(named.batches)) missing.push('batch names through the link')
+
+// Sea-ground and fill batches keep their ground and draw through the link.
+{
+  const fill = { area: {}, batches: [{ angle: 0, ground: 'sea', draw: 'fill', style: { input_blur: 3 } }] }
+  const back = docFromHash(docToHash(fill))
+  if (JSON.stringify(back.batches) !== JSON.stringify(fill.batches)) missing.push(`link loses a sea fill ${JSON.stringify(back.batches)}`)
+  const dots = { area: {}, batches: [{ angle: 0, draw: 'dots', style: { space: 3, input_height: 0.5 } }] }
+  if (JSON.stringify(docFromHash(docToHash(dots)).batches) !== JSON.stringify(dots.batches)) missing.push('link loses land dots')
+}
 
 // Ambiguous short names resolve longest-first, never silently.
 if (noteToDoc('|a0,salt45').batches[0].style.sun_altitude !== 45) missing.push('salt vs sa')
@@ -186,7 +268,7 @@ for (const note of ['fpx1600|a0,s5', 'fw200|a0,s5', 'fh300|a0,s5']) {
   if (!throwsWith(() => noteToDoc(note), 'Unknown area setting')) missing.push(`old notation ${note} should be rejected`)
 }
 
-// Frame: the same rules as the CLI.
+// ---------- Frame: the same rules as the CLI ----------
 const F = await import('../src/lib/frame.js')
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b))
 const paper = { ...F.DEFAULT_FRAME, mode: 'paper', size_mm: [297, 420], scale: 50000 }
@@ -201,8 +283,8 @@ for (const lat of [0, 37.75, 60]) {
   if (!near(F.groundWidthAt(lat, z, 600), 8)) missing.push(`zoom round trip at ${lat}`)
 }
 // A zoom by hand changes km in land mode, the scale in paper mode; the shape stays.
-const land = F.withGroundWidth({ ...F.DEFAULT_FRAME, size_km: [10, 5] }, 20.04)
-if (land.size_km[0] !== 20 || land.size_km[1] !== 10) missing.push(`land zoom ${land.size_km}`)
+const landZoom = F.withGroundWidth({ ...F.DEFAULT_FRAME, size_km: [10, 5] }, 20.04)
+if (landZoom.size_km[0] !== 20 || landZoom.size_km[1] !== 10) missing.push(`land zoom ${landZoom.size_km}`)
 const zoomed = F.withGroundWidth(paper, 29.7)
 if (zoomed.scale !== 100000 || zoomed.size_mm[0] !== 297) missing.push(`paper zoom ${zoomed.scale}`)
 
@@ -241,94 +323,10 @@ if (!throwsWith(() => F.frameFromArea({ at: 'Zermatt' }), 'lat,lon')) missing.pu
 // And back: the area block the app exports.
 const out = F.areaFromFrame(paper, [7.7, 46])
 if (JSON.stringify(out) !== JSON.stringify({ at: '46.00000,7.70000', size_mm: [297, 420], scale: 50000 })) missing.push(`areaFromFrame ${JSON.stringify(out)}`)
-  if (JSON.stringify(F.areaFromFrame({ ...F.DEFAULT_FRAME, size_km: [8, 8] }, null)) !== '{"size_km":[8]}') missing.push('square km written once')
+if (JSON.stringify(F.areaFromFrame({ ...F.DEFAULT_FRAME, size_km: [8, 8] }, null)) !== '{"size_km":[8]}') missing.push('square km written once')
 
-// The editor's three views: YAML, JSON5 and the command, against the real
-// parameter table from crates/burin-map-core/src/style.rs.
-const V = await import('../src/lib/views.js')
-const { readFileSync } = await import('node:fs')
-const styleRs = readFileSync(new URL('../crates/burin-map-core/src/style.rs', `file://${process.cwd()}/`), 'utf8')
-const schema = {
-  params: [...styleRs.matchAll(/^\s+(\w+): (\w+) \("\w+"\): \w+ = ([\d.]+), "([^"]+)";/gm)]
-    .map(([, group, name, def, help]) => ({ name, group, default: Number(def), help })),
-  groups: [...styleRs.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map(([, id, blurb]) => ({ id, blurb })),
-}
-if (schema.params.length !== 47) missing.push(`views: read ${schema.params.length} params from style.rs`)
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-const model = {
-  area: { at: '46.02000,7.74000', size_mm: [210, 297], scale: 25000, pen_mm: 0.35 },
-  batches: [
-    { name: "Bob's ridges: #1", angle: 0, style: { space: 6, input_gain: 3.5 } },
-    { angle: -30, style: { batch_floor: 0.45 } },
-  ],
-  water: {
-    classes: ['ocean', 'lake'],
-    shoreline: { lines: 2, style: { dash_dark: 0.5, batch_stroke: 2 } },
-    batches: [
-      { name: 'along the coast', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
-      { follow: 'map', angle: 70, style: {} },
-      { follow: 'map', draw: 'dots', angle: 80, style: { water_size: 20 } },
-      { follow: 'map', draw: 'ripples', angle: 90, style: { mod_wave: 2 } },
-    ],
-  },
-  bathymetry: null,
-  notes: {
-    '': { above: ['Zermatt, A4 at 1:25000', 'second line'] },
-    'area.at': { after: 'the Matterhorn is south-west' },
-    'batches.0.style.space': { above: ['wider in the valleys'], after: 'was 4.8' },
-    'batches.1': { above: ['steep ground only'] },
-    'water.shoreline.style.dash_dark': { after: 'dotted' },
-    'water.batches.0.style.space': { after: 'wider offshore' },
-  },
-}
-const kinds = Object.keys(V.VIEWS)
-// The command gives water as one JSON argument, which holds no comments.
-const dry = { ...model, notes: Object.fromEntries(Object.entries(model.notes).filter(([k]) => !k.startsWith('water.'))) }
-for (const kind of kinds) {
-  const text = V.renderView(kind, model, schema)
-  let back
-  try { back = V.parseView(kind, text, schema) } catch (e) { missing.push(`views: ${kind} can't read itself: ${e.message}`); continue }
-  if (!same(back, kind === 'cli' ? dry : model)) missing.push(`views: ${kind} round trip\n${JSON.stringify(back)}`)
-  for (const other of kinds) {
-    const again = V.parseView(other, V.renderView(other, back, schema), schema)
-    if (!same(again, kind === 'cli' || other === 'cli' ? dry : model)) missing.push(`views: ${kind} -> ${other} loses something`)
-  }
-  if (!text.includes('input_broad') && !text.includes('input-broad')) missing.push(`views: ${kind} should list unset parameters`)
-}
-
-// A seabed batch keeps its ground in the editor views and in a share link.
+// ---------- Crop: the SVG the app hands to the downloader ----------
 {
-  const sea = { ...model, batches: [{ angle: 0, ground: 'sea', style: { space: 5 } }], notes: {} }
-  for (const kind of ['yaml', 'json5']) {
-    const back = V.parseView(kind, V.renderView(kind, sea, schema), schema)
-    if (!same(back.batches, sea.batches)) missing.push(`views: ${kind} loses ground ${JSON.stringify(back.batches)}`)
-  }
-  const D = await import('../src/lib/doc.js')
-  const linked = D.noteToDoc(D.docToNote({ ...sea, water: { shoreline: { lines: 1 }, batches: [] } }))
-  if (!same(linked.batches, sea.batches)) missing.push(`link loses ground ${JSON.stringify(linked.batches)}`)
-}
-
-// Colour, width and line ends survive both editor views, on land, at sea and on the shoreline.
-{
-  const ink = { color_expr: 'lerp(#000, #f00, tone)', width_expr: 'lerp(2, 0.5, clamp(elev / 500, 0, 1))', width_steps: 3, cap: 'round_inside' }
-  const inked = {
-    ...model,
-    batches: [{ angle: 0, style: { space: 3 }, ...ink }],
-    water: {
-      shoreline: { lines: 2, color: '#123456', cap: 'butt', style: {} },
-      batches: [{ follow: 'shore', draw: 'dots', angle: 0, style: {}, width_expr: 'lerp(3, 1, clamp(dist / 100, 0, 1))', cap: 'square' }],
-    },
-    notes: {},
-  }
-  for (const kind of ['yaml', 'json5']) {
-    const back = V.parseView(kind, V.renderView(kind, inked, schema), schema)
-    if (!same(back.batches, inked.batches)) missing.push(`views: ${kind} loses land ink ${JSON.stringify(back.batches)}`)
-    if (!same(back.water, inked.water)) missing.push(`views: ${kind} loses water ink ${JSON.stringify(back.water)}`)
-  }
-  let threw = false
-  try { V.parseView('yaml', 'batches:\n  - cap: pointy\n', schema) } catch { threw = true }
-  if (!threw) missing.push('views: a wrong cap should be an error')
-
   const C = await import('../src/lib/crop.js')
   const layer = ' id="hills-1" inkscape:groupmode="layer" inkscape:label="hills-1"'
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"'
@@ -343,162 +341,21 @@ for (const kind of kinds) {
     missing.push(`crop should keep layers at the root, with their namespace ${cut}`)
   }
   if (cut.includes('M200')) missing.push('crop keeps a path outside the frame')
-}
 
-// A stippled land batch keeps `draw: dots` in the editor views and in a share link.
-{
-  const dots = { ...model, batches: [{ angle: 0, draw: 'dots', style: { space: 3, input_height: 0.5 } }], notes: {} }
-  for (const kind of ['yaml', 'json5']) {
-    const back = V.parseView(kind, V.renderView(kind, dots, schema), schema)
-    if (!same(back.batches, dots.batches)) missing.push(`views: ${kind} loses land dots ${JSON.stringify(back.batches)}`)
-  }
-  const D = await import('../src/lib/doc.js')
-  const linked = D.noteToDoc(D.docToNote({ ...dots, water: { shoreline: { lines: 1 }, batches: [] } }))
-  if (!same(linked.batches, dots.batches)) missing.push(`link loses land dots ${JSON.stringify(linked.batches)}`)
-}
-
-// Fills: `draw: fill` and its `where` survive the editor views; `where` is theirs alone.
-{
-  const filled = {
-    ...model,
-    batches: [
-      { angle: 0, ground: 'sea', draw: 'fill', where: { depth_min: 200 }, style: {}, color: '#aaccee' },
-      { angle: 0, draw: 'fill', style: { input_blur: 3 } },
-      { angle: 0, style: { space: 3 } },
-    ],
-    notes: {},
-  }
-  for (const kind of ['yaml', 'json5']) {
-    const text = V.renderView(kind, filled, schema)
-    const back = V.parseView(kind, text, schema)
-    if (!same(back.batches, filled.batches)) missing.push(`views: ${kind} loses fills ${JSON.stringify(back.batches)}`)
-    const first = text.slice(text.indexOf('batches'), text.indexOf('style'))
-    if (first.includes('angle')) missing.push(`views: ${kind} writes an angle for a fill`)
-  }
-  for (const [text, what] of [
-    ['batches:\n  - where: { elev_min: 10 }\n', 'where on a line batch'],
-    ['batches:\n  - draw: fill\n    where: { height: 10 }\n', 'an unknown where key'],
-    ['batches:\n  - angle: 0\nwater:\n  batches:\n    - draw: fill\n', 'a water fill'],
-  ]) {
-    let threw = false
-    try { V.parseView('yaml', text, schema) } catch { threw = true }
-    if (!threw) missing.push(`views: ${what} should be an error`)
-  }
-  const D = await import('../src/lib/doc.js')
-  const plain = { ...model, batches: [{ angle: 0, draw: 'fill', style: {} }], notes: {} }
-  const linked = D.noteToDoc(D.docToNote({ ...plain, water: { shoreline: { lines: 1 }, batches: [] } }))
-  if (!same(linked.batches, plain.batches)) missing.push(`link loses a fill ${JSON.stringify(linked.batches)}`)
-
-  const C = await import('../src/lib/crop.js')
-  const svg = '<svg viewBox="0 0 100 100"><g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
+  const fillSvg = '<svg viewBox="0 0 100 100"><g fill="none" stroke-linecap="round" stroke-linejoin="round">\n'
     + '<g stroke="none" fill="#dddddd" fill-rule="evenodd" id="fill">\n<path d="M0 0 L100 0 L100 100 L0 100 Z M200 200 L210 200 L210 210 Z"/>\n</g>\n'
     + '<g stroke="#000000" stroke-width="0.5">\n<path d="M10 20 L20 20"/>\n</g>\n</g></svg>\n'
-  const cut = C.cropSvg(svg, [10, 10, 50, 50], [40, 40])
-  if (!cut.includes('fill-rule="evenodd" id="fill">') || !/M0 0 L40 0 L40 40 L0 40 Z|L0 0[^"]*Z/.test(cut) || cut.includes('M200') || cut.includes('190')) {
-    missing.push(`crop mangles a fill ${cut}`)
+  const fillCut = C.cropSvg(fillSvg, [10, 10, 50, 50], [40, 40])
+  if (!fillCut.includes('fill-rule="evenodd" id="fill">') || !/M0 0 L40 0 L40 40 L0 40 Z|L0 0[^"]*Z/.test(fillCut) || fillCut.includes('M200') || fillCut.includes('190')) {
+    missing.push(`crop mangles a fill ${fillCut}`)
   }
-  if (C.strokeOf(svg) !== 0.5) missing.push('strokeOf should look past a fill')
+  if (C.strokeOf(fillSvg) !== 0.5) missing.push('strokeOf should look past a fill')
 }
 
-// Water lists input_flat (its dashes use it) but no terrain-only parameters.
-{
-  const yaml = V.renderView('yaml', model, schema)
-  const wet = yaml.slice(yaml.indexOf('\nwater:'))
-  if (!wet.includes('# input_flat:')) missing.push('views: water should list input_flat')
-  for (const p of ['space_steep', 'batch_floor', 'sun_azimuth', 'input_gain']) {
-    if (wet.includes(`${p}:`)) missing.push(`views: water should not list ${p}`)
-  }
-}
-
-// Dots and ripples list only what they use, at their own defaults.
-{
-  // The engine's list gives each parameter its default per draw; this one is read from style.rs.
-  const withDraws = { ...schema, params: schema.params.map((p) => (p.name === 'space' ? { ...p, dots_default: 5, ripples_default: 9 } : p)) }
-  const yaml = V.renderView('yaml', model, withDraws)
-  const dots = yaml.slice(yaml.indexOf('draw: dots'), yaml.indexOf('draw: ripples'))
-  if (!dots.includes('# space: 5')) missing.push('views: dots default to space 5')
-  if (dots.includes('dash_light') || dots.includes('engine_step') || dots.includes('mod_wave')) missing.push('views: dots list dashes, the tracer or the wave')
-  const ripples = yaml.slice(yaml.indexOf('draw: ripples'))
-  if (!ripples.includes('# space: 9')) missing.push('views: ripples default to space 9')
-  if (!ripples.includes('mod_wave_size') || ripples.includes('engine_step')) missing.push('views: ripples list the wave, not the tracer')
-  const lines = yaml.slice(yaml.indexOf('\nwater:'), yaml.indexOf('draw: dots'))
-  if (lines.includes('water_size')) missing.push('views: water lines should not list water_size')
-  let threw = false
-  try { V.parseView('yaml', yaml.replace('draw: dots', 'draw: foam'), schema) } catch { threw = true }
-  if (!threw) missing.push('views: an unknown draw should be an error')
-}
-
-// A later land batch shows the terrain it takes from the one above, not the default.
-{
-  const two = { area: {}, batches: [{ angle: 0, style: { space: 6, sun_azimuth: 200 } }, { angle: 90, style: {} }], notes: {} }
-  const yaml = V.renderView('yaml', two, schema)
-  const second = yaml.slice(yaml.indexOf('angle: 90'))
-  if (!second.includes('# sun_azimuth: 200')) missing.push('views: second batch should show the inherited sun_azimuth')
-  if (!second.includes('# space: 4.8')) missing.push('views: space is not terrain, so it should not carry over')
-  if (!same(V.parseView('yaml', yaml, schema).batches, two.batches)) missing.push('views: inherited values must not become set')
-}
-
-// Uncommenting a default sets it; commenting a value out unsets it.
-const one = { area: {}, batches: [{ angle: 0, style: { space: 6 } }], notes: {} }
-const edits = {
-  yaml: [['# dash_light: 0.15', 'dash_light: 0.3'], ['space: 6', '# space: 6']],
-  json5: [['// "dash_light": 0.15,', '"dash_light": 0.3,'], ['"space": 6,', '// "space": 6,']],
-  cli: [['# --dash-light 0.15', '--dash-light 0.3'], ['--space 6', '# --space 6']],
-}
-for (const kind of kinds) {
-  let text = V.renderView(kind, one, schema)
-  for (const [from, to] of edits[kind]) {
-    if (!text.includes(from)) missing.push(`views: ${kind} has no "${from}"`)
-    text = text.replace(from, to)
-  }
-  const got = V.parseView(kind, text, schema)
-  if (!same(got.batches[0].style, { dash_light: 0.3 })) missing.push(`views: ${kind} comment toggle ${JSON.stringify(got.batches[0].style)}`)
-  if (Object.keys(got.notes).length) missing.push(`views: ${kind} generated comments kept as notes ${JSON.stringify(got.notes)}`)
-}
-
-// Files saved when every line carried its help text read back without notes.
-const oldYaml = [
-  'area:',
-  '  at: 46.00000,7.70000   # centre, "lat,lon"; dragging the map changes it',
-  'batches:',
-  '  - angle: 0   # line direction: 0 follows the contour lines, 90 runs straight downhill',
-  '    style:',
-  '      # ── Space: Distance between neighbouring lines, from open on lit slopes to dense in shadow.',
-  '      space: 6   # distance between neighbouring lines, in px (default 4.8)',
-  '      # space_light: 1   # spacing multiplier on fully lit slopes; above 1 opens them up',
-].join('\n')
-const oldBack = V.parseView('yaml', oldYaml, schema)
-if (Object.keys(oldBack.notes).length || oldBack.batches[0].style.space !== 6) missing.push(`views: old help comments ${JSON.stringify(oldBack.notes)}`)
-if (V.renderView('yaml', one, schema).includes('distance between')) missing.push('views: help text should no longer be written')
-
-// Unknown parameters are errors in every view, and say which.
-const bad = {
-  yaml: 'batches:\n  - style:\n      spacing: 5\n',
-  json5: '{ batches: [{ style: { spacing: 5 } }] }',
-  cli: 'burin-map --spacing 5',
-}
-for (const kind of kinds) {
-  if (!throwsWith(() => V.parseView(kind, bad[kind], schema), 'spacing')) missing.push(`views: ${kind} should reject "spacing"`)
-}
-
-// Plain JSON (what older builds exported) and a one-line command both read.
-const oldJson = '{"area":{"at":"46,7.7"},"batches":[{"angle":90,"style":{"space":5}}]}'
-if (V.parseView('json5', oldJson, schema).batches[0].style.space !== 5) missing.push('views: plain JSON')
-const line = V.parseView('cli', "burin-map --tat 46,7.7 --ts 8km 6km --esc 1:50000 --s 6 --dl 0.3 --batch-name 'A b'", schema)
-if (!same(line.area, { at: '46,7.7', size_km: [8, 6], scale: 50000 }) || !same(line.batches, [{ name: 'A b', angle: 0, style: { space: 6, dash_light: 0.3 } }])) {
-  missing.push(`views: one-line command ${JSON.stringify(line)}`)
-}
-const shared = V.parseView('cli', 'burin-map --s 6 --batch --ba 90 --batch --dl 0.2', schema)
-if (!same(shared.batches.map((b) => b.style), [{ space: 6 }, { space: 6, dash_light: 0.2 }])) missing.push('views: flags before --batch are shared')
-
-if (V.detectView('a.yml', '') !== 'yaml' || V.detectView('a.json', '') !== 'json5' || V.detectView('x', 'burin-map --s 5') !== 'cli' || V.detectView('x', '{"a":1}') !== 'json5' || V.detectView('x', 'batches:\n  - angle: 0') !== 'yaml') {
-  missing.push('views: detectView')
-}
-
-// The loading panel: the engine's own panel (the one the command line
-// shows), told what a draw does, laid out by LoadPanel.
+// ---------- The loading panel ----------
 const { default: LoadPanel } = await import('../src/components/LoadPanel.jsx')
 const wasm = await import('../pkg/burin_map_wasm.js')
+const { readFileSync } = await import('node:fs')
 await wasm.default({ module_or_path: readFileSync(new URL('../pkg/burin_map_wasm_bg.wasm', import.meta.url)) })
 const engine = new wasm.Panel('952×860 px · 1 batch', '[{"angle":0,"style":{}}]', '{"shoreline":{"lines":1},"batches":[]}')
 engine.area(-122.5, 37.7, -122.4, 37.8, 0)

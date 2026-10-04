@@ -1,0 +1,21 @@
+{
+  "name": "burin-map-script-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings for burin-map's script interpreter: a document in, its atlas out",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/piLeoni/burin-map"
+  },
+  "files": [
+    "burin_map_script_wasm_bg.wasm",
+    "burin_map_script_wasm.js",
+    "burin_map_script_wasm.d.ts"
+  ],
+  "main": "burin_map_script_wasm.js",
+  "types": "burin_map_script_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

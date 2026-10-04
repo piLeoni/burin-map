@@ -307,6 +307,25 @@ pub fn drawing_to_json(d: &Drawing) -> Value {
     })
 }
 
+/// The area a script asked for, checked: the keys the document's `area` block
+/// takes, and nothing else. A script sets it with
+/// `burin.area({ at: …, size_km: … })`, and a front end reads it back so the
+/// same script draws the same place everywhere.
+pub fn area_from(v: &Value) -> Result<Value, String> {
+    let Some(o) = v.as_object() else {
+        return Err("burin.area takes an object of area settings".into());
+    };
+    const KEYS: &[&str] = &["place", "at", "bounds", "size_km", "size_mm", "scale", "pen_mm"];
+    let mut out = Map::new();
+    for (k, value) in o {
+        if !KEYS.contains(&k.as_str()) {
+            return Err(format!("area {k:?} is not one of {}", KEYS.join(", ")));
+        }
+        out.insert(k.clone(), value.clone());
+    }
+    Ok(Value::Object(out))
+}
+
 /// The names of the style parameters, for editors and for a script asking.
 pub fn parameters() -> Value {
     Value::Array(

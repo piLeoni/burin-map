@@ -1,26 +1,34 @@
 /**
  * The `burin` object a document script sees.
  *
- * A document is a list of batches and water passes, in the order they are
- * drawn; this builds that list and hands it back as the atlas the engine
- * reads. The front ends are the same one burin-map-core exposes to draw.land,
- * so a style written here means the same thing there.
+ * A document is a run of calls: `burin.batch({…})`, `burin.water(…)`,
+ * `burin.shore(…)`, in the order they are drawn, ended by `burin.draw()`.
+ * Each call builds one entry and keeps it; nothing is returned to hold. The
+ * same script runs at the CLI, in the browser, and from Python and Node,
+ * because each of those is just a front end that runs it and reads the atlas.
  *
- *   const hills = burin.batch({ shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) })
- *   const sea = burin.water("dots", { color: "#9db4c0" })
- *   burin.atlas().batch(hills).water(sea).draw()
+ *   burin.batch({ shade: burin.lerp("#e8dcc8", "#2a1810", burin.tone) })
+ *   burin.water("dots", { color: "#9db4c0" })
+ *   burin.area({ at: "37.75,-122.45", size_km: [8, 8] })
+ *   burin.draw()
  *
  * `where` keeps a fill to a band of heights, which is how a contour belt is
- * written:
+ * written — a loop, the point of a real language:
  *
  *   for (const [from, to] of [[0, 200], [200, 400]])
- *     burin.atlas().batch(burin.fill({ color: "#8a7a5c", where: { elevMin: from, elevMax: to } }))
+ *     burin.fill({ color: "#8a7a5c", where: { elevMin: from, elevMax: to } })
+ *
+ * Nothing joins the document until `burin.draw()`; a call made before then is
+ * just collected, so the order of the calls is the draw order.
  */
 (function () {
   "use strict";
 
   const B = globalThis.__burin;
   delete globalThis.__burin;
+
+  /** The entry list being built, in draw order. Reset for each run. */
+  const items = [];
 
   /** An object, or a helpful error: the argument is usually the mistake. */
   function object(v, what) {
@@ -61,8 +69,6 @@
     return [op, ...args];
   }
 
-  const FIELDS = ["elev", "tone", "dist", "depth"];
-
   const burin = {
     /**
      * A batch of hatching, stippling or a fill. Everything burin's `batch`
@@ -89,7 +95,7 @@
       if (width !== undefined) out.width = scalar(width, "burin.batch width");
       if (where !== undefined) out.where = band(where, "burin.batch where");
       out.style = { ...styleParams(style), ...styleParams(rest) };
-      return B.batch(JSON.stringify(out));
+      return push(B.batch(JSON.stringify(out)));
     },
 
     /** A fill of a band: what a contour belt is. */
@@ -119,7 +125,7 @@
       if (width !== undefined) out.width = scalar(width, "burin.water width");
       if (where !== undefined) out.where = band(where, "burin.water where", true);
       out.style = { ...styleParams(style), ...styleParams(rest) };
-      return B.water(JSON.stringify(out));
+      return push(B.water(JSON.stringify(out)));
     },
 
     /** The shore, the zero contour; or its own style. */
@@ -131,17 +137,36 @@
       if (shade !== undefined) out.shade = color(shade, "burin.shore shade");
       if (width !== undefined) out.width = scalar(width, "burin.shore width");
       out.style = { ...styleParams(style), ...styleParams(rest) };
-      return B.shore(JSON.stringify(out));
+      return push(B.shore(JSON.stringify(out)));
+    },
+
+    /**
+     * Where to draw. The same keys as the document's area block: `place`,
+     * `at`, `bounds`, `size_km`, `size_mm`, `scale`, `pen_mm`. A front end
+     * reads it back; the command line only fills in what its own flags left
+     * unset.
+     */
+    area(options) {
+      const o = object(options, "burin.area");
+      return B.area(JSON.stringify(o));
+    },
+
+    /** Draw what has been built: the document, for the engine. */
+    draw() {
+      if (items.length === 0) {
+        throw new Error("the document has nothing to draw: add a batch with burin.batch({…})");
+      }
+      return B.draw(JSON.stringify(items));
+    },
+
+    /** The document as JSON, without drawing it: for saving or inspecting. */
+    json() {
+      return B.atlas(JSON.stringify(items));
     },
 
     /** The style parameters, by name, with their help: what an editor lists. */
     parameters() {
       return JSON.parse(B.parameters());
-    },
-
-    /** The document being built, in draw order. */
-    atlas() {
-      return new Atlas();
     },
 
     /** The fields a tree may read at a point. */
@@ -194,6 +219,12 @@
     },
   };
 
+  /** Keep one entry, and hand it back so a call can be used as a value. */
+  function push(entry) {
+    items.push(entry);
+    return entry;
+  }
+
   /** A batch's style parameters: numbers only, by their short names too. */
   function styleParams(v) {
     const o = object(v, "style");
@@ -223,36 +254,6 @@
     }
     return out;
   }
-
-  /** The document under construction, in draw order. */
-  function Atlas() {
-    this.items = [];
-  }
-  Atlas.prototype.batch = function (b) {
-    if (b === undefined) throw new Error("atlas.batch needs a batch: burin.batch({…})");
-    this.items.push(b);
-    return this;
-  };
-  Atlas.prototype.water = function (w) {
-    if (w === undefined) throw new Error('atlas.water needs a pass: burin.water("dots", {…})');
-    this.items.push(w);
-    return this;
-  };
-  Atlas.prototype.shore = function (s) {
-    this.items.push(s === undefined ? burin.shore() : s);
-    return this;
-  };
-  /** The document, for the engine: an atlas JSON string. */
-  Atlas.prototype.draw = function () {
-    if (this.items.length === 0) {
-      throw new Error("the document has nothing to draw: add a batch with burin.batch({…})");
-    }
-    return B.draw(JSON.stringify(this.items));
-  };
-  /** The same, without drawing: the atlas as JSON, for saving or inspecting. */
-  Atlas.prototype.json = function () {
-    return B.atlas(JSON.stringify(this.items));
-  };
 
   globalThis.burin = Object.freeze(burin);
 })();

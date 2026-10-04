@@ -344,6 +344,7 @@ dependencies = [
  "anstream 0.6.21",
  "anstyle",
  "burin-map-core",
+ "burin-map-script",
  "clap",
  "json5",
  "libc",
@@ -375,6 +376,7 @@ version = "0.1.0"
 dependencies = [
  "burin-map",
  "burin-map-core",
+ "burin-map-script",
  "napi",
  "napi-build",
  "napi-derive",
@@ -387,6 +389,7 @@ version = "0.1.0"
 dependencies = [
  "burin-map",
  "burin-map-core",
+ "burin-map-script",
  "pyo3",
  "serde_json",
 ]

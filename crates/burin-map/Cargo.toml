@@ -20,6 +20,8 @@ gpu = ["burin-map-core/gpu"]
 anstream = "0.6"
 anstyle = "1"
 burin-map-core = { workspace = true }
+# A document is a script; the CLI runs it the same way the web page does.
+burin-map-script = { path = "../burin-map-script", version = "0.1.0" }
 clap = { version = "4", features = ["string"] }
 serde = { version = "1", features = ["derive"] }
 png = "0.17"

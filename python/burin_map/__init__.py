@@ -14,6 +14,7 @@ only adapts it to Python: numpy arrays, dataclasses, files.
 from __future__ import annotations
 
 import dataclasses
+import json
 from dataclasses import field
 from pathlib import Path
 from typing import Callable
@@ -23,8 +24,8 @@ import numpy as np
 from . import _burin
 
 __all__ = ["Drawing", "Style", "bounds_around", "draw", "draw_elevation", "engine",
-           "fields", "force_cpu", "locate", "projected_size", "style_groups",
-           "style_help"]
+           "evaluate", "fields", "force_cpu", "locate", "projected_size",
+           "style_groups", "style_help"]
 __version__ = _burin.__version__
 
 Bounds = tuple[float, float, float, float]  # west, south, east, north (degrees)
@@ -147,6 +148,24 @@ def bounds_around(lat: float, lon: float, width_km: float, height_km: float) -> 
 def projected_size(bounds: Bounds) -> tuple[float, float]:
     """Width and height in metres of `bounds` in the map's projection."""
     return _burin.projected_size(tuple(bounds))
+
+
+def evaluate(script: str) -> dict:
+    """Run a burin-map document (JavaScript) and return the graph it built.
+
+    A document is a script that calls `burin.*` and ends with `burin.draw()`;
+    running it builds an *atlas* — the batches and water passes the engine
+    draws, in order — and that atlas is the document the engine reads. The
+    interpreter is the front end; the drawing never sees JavaScript.
+
+        >>> doc = burin_map.evaluate(open("contours.js").read())
+        >>> doc["atlas"][0]["kind"] if doc["atlas"] else "batch"
+        'batch'
+
+    Returns `{"atlas": [...], "area": {...} | null}`: the same shape the CLI's
+    `--script` runs and the web page draws.
+    """
+    return json.loads(_burin.evaluate(script))
 
 
 def draw(bounds: Bounds, style: Style | None = None, *,

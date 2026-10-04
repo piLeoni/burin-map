@@ -1,7 +1,9 @@
 /**
- * Drawing document: where (`area`) and how (`batches`) — the shape the CLI
- * takes with --style-json. This file holds the compact URL notation; the
- * editable views (YAML, JSON5, CLI) are in views.js.
+ * The compact URL notation a share link carries: where (`area`) and how
+ * (`batches`, `water`), as one flat string. It is the flat form of a drawing —
+ * a link cannot hold a loop — so `document.js` writes an atlas back into it
+ * with `atlasToDoc` and reads it again with `docToAtlas`. The editor itself
+ * never sees this: a document is a script, and only links are flat.
  *
  * @typedef {{ place?: string, at?: string, bounds?: number[], size_km?: number[], size_mm?: number[], scale?: number, pen_mm?: number }} AreaDoc
  * @typedef {{ name?: string, angle: number, style: Record<string, number> }} Batch

@@ -221,3 +221,38 @@ BURIN_ENGINE=cpu ./target/release/burin-map --tp san-francisco --out-file sf.svg
 
 gh run list -L1                                # the CI verdict
 ```
+
+## Afterwards: one document, one language
+
+The document model was rebuilt around a single idea (draw.land's
+`docs/front-ends.md`): **the engine reads one typed graph; languages are front
+ends that emit it.** The flat formats (YAML, JSON5) were being used as
+documents, and a document outgrew them the moment it needed a loop — once you
+need a function, a data format is just a bad programming language.
+
+What changed:
+
+- The interpreter (`burin-map-script`, over Boa) was already right; what was
+  wrong was its presentation. `burin.atlas()` and a model↔atlas conversion
+  layer (`renderJs`/`atlasToModel`, `views.js`) are gone. A script now makes
+  **bare accumulating calls** — `burin.batch({…})`, `burin.water(kind, {…})`,
+  `burin.shore({…})`, `burin.area({…})`, then `burin.draw()` — matching
+  draw.land's shape.
+- The **CLI gained `--script PATH`** (`.js`), running the interpreter into an
+  atlas and drawing it. `--style-file` / `--style-json` stay as an escape hatch
+  for a saved atlas, not the main path.
+- **Web is JS only.** The four views (YAML / JSON5 / CLI / JS), `views.js` and
+  the conversion layer are deleted. A preset is a real script file
+  (`presets/*.js`), shown in the editor and precomputed into
+  `web/src/presets/atlases.json` so an unedited preset draws without booting
+  the interpreter.
+- **Node and Python are front ends, not data constructors.** Both gained
+  `evaluate(script) → { atlas, area }`; the old `batch`/`atlas` value
+  constructors are gone. `burin-map-core::script` (the typed
+  `Batch`/`WaterBatch`/`Shoreline`/`Atlas`) is unchanged and remains the
+  source of truth draw.land reads through the Rust API.
+
+Not to do (from the same note): no merging burin-map into draw.land, no Python
+browser front end before it is asked for, and no flat format kept as a
+first-class document anywhere.
+

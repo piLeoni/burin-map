@@ -23,8 +23,18 @@ export declare class Drawing {
   penUpTravel(): number
 }
 
+/**
+ * Read an atlas a script built: its list of batches and water passes, as
+ * `burinBatch` / `burinWater` / `burinShore` return them. Comes back as the
+ * batches a document carries, so a drawing can be saved and rebuilt.
+ */
+export declare function atlasFromJson(json: string): string
+
 /** Lon/lat box of roughly `width_km` × `height_km` centred on `(lat, lon)`. */
 export declare function boundsAround(lat: number, lon: number, widthKm: number, heightKm: number): [number, number, number, number]
+
+/** The style parameters, as an editor's completion and help want them. */
+export declare function burinParameters(): string
 
 /** Download elevation for the lon/lat box and draw it. */
 export declare function draw(west: number, south: number, east: number, north: number, style?: object | undefined | null, frameSizeMm?: Array<number> | undefined | null, framePenMm?: number | undefined | null): Drawing
@@ -34,6 +44,14 @@ export declare function drawElevation(elev: Float32Array, width: number, height:
 
 /** Where the fields are built: "GPU: Apple M4 (Metal)", "CPU (forced)", … */
 export declare function engine(): string
+
+/**
+ * Run a burin-map document (JavaScript) and return the atlas it built, as
+ * JSON: the batches and water passes the engine draws, in order. This is what
+ * the CLI's `--script` and the web page run; the interpreter is the front end
+ * and the atlas is the document the engine reads.
+ */
+export declare function evaluate(script: string): string
 
 /**
  * Never build the fields on the GPU: reproducible output, for tests and
