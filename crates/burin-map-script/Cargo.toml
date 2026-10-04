@@ -1,0 +1,18 @@
+[package]
+name = "burin-map-script"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "burin-map documents in JavaScript: a script in, the atlas it builds out"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+burin-map-core = { workspace = true }
+serde_json = "1"
+# The interpreter. `js` only: no clock, no randomness, no modules to reach out
+# with — a document has to be able to say what it draws and nothing else.
+boa_engine = { version = "0.22", default-features = false, features = ["js"] }

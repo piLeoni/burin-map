@@ -312,4 +312,65 @@ export const PRESETS = [
       water: { shoreline: { lines: 1, color: '#1d3a52' }, batches: [] },
     },
   },
+  {
+    id: 'contour-belts',
+    screen: 'fast',
+    plot: 'slow',
+    label: 'Contour belts',
+    blurb: 'a loop in JavaScript: a coloured belt for every 100 m of height and depth — the JS view shows the script',
+    script: `// A loop makes a belt for every step of height and depth: one batch per
+// band, each filled between its two limits. Open the YAML view to see it
+// written out flat; edit the numbers here to change the steps.
+const doc = burin.atlas()
+
+// the sea floor, pale to blue, deepening every 100 m
+const sea = ["#d6e6ef", "#a9c6db", "#7ba3c0", "#4d7fa2", "#2b5c80", "#153b5c"]
+for (let i = 0; i < sea.length; i++)
+  doc.batch(burin.fill({ ground: "sea", color: sea[i], where: { depthMin: i * 100 }, angle: 0, style: { input_blur: 5 } }))
+
+// the land, pale green to brown, rising every 100 m
+const land = ["#eef0df", "#dfe3c2", "#d3d2a4", "#cbb589", "#bd9c6e", "#a67f52", "#8a6440"]
+for (let i = 0; i < land.length; i++)
+  doc.batch(burin.fill({ color: land[i], where: { elevMin: i * 100 }, angle: 0, style: { input_blur: 5 } }))
+
+// contours over the belts, coloured by height, and the coast
+doc.batch(burin.batch({ angle: 0, shade: burin.lerp("#6a5230", "#241206", burin.clamp(burin.tone, 0, 1)), style: { dash_light: 0.5 } }))
+doc.batch(burin.batch({ angle: 0, ground: "sea", shade: burin.lerp("#4a6f88", "#0b2236", burin.tone), style: { space: 5, engine_stripes: 1 } }))
+doc.shore(burin.shore({ color: "#1d3a52" }))
+
+doc.draw()`,
+  },
+  {
+    id: 'scripted-hills',
+    screen: 'fast',
+    plot: 'very slow',
+    label: 'Scripted hills',
+    blurb: 'a loop over angles: crosshatching that tightens with the slope, drawn by a script you can tune',
+    script: `// Crosshatching written as a loop: each pass adds another angle to the
+// hatched set, so four lines build up a rounded hill. The spacing of a
+// pass tightens where the ground is steep, so the summits go dark.
+const doc = burin.atlas()
+
+for (const angle of [0, 45, 90, 135])
+  doc.batch(burin.batch({
+    angle,
+    style: {
+      space: 6,
+      space_light: 2.5,
+      space_dark: 0.7,
+      space_steep: 0.25,
+      dash_light: 0.6,
+      dash_dark: 1,
+      dash_cutoff: 0,
+      dash_drop: 0,
+      mod_breaks: 0.03,
+      mod_smooth: 8,
+    },
+  }))
+
+// the sea: one even hatch, nothing on land
+doc.batch(burin.batch({ angle: 0, ground: "sea", style: { space: 5, space_light: 1, space_dark: 1, water_reach: 4000 } }))
+
+doc.draw()`,
+  },
 ]

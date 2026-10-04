@@ -161,7 +161,7 @@ export const notesAtom = atomWithStorage('burin-map.notes.v1', {})
 export const forceCpu = typeof window !== 'undefined'
   && new URLSearchParams(window.location.search).has('force-cpu')
 
-/** Which way the editor writes the document: 'yaml', 'json5' or 'cli'. */
+/** Which way the editor writes the document: 'yaml', 'json5', 'cli' or 'js'. */
 export const viewKindAtom = atomWithStorage('burin-map.view', 'yaml')
 
 /** How long a successful unlock stays valid (30 days). */

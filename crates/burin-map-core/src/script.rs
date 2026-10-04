@@ -73,22 +73,24 @@ pub fn batch_from(v: &Value) -> Result<Batch, String> {
 }
 
 /// Read a height band: `{ elevMin, elevMax, depthMin, depthMax }`, in metres.
-/// The names are the ones the document writes, so the two fronts agree.
+/// A script writes the camelCase names; a saved document carries the
+/// snake_case ones the `Band` serializes to, so both are read.
 pub fn band_of(v: &Value) -> Result<Band, String> {
-    let num = |k: &str| -> Result<Option<f32>, String> {
-        match v.get(k) {
+    let num = |camel: &str, snake: &str| -> Result<Option<f32>, String> {
+        let x = v.get(camel).or_else(|| v.get(snake));
+        match x {
             None | Some(Value::Null) => Ok(None),
             Some(x) => x
                 .as_f64()
                 .map(|n| Some(n as f32))
-                .ok_or_else(|| format!("where {k:?} is a number of metres")),
+                .ok_or_else(|| format!("where {camel:?} is a number of metres")),
         }
     };
     let band = Band {
-        elev_min: num("elevMin")?,
-        elev_max: num("elevMax")?,
-        depth_min: num("depthMin")?,
-        depth_max: num("depthMax")?,
+        elev_min: num("elevMin", "elev_min")?,
+        elev_max: num("elevMax", "elev_max")?,
+        depth_min: num("depthMin", "depth_min")?,
+        depth_max: num("depthMax", "depth_max")?,
     };
     if band.elev_min.zip(band.elev_max).is_some_and(|(lo, hi)| lo > hi) {
         return Err("elevMin is above elevMax".into());
@@ -140,10 +142,16 @@ pub fn water_from(v: &Value, kind: Option<&str>) -> Result<WaterBatch, String> {
         w.angle = a as f32;
     }
     if let Some(where_) = get("where") {
-        let g = |k: &str| where_.get(k).and_then(Value::as_f64).map(|v| v as f32);
-        w.r#where.depth_min = g("depthMin");
-        w.r#where.depth_max = g("depthMax");
-        w.r#where.depth_fade = g("depthFade");
+        let g = |camel: &str, snake: &str| {
+            where_
+                .get(camel)
+                .or_else(|| where_.get(snake))
+                .and_then(Value::as_f64)
+                .map(|v| v as f32)
+        };
+        w.r#where.depth_min = g("depthMin", "depth_min");
+        w.r#where.depth_max = g("depthMax", "depth_max");
+        w.r#where.depth_fade = g("depthFade", "depth_fade");
     }
     apply_style(&mut w.style, get("style"))?;
     Ok(w)

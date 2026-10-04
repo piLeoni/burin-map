@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import Editor from '@monaco-editor/react'
-import { EDITOR_THEME, defineEditorTheme, editorFont, registerCliLanguage } from '../lib/editorTheme'
+import { EDITOR_THEME, defineEditorTheme, editorFont, registerCliLanguage, registerDocLanguage } from '../lib/editorTheme'
+import BURIN_TYPES from '../lib/burin.d.ts?raw'
 import { loadBurin } from '../lib/burin'
 import { PRESETS } from '../lib/presets'
 import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
-import { VIEWS, detectView, parseView, renderView } from '../lib/views'
+import { VIEWS, atlasToModel, detectView, parseView, renderView, runJs } from '../lib/views'
 import Panel from './Panel'
 import {
   BATCHES_V1_KEY, bathymetryAtom, cameraRequestAtom, frameAtom, mapViewAtom, notesAtom, styleAtom, viewKindAtom, waterAtom,
@@ -150,10 +151,19 @@ export default function Sidebar({ open, onClose, status }) {
   const shown = draft ?? liveText
   const dirty = draft != null && draft !== liveText
 
-  const applyDraft = () => {
+  /**
+   * A view's text into a model. The JS view runs through the interpreter, so
+   * this is async; the others parse straight away.
+   */
+  const toModel = async (kind, text, area) => {
+    if (kind === 'js') return atlasToModel(await runJs(text), schema, area ?? {})
+    return parseView(kind, text, schema)
+  }
+
+  const applyDraft = async () => {
     if (!dirty) return
     try {
-      load(parseView(view, draft, schema))
+      load(await toModel(view, draft, model.area))
       setDraft(null)
       setError('')
     } catch (e) {
@@ -168,11 +178,13 @@ export default function Sidebar({ open, onClose, status }) {
   }
 
   /** Switch view; an unapplied edit comes along, rewritten in the new view. */
-  const switchView = (next) => {
+  const switchView = async (next) => {
     if (next === view) return
     if (dirty) {
       try {
-        setDraft(renderView(next, parseView(view, draft, schema), schema))
+        const m = await toModel(view, draft, model.area)
+        // The JS view is written from the model; the rest render it.
+        setDraft(next === 'js' ? null : renderView(next, m, schema))
       } catch (e) {
         setError(`Fix this before switching: ${e.message}`)
         return
@@ -184,8 +196,21 @@ export default function Sidebar({ open, onClose, status }) {
     setKind(next)
   }
 
-  const loadPreset = (p) => {
+  const loadPreset = async (p) => {
     presetMenuRef.current?.removeAttribute('open')
+    // A JS preset is a script: open the JS view and run it.
+    if (p.script) {
+      setKind('js')
+      setDraft(p.script)
+      try {
+        load(await toModel('js', p.script, model.area))
+        setError('')
+        flash(`Loaded ${p.label} — a JavaScript document`)
+      } catch (e) {
+        setError(e.message || 'Can\'t run this')
+      }
+      return
+    }
     const doc = structuredClone(p.doc)
     try {
       load({ area: doc.area, batches: doc.batches, water: doc.water ?? null, bathymetry: doc.bathymetry ?? null, notes: {} })
@@ -203,7 +228,9 @@ export default function Sidebar({ open, onClose, status }) {
     if (!file || !schema) return
     try {
       const text = await file.text()
-      load(parseView(detectView(file.name, text), text, schema))
+      const kind = detectView(file.name, text)
+      load(await toModel(kind, text, model.area))
+      if (kind === 'js') setKind('js')
       setDraft(null)
       setError('')
       flash(`Loaded ${file.name}`)
@@ -393,6 +420,7 @@ export default function Sidebar({ open, onClose, status }) {
               beforeMount={(monaco) => {
                 monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({ validate: false })
                 registerCliLanguage(monaco)
+                registerDocLanguage(monaco, BURIN_TYPES)
                 defineEditorTheme(monaco)
               }}
               onMount={(editor, monaco) => {

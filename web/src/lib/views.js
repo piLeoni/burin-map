@@ -35,6 +35,7 @@ export const VIEWS = {
   yaml: { label: 'YAML', ext: 'yaml', language: 'yaml', mime: 'application/yaml' },
   json5: { label: 'JSON5', ext: 'json5', language: 'json', mime: 'application/json5' },
   cli: { label: 'CLI', ext: 'sh', language: 'burin-cli', mime: 'text/x-shellscript' },
+  js: { label: 'JS', ext: 'js', language: 'burin-doc', mime: 'text/javascript' },
 }
 
 const AREA_KEYS = ['place', 'at', 'bounds', 'size_km', 'size_mm', 'scale', 'pen_mm']
@@ -1051,6 +1052,266 @@ function parseCli(text, schema) {
 /* ================================================================= */
 
 /** A style block: known parameters with numbers only. */
+/* ================================================================= */
+/*  The JS view                                                       */
+/* ================================================================= */
+
+/**
+ * The JS view renders a model as a `burin` document, the same script the
+ * interpreter runs. `runJs` goes the other way, through the interpreter, and
+ * returns the same model the other views parse into — so switching views keeps
+ * everything, and the map draws the JS document like any other.
+ */
+
+/** A JS string literal. */
+const js = (s) => JSON.stringify(String(s))
+
+/** A number for a document: no float noise, no scientific notation. */
+const jsNum = (v) => num(v)
+
+/** A style block as JS, or `null`. */
+function jsStyle(style) {
+  const entries = Object.entries(style ?? {})
+  if (!entries.length) return null
+  return `{ ${entries.map(([k, v]) => `${k}: ${jsNum(v)}`).join(', ')} }`
+}
+
+/** The options object a `burin.batch` call takes, from a model batch. */
+function jsBatch(b) {
+  const parts = []
+  if (b.name) parts.push(`name: ${js(b.name)}`)
+  if (b.ground) parts.push(`ground: ${js(b.ground)}`)
+  if (b.draw) parts.push(`draw: ${js(b.draw)}`)
+  if (b.color) parts.push(`color: ${js(b.color)}`)
+  if (b.color_expr) parts.push(`shade: ${js(b.color_expr)}`)
+  if (b.width_expr) parts.push(`width: ${js(b.width_expr)}`)
+  if (b.where) {
+    const w = b.where
+    // The document writes the camelCase names the library reads.
+    const map = { elev_min: 'elevMin', elev_max: 'elevMax', depth_min: 'depthMin', depth_max: 'depthMax' }
+    const keys = Object.keys(map).filter((k) => w[k] != null)
+    if (keys.length) parts.push(`where: { ${keys.map((k) => `${map[k]}: ${jsNum(w[k])}`).join(', ')} }`)
+  }
+  parts.push(`angle: ${jsNum(b.angle ?? 0)}`)
+  const style = jsStyle(b.style)
+  if (style) parts.push(`style: ${style}`)
+  return parts.join(', ')
+}
+
+/** The options object a `burin.water` call takes. */
+function jsWaterBatch(b) {
+  const parts = []
+  if (b.name) parts.push(`name: ${js(b.name)}`)
+  if (b.follow && b.follow !== 'shore') parts.push(`follow: ${js(b.follow)}`)
+  if (b.draw) parts.push(`draw: ${js(b.draw)}`)
+  if (b.color) parts.push(`color: ${js(b.color)}`)
+  if (b.color_expr) parts.push(`shade: ${js(b.color_expr)}`)
+  if (b.width_expr) parts.push(`width: ${js(b.width_expr)}`)
+  if (b.where) {
+    const map = { depth_min: 'depthMin', depth_max: 'depthMax', depth_fade: 'depthFade' }
+    const keys = Object.keys(map).filter((k) => b.where[k] != null)
+    if (keys.length) parts.push(`where: { ${keys.map((k) => `${map[k]}: ${jsNum(b.where[k])}`).join(', ')} }`)
+  }
+  if (b.angle != null && b.angle !== 0) parts.push(`angle: ${jsNum(b.angle)}`)
+  const style = jsStyle(b.style)
+  if (style) parts.push(`style: ${style}`)
+  return parts.join(', ')
+}
+
+/** The area as the comment a document opens with, since the map holds it. */
+function jsAreaComment(area) {
+  const bits = []
+  if (area?.place) bits.push(`place ${area.place}`)
+  if (area?.at) bits.push(`at ${area.at}`)
+  if (area?.bounds) bits.push(`bounds ${area.bounds.join(', ')}`)
+  if (area?.size_km) bits.push(`size ${area.size_km.join(' × ')} km`)
+  if (area?.size_mm) bits.push(`paper ${area.size_mm.join(' × ')} mm`)
+  if (area?.scale) bits.push(`scale 1:${area.scale}`)
+  if (area?.pen_mm != null) bits.push(`pen ${area.pen_mm} mm`)
+  return bits.length ? `// area: ${bits.join(' · ')}` : null
+}
+
+/** Write the model as a `burin` document. */
+function renderJs(model) {
+  const lines = [
+    '/**',
+    ' * A burin-map document in JavaScript.',
+    ' *',
+    ' * The map area, the paper size and the pen come from the page, not from',
+    ' * here; only what is drawn is written below.',
+    ' */',
+  ]
+  const area = jsAreaComment(model.area)
+  if (area) lines.push(area)
+  lines.push('', 'burin', '  .atlas()')
+
+  for (const b of model.batches) {
+    lines.push(`  .batch(burin.batch({ ${jsBatch(b)} }))`)
+  }
+
+  if (model.water) {
+    lines.push('  // water')
+    if (model.water.shoreline === false) lines.push('  // (no shoreline)')
+    else if (model.water.shoreline && typeof model.water.shoreline === 'object') {
+      const s = model.water.shoreline
+      const bits = []
+      if (s.color) bits.push(`color: ${js(s.color)}`)
+      if (s.shade) bits.push(`shade: ${js(s.shade)}`)
+      if (s.width != null) bits.push(`width: ${jsNum(s.width)}`)
+      if (s.lines != null && s.lines !== 1) bits.push(`lines: ${s.lines}`)
+      const style = jsStyle(s.style)
+      if (style) bits.push(`style: ${style}`)
+      lines.push(`  .shore(burin.shore({ ${bits.join(', ')} }))`)
+    } else {
+      lines.push('  .shore()')
+    }
+    for (const b of model.water.batches ?? []) {
+      const kind = b.draw === 'ripples' || b.draw === 'dots' ? b.draw : 'lines'
+      lines.push(`  .water(burin.water(${js(kind)}, { ${jsWaterBatch(b)} }))`)
+    }
+  }
+
+  lines.push('  .draw()', '')
+  return lines.join('\n')
+}
+
+/** The script WASM module, loaded the first time a document has to run. */
+let scriptModule = null
+
+// Function so Vite does not rewrite the import of a file in /public (as in
+// burin.js): the interpreter is fetched from the served path, not bundled.
+const importPkg = new Function('url', 'return import(url)')
+
+async function loadScript() {
+  scriptModule ??= (async () => {
+    const m = await importPkg('/pkg-script/burin_map_script_wasm.js')
+    await m.default()
+    return m
+  })()
+  return scriptModule
+}
+
+/** The library's source, so an editor can offer it beside the types. */
+export async function librarySource() {
+  const m = await loadScript()
+  return m.librarySource()
+}
+
+/**
+ * Run a document and return the atlas it builds: the list of batches and water
+ * passes the engine draws, in draw order.
+ * @param {string} source
+ * @returns {Promise<Array<object>>}
+ */
+export async function runJs(source) {
+  const m = await loadScript()
+  try {
+    return JSON.parse(m.evaluate(source))
+  } catch (e) {
+    // The interpreter's errors carry `line`/`column`; a readable prefix helps
+    // the editor point at the mistake.
+    const at = e && Number.isFinite(e.line) ? `JS, line ${e.line}${Number.isFinite(e.column) ? ` column ${e.column}` : ''}: ` : ''
+    throw new Error(at + (e?.message ?? String(e)))
+  }
+}
+
+/** The atlas (engine batches and water passes) as the page's model. */
+export function atlasToModel(atlas, schema, area = {}) {
+  const batches = []
+  let water = null
+  for (const item of atlas) {
+    if (item.kind === 'water' || item.kind === 'shore') continue
+    const b = item
+    batches.push({
+      angle: b.angle ?? 0,
+      ...(b.name ? { name: b.name } : {}),
+      ...(b.ground && b.ground !== 'land' ? { ground: b.ground } : {}),
+      ...(b.draw && b.draw !== 'lines' ? { draw: b.draw } : {}),
+      ...inkFromAtlas(b, 'a batch'),
+      ...(b.where ? { where: bandToModel(b.where) } : {}),
+      style: styleFromAtlas(b.style, schema, 'a batch'),
+    })
+  }
+  const waterItems = atlas.filter((i) => i.kind === 'water')
+  const shore = atlas.find((i) => i.kind === 'shore')
+  if (waterItems.length || shore) {
+    water = {
+      ...(shore
+        ? {
+            shoreline: {
+              lines: shore.lines ?? 1,
+              ...inkFromAtlas(shore, 'the shoreline'),
+              style: styleFromAtlas(shore.style, schema, 'the shoreline'),
+            },
+          }
+        : {}),
+      batches: waterItems.map((b) => ({
+        follow: b.follow ?? 'shore',
+        ...(b.draw && b.draw !== 'lines' ? { draw: b.draw } : {}),
+        ...(b.name ? { name: b.name } : {}),
+        angle: b.angle ?? 0,
+        ...inkFromAtlas(b, 'a water batch'),
+        ...(b.where ? { where: waterWhereToModel(b.where) } : {}),
+        style: styleFromAtlas(b.style, schema, 'a water batch'),
+      })),
+    }
+  }
+  return { area, batches, water, bathymetry: null, notes: {} }
+}
+
+/**
+ * The engine saves a batch's whole style, defaults and all; a document holds
+ * only the parameters that are set, and only the ones the app knows. What is
+ * left is what the script actually changed.
+ */
+function styleFromAtlas(style, schema, which) {
+  const known = new Set((schema?.params ?? []).map((p) => p.name))
+  const out = {}
+  for (const [k, v] of Object.entries(style ?? {})) {
+    if (known.has(k) && typeof v === 'number' && Number.isFinite(v)) out[k] = v
+  }
+  return readStyle(out, which, schema)
+}
+
+/**
+ * The ink of an engine batch, as the model keeps it: the engine's `shade` and
+ * `width` are the model's `color_expr` and `width_expr`.
+ */
+function inkFromAtlas(b, which) {
+  return readInk(
+    {
+      layer: b.layer,
+      color: b.color,
+      color_expr: b.shade,
+      width_expr: typeof b.width === 'string' ? b.width : undefined,
+      width_steps: b.width_steps,
+      cap: b.cap,
+    },
+    which,
+  )
+}
+
+/** A land fill's band, saved or as written, to the model's `where`. */
+function bandToModel(w) {
+  const pick = (camel, snake) => w[camel] ?? w[snake]
+  return {
+    ...(pick('elevMin', 'elev_min') != null ? { elev_min: pick('elevMin', 'elev_min') } : {}),
+    ...(pick('elevMax', 'elev_max') != null ? { elev_max: pick('elevMax', 'elev_max') } : {}),
+    ...(pick('depthMin', 'depth_min') != null ? { depth_min: pick('depthMin', 'depth_min') } : {}),
+    ...(pick('depthMax', 'depth_max') != null ? { depth_max: pick('depthMax', 'depth_max') } : {}),
+  }
+}
+
+/** A water pass's `where`, to the model's (already snake_case). */
+function waterWhereToModel(w) {
+  const pick = (camel, snake) => w[camel] ?? w[snake]
+  return {
+    ...(pick('depthMin', 'depth_min') != null ? { depth_min: pick('depthMin', 'depth_min') } : {}),
+    ...(pick('depthMax', 'depth_max') != null ? { depth_max: pick('depthMax', 'depth_max') } : {}),
+    ...(pick('depthFade', 'depth_fade') != null ? { depth_fade: pick('depthFade', 'depth_fade') } : {}),
+  }
+}
+
 function readStyle(src, which, schema) {
   const style = {}
   if (src == null) return style
@@ -1230,10 +1491,11 @@ function toModel(value, notes, schema) {
   return { area, batches, water: readWater(doc.water, schema), bathymetry, notes }
 }
 
-/** Write the model in one of the three views. */
+/** Write the model in one of the views. */
 export function renderView(kind, model, schema) {
   if (kind === 'json5') return renderJson5(model, schema)
   if (kind === 'cli') return renderCli(model, schema)
+  if (kind === 'js') return renderJs(model)
   return renderYaml(model, schema)
 }
 
@@ -1241,6 +1503,7 @@ export function renderView(kind, model, schema) {
 export function parseView(kind, text, schema) {
   if (kind === 'json5') return parseJson5(text, schema)
   if (kind === 'cli') return parseCli(text, schema)
+  if (kind === 'js') throw new Error('JS is run by the interpreter, not parsed')
   return parseYaml(text, schema)
 }
 
@@ -1250,8 +1513,10 @@ export function detectView(fileName, text) {
   if (ext === 'yaml' || ext === 'yml') return 'yaml'
   if (ext === 'json' || ext === 'json5') return 'json5'
   if (ext === 'sh') return 'cli'
+  if (ext === 'js' || ext === 'mjs') return 'js'
   const t = String(text || '').trimStart()
   if (/^(\{|\[|\/\/|\/\*)/.test(t)) return 'json5'
   if (/^(#!|burin-map\b|args=\()/.test(t) || (/(^|\s)--[a-z]/.test(t) && !/^\s*[a-z_]+:/m.test(t))) return 'cli'
+  if (/\bburin\s*\.|`burin`|\bfrom ['"]burin/.test(t)) return 'js'
   return 'yaml'
 }

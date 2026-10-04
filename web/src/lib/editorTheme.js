@@ -17,6 +17,56 @@ export const EDITOR_THEME = 'burin-grey'
  */
 export const CLI_LANGUAGE = 'burin-cli'
 
+/**
+ * The JS view is a burin document: JavaScript, with `burin` and its methods as
+ * the vocabulary that matters. Monaco's own JS tokenizer does the strings,
+ * numbers and comments; this adds the names.
+ */
+export const DOC_LANGUAGE = 'burin-doc'
+
+export function registerDocLanguage(monaco, types) {
+  if (!monaco.languages.getLanguages().some((l) => l.id === DOC_LANGUAGE)) {
+    monaco.languages.register({ id: DOC_LANGUAGE })
+    monaco.languages.setMonarchTokensProvider(DOC_LANGUAGE, {
+      tokenizer: {
+        root: [
+          [/#.*$/, 'comment'],
+          [/\/\*/, 'comment', '@comment'],
+          [/\/\/.*$/, 'comment'],
+          [/"[^"]*"|'[^']*'|`[^`]*`/, 'string'],
+          [/\bburin\b/, 'type'],
+          [/\b(atlas|batch|fill|water|shore|draw|json|parameters)\b(?=\s*\()/, 'attribute.name'],
+          [/\b(elev|tone|dist|depth|lerp|rgb|clamp|smoothstep|step|abs|floor|ceil|round|min|max|mix)\b/, 'attribute.name'],
+          [/\b(const|let|var|for|of|in|if|else|return|function|=>|new|throw)\b/, 'keyword'],
+          [/-?\d+(\.\d+)?/, 'number'],
+          [/[()[\]{},.:;=]/, 'delimiter'],
+        ],
+        comment: [
+          [/[^*/]+/, 'comment'],
+          [/\*\//, 'comment', '@pop'],
+          [/./, 'comment'],
+        ],
+      },
+    })
+  }
+  // The types drive hover and completion for `burin.*`, and `checkJs` makes
+  // real mistakes show; syntax is checked as the document is typed.
+  const ts = monaco.typescript ?? monaco.languages.typescript
+  if (ts) {
+    const js = ts.javascriptDefaults
+    js.setCompilerOptions({
+      allowJs: true,
+      checkJs: true,
+      allowNonTsExtensions: true,
+      noEmit: true,
+      target: ts.ScriptTarget.ES2020,
+      lib: ['es2020'],
+    })
+    js.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false })
+    if (types) js.addExtraLib(types, 'file:///burin.d.ts')
+  }
+}
+
 export function registerCliLanguage(monaco) {
   if (monaco.languages.getLanguages().some((l) => l.id === CLI_LANGUAGE)) return
   monaco.languages.register({ id: CLI_LANGUAGE })

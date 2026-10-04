@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Build the two WASM packages the web app serves from public/:
-#   pkg/     single-threaded, stable Rust; works on any page
-#   pkg-mt/  rayon threads (wasm-bindgen-rayon); needs a cross-origin isolated
-#            page (COOP/COEP headers) and a nightly toolchain for build-std
-# Both include draw_batches_gpu (terrain fields on WebGPU).
+# Build the WASM packages the web app serves from public/:
+#   pkg/        single-threaded, stable Rust; works on any page
+#   pkg-mt/     rayon threads (wasm-bindgen-rayon); needs a cross-origin isolated
+#               page (COOP/COEP headers) and a nightly toolchain for build-std
+#   pkg-script/ the JavaScript interpreter, loaded only when a document runs
+# The first two include draw_batches_gpu (terrain fields on WebGPU).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NIGHTLY="${BURIN_NIGHTLY:-nightly-2026-04-14}"
@@ -13,6 +14,14 @@ wasm-pack build --target web --release --out-dir ../../web/pkg -- --features gpu
 rm -rf ../../web/public/pkg
 cp -R ../../web/pkg ../../web/public/pkg
 printf '' > ../../web/public/pkg/.gitignore
+
+# The interpreter is its own module: a page that never opens a script never
+# downloads Boa. Built from the sibling crate, straight into public/.
+wasm-pack build "$ROOT/crates/burin-map-script-wasm" \
+  --target web \
+  --out-dir "$ROOT/web/public/pkg-script" \
+  --profile wasm-script
+printf '' > "$ROOT/web/public/pkg-script/.gitignore"
 
 if ! rustup run "$NIGHTLY" rustc --version >/dev/null 2>&1; then
   echo "skipping pkg-mt: install the toolchain with" >&2
