@@ -8,6 +8,7 @@
 
 use crate::atlas::{Atlas, WaterDraw};
 use crate::expr::{Expr, Scalar};
+use crate::fills::Band;
 use crate::water::{Shoreline, WaterBatch};
 use crate::{Batch, Cap, Drawing, Follow, Ground, Style};
 use serde_json::{json, Map, Value};
@@ -64,8 +65,38 @@ pub fn batch_from(v: &Value) -> Result<Batch, String> {
     if let Some(c) = get("cap").and_then(Value::as_str) {
         b.cap = cap_of(c)?;
     }
+    if let Some(where_) = get("where") {
+        b.band = band_of(where_)?;
+    }
     apply_style(&mut b.style, get("style"))?;
     Ok(b)
+}
+
+/// Read a height band: `{ elevMin, elevMax, depthMin, depthMax }`, in metres.
+/// The names are the ones the document writes, so the two fronts agree.
+pub fn band_of(v: &Value) -> Result<Band, String> {
+    let num = |k: &str| -> Result<Option<f32>, String> {
+        match v.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(x) => x
+                .as_f64()
+                .map(|n| Some(n as f32))
+                .ok_or_else(|| format!("where {k:?} is a number of metres")),
+        }
+    };
+    let band = Band {
+        elev_min: num("elevMin")?,
+        elev_max: num("elevMax")?,
+        depth_min: num("depthMin")?,
+        depth_max: num("depthMax")?,
+    };
+    if band.elev_min.zip(band.elev_max).is_some_and(|(lo, hi)| lo > hi) {
+        return Err("elevMin is above elevMax".into());
+    }
+    if band.depth_min.zip(band.depth_max).is_some_and(|(lo, hi)| lo > hi) {
+        return Err("depthMin is above depthMax".into());
+    }
+    Ok(band)
 }
 
 /// Read a water pass: `burin.water.lines({ ... })`.
@@ -112,6 +143,7 @@ pub fn water_from(v: &Value, kind: Option<&str>) -> Result<WaterBatch, String> {
         let g = |k: &str| where_.get(k).and_then(Value::as_f64).map(|v| v as f32);
         w.r#where.depth_min = g("depthMin");
         w.r#where.depth_max = g("depthMax");
+        w.r#where.depth_fade = g("depthFade");
     }
     apply_style(&mut w.style, get("style"))?;
     Ok(w)
@@ -374,6 +406,39 @@ mod tests {
         let out = drawing_to_json(&d);
         assert!(out["svg"].as_str().unwrap().contains("<svg"));
         assert!(out["runs"].as_array().unwrap().len() > 1, "the shading changes the pen");
+    }
+
+    #[test]
+    fn a_fill_keeps_to_its_band() {
+        // The heights a fill covers, so a script can loop over bands and draw
+        // one contour belt at a time.
+        let b = batch_from(&serde_json::json!({
+            "draw": "fill",
+            "color": "#d8c9a8",
+            "where": {"elevMin": 200, "elevMax": 400}
+        }))
+        .unwrap();
+        assert_eq!(b.band.elev_min, Some(200.0));
+        assert_eq!(b.band.elev_max, Some(400.0));
+        assert!(b.band.depth_min.is_none());
+
+        // Depths read too, on the water's own where (which carries a fade).
+        let w = water_from(&serde_json::json!({"where": {"depthMin": 100}}), Some("dots")).unwrap();
+        assert_eq!(w.r#where.depth_min, Some(100.0));
+
+        // A band that says nothing is left out of the JSON, as before.
+        let open = batch_from(&serde_json::json!({"draw": "fill", "color": "#fff"})).unwrap();
+        assert!(!to_json_batches(&[open]).contains(r#""where""#));
+    }
+
+    #[test]
+    fn a_band_that_makes_no_sense_is_reported() {
+        let e = batch_from(&serde_json::json!({
+            "draw": "fill", "where": {"elevMin": 400, "elevMax": 200}
+        }))
+        .unwrap_err();
+        assert!(e.contains("elevMin is above elevMax"), "{e}");
+        assert!(batch_from(&serde_json::json!({"where": {"elevMin": "high"}})).is_err());
     }
 
     #[test]
