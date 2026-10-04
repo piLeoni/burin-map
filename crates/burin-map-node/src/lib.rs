@@ -146,6 +146,62 @@ pub fn style_from_json(json: String) -> Result<String> {
     Ok(serde_json::to_string(&batches).unwrap_or_default())
 }
 
+/// Read an atlas a script built: its list of batches and water passes, as
+/// `burinBatch` / `burinWater` / `burinShore` return them. Comes back as the
+/// batches a document carries, so a drawing can be saved and rebuilt.
+#[napi]
+pub fn atlas_from_json(json: String) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| Error::from_reason(format!("invalid atlas JSON: {e}")))?;
+    let atlas = burin_map_core::script::atlas_from(&value)
+        .map_err(|e| Error::from_reason(format!("invalid atlas: {e}")))?;
+    Ok(burin_map_core::script::atlas_to_json(&atlas).to_string())
+}
+
+/// `burin.batch({ ... })` as the script's interpreter returns it, read into a
+/// batch's own fields.
+#[napi]
+pub fn burin_batch(json: String) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| Error::from_reason(format!("invalid options: {e}")))?;
+    let b = burin_map_core::script::batch_from(&value)
+        .map_err(|e| Error::from_reason(e))?;
+    Ok(serde_json::to_string(&b).unwrap_or_default())
+}
+
+/// `burin.water.lines({ ... })`, and the same for `ripples` and `dots`.
+#[napi]
+pub fn burin_water(kind: String, json: String) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| Error::from_reason(format!("invalid options: {e}")))?;
+    let mut pass = burin_map_core::script::water_from(&value, Some(&kind))
+        .map_err(|e| Error::from_reason(e))?;
+    let mut o = serde_json::to_value(&mut pass).unwrap_or_default();
+    if let Some(m) = o.as_object_mut() {
+        m.insert("kind".into(), serde_json::json!("water"));
+    }
+    Ok(o.to_string())
+}
+
+/// `burin.shore({ ... })`.
+#[napi]
+pub fn burin_shore(json: String) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| Error::from_reason(format!("invalid options: {e}")))?;
+    let s = burin_map_core::script::shore_from(&value).map_err(|e| Error::from_reason(e))?;
+    let mut o = serde_json::to_value(s).unwrap_or_default();
+    if let Some(m) = o.as_object_mut() {
+        m.insert("kind".into(), serde_json::json!("shore"));
+    }
+    Ok(o.to_string())
+}
+
+/// The style parameters, as an editor's completion and help want them.
+#[napi]
+pub fn burin_parameters() -> String {
+    burin_map_core::script::parameters().to_string()
+}
+
 /// Download elevation for the lon/lat box and draw it.
 #[napi]
 pub fn draw(

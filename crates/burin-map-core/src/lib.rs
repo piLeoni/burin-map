@@ -8,7 +8,9 @@
 //! → plotting order → input-driven dashes. Several batch passes (angles)
 //! run in parallel and are merged.
 
-mod color_expr;
+pub mod atlas;
+pub mod expr;
+pub mod script;
 mod dashes;
 mod depth;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
@@ -29,6 +31,7 @@ mod style;
 pub mod water;
 mod wave;
 
+pub use atlas::{Atlas, Water, WaterDraw};
 pub use dashes::{dash_lines, dash_lines_by};
 pub use depth::{
     bathymetry_source_needs_fetch, build_depth_grid, depth_allows, depth_weight, expr_uses_depth,
@@ -37,6 +40,7 @@ pub use depth::{
 pub use fields::{batch_fields, build_fields, build_fields_with, land_mask, Fields};
 pub use fills::{Band, Fill};
 pub use order::{pen_up_travel, plot_order};
+pub use expr::{Color, Expr, Field, Func, Scalar};
 pub use pen::{Cap, Ink, Pen};
 pub use progress::{rows, Progress, Row, Stage, Step};
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
@@ -123,6 +127,53 @@ pub fn draw_batches(
         })
         .collect();
     draw_fields(&fields, batches, elev)
+}
+
+/// An [`Atlas`] over an elevation grid: the water coverage worked out from
+/// the elevation when it is not given, then the engine run on it.
+pub fn draw_atlas(
+    atlas: &Atlas,
+    elev: &[f32],
+    coverage: Option<&[f32]>,
+    width: usize,
+    height: usize,
+    px_m: f32,
+) -> Drawing {
+    let own = if atlas.water.is_some() {
+        // The land's mask when there is one, else from the elevation itself.
+        coverage.map(<[f32]>::to_vec).or_else(|| {
+            elev.iter()
+                .map(|&e| (e <= 0.5) as u8 as f32)
+                .collect::<Vec<f32>>()
+                .into()
+        })
+    } else {
+        None
+    };
+    let layer = own.as_ref().map(|c| WaterLayer {
+        coverage: c,
+        depth: None,
+        depth_override: None,
+        shoreline: atlas.water.as_ref().and_then(|w| w.shoreline.as_ref()),
+        batches: atlas.water.as_ref().map_or(&[][..], |w| &w.batches),
+    });
+    let sea = sea_coverage(elev, coverage, &atlas.batches);
+    draw_fields_timed(
+        &terrain_groups(&atlas.batches)
+            .0
+            .iter()
+            .map(|&i| {
+                let cov = ground_coverage(&atlas.batches[i], coverage, sea.as_deref());
+                build_fields_with(elev, width, height, px_m, &atlas.batches[i].style, cov)
+            })
+            .collect::<Vec<_>>(),
+        &atlas.batches,
+        layer.as_ref(),
+        elev,
+        || 0.0,
+        &(),
+    )
+    .0
 }
 
 /// The mask `ground: sea` batches build their fields with: water where the
@@ -396,7 +447,7 @@ fn trace_land(
                 at(Stage::Trace);
                 let (w, h) = (fields[0].w, fields[0].h);
                 let rings = fills::rings(b.ground, &b.band, elev, water, w, h, st.input_blur);
-                let pen = Pen::filling(b.color.as_deref(), b.color_expr.as_deref(), Some(&layer));
+                let pen = Pen::filling(b.color.as_deref(), b.color_expr.as_ref(), Some(&layer));
                 at(Stage::Done);
                 return (Vec::new(), vec![(pen, rings)], [now() - t0, 0.0, 0.0, 0.0]);
             }
@@ -413,7 +464,7 @@ fn trace_land(
             } else {
                 trace_batch(&bf, &st, false, now, &at)
             };
-            let ctx = color_expr::ColorCtx {
+            let ctx = expr::ColorCtx {
                 w: bf.w,
                 h: bf.h,
                 elev: Some(elev),
@@ -425,7 +476,7 @@ fn trace_land(
                 layer: Some(&layer),
                 ..b.ink()
             };
-            let ink = color_expr::colorize_paths(paths, &ink, &ctx);
+            let ink = expr::colorize_paths(paths, &ink, &ctx);
             at(Stage::Done);
             (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
@@ -483,7 +534,7 @@ fn trace_water(
                 };
                 let f = water::water_fields(wl.coverage, &dist, depth, w, h, &b);
                 let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
-                let ink = color_expr::colorize_paths(plot_order(marks), &ink, &ctx);
+                let ink = expr::colorize_paths(plot_order(marks), &ink, &ctx);
                 at(Stage::Done);
                 return (Vec::new(), ink, [ms, 0.0, 0.0, 0.0]);
             }
@@ -519,7 +570,7 @@ fn trace_water(
                 &b.r#where,
             );
             let ctx = water_ctx(w, h, Some(&f.input), &dist, depth);
-            let ink = color_expr::colorize_paths(paths, &ink, &ctx);
+            let ink = expr::colorize_paths(paths, &ink, &ctx);
             at(Stage::Done);
             (lines, ink, [t1 - t0, t[0], t[1], t[2]])
         })
@@ -534,7 +585,7 @@ fn trace_water(
         progress.reach(Step::Shoreline, Stage::Done);
         lines.extend(l);
         let ctx = water_ctx(w, h, None, &dist, depth);
-        paths.extend(color_expr::colorize_paths(p, &sh.ink(), &ctx));
+        paths.extend(expr::colorize_paths(p, &sh.ink(), &ctx));
     }
     (lines, paths, timings)
 }
@@ -610,8 +661,8 @@ fn water_ctx<'a>(
     tone: Option<&'a [f32]>,
     dist: &'a [f32],
     depth: Option<&'a [f32]>,
-) -> color_expr::ColorCtx<'a> {
-    color_expr::ColorCtx {
+) -> expr::ColorCtx<'a> {
+    expr::ColorCtx {
         w,
         h,
         elev: None,
@@ -778,6 +829,7 @@ fn svg_layer(name: &str, used: &mut std::collections::HashMap<String, usize>) ->
 
 #[cfg(test)]
 mod tests {
+    use crate::expr::{Bin, Field, Func, Scalar};
     use super::*;
 
     fn island(w: usize, h: usize) -> Vec<f32> {
@@ -995,7 +1047,25 @@ mod tests {
     fn width_and_cap_reach_the_svg() {
         let (w, h) = (200, 200);
         let b = Batch {
-            width_expr: Some("lerp(0.5, 3, clamp(elev / 1500, 0, 1))".into()),
+            width_expr: Some(Scalar::Call(
+                Func::Lerp,
+                vec![
+                    Scalar::Lit(0.5),
+                    Scalar::Lit(3.0),
+                    Scalar::Call(
+                        Func::Clamp,
+                        vec![
+                            Scalar::Bin(
+                                Bin::Div,
+                                Box::new(Scalar::Field(Field::Elev)),
+                                Box::new(Scalar::Lit(1500.0)),
+                            ),
+                            Scalar::Lit(0.0),
+                            Scalar::Lit(1.0),
+                        ],
+                    ),
+                ],
+            )),
             width_steps: 3,
             cap: Cap::Butt,
             ..Batch::along(Style::default())

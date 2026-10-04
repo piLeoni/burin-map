@@ -65,9 +65,9 @@ pub struct WaterBatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub color_expr: Option<String>,
+    pub color_expr: Option<crate::expr::Expr>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub width_expr: Option<String>,
+    pub width_expr: Option<crate::expr::Scalar>,
     #[serde(skip_serializing_if = "crate::style::is_zero")]
     pub width_steps: u32,
     #[serde(skip_serializing_if = "Cap::is_round")]
@@ -109,8 +109,8 @@ impl WaterBatch {
             stroke: self.style.batch_stroke,
             layer: self.layer.as_deref(),
             color: self.color.as_deref(),
-            color_expr: self.color_expr.as_deref(),
-            width_expr: self.width_expr.as_deref(),
+            expr: self.color_expr.clone(),
+            width: self.width_expr.clone(),
             width_steps: self.width_steps,
             cap: self.cap,
         }
@@ -144,8 +144,8 @@ impl<'de> Deserialize<'de> for WaterBatch {
             name: Option<String>,
             layer: Option<String>,
             color: Option<String>,
-            color_expr: Option<String>,
-            width_expr: Option<String>,
+            color_expr: Option<crate::expr::Expr>,
+            width_expr: Option<crate::expr::Scalar>,
             width_steps: u32,
             cap: Cap,
             follow: Follow,
@@ -178,9 +178,6 @@ impl<'de> Deserialize<'de> for WaterBatch {
             return Err(serde::de::Error::custom(
                 "fills are land batches: put them in batches, with ground: sea for the water",
             ));
-        }
-        if let Some(e) = &g.width_expr {
-            crate::color_expr::check_width(e).map_err(serde::de::Error::custom)?;
         }
         let mut style = Style::drawn(g.draw);
         for (name, v) in g.style {
@@ -280,9 +277,9 @@ pub struct Shoreline {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub color_expr: Option<String>,
+    pub color_expr: Option<crate::expr::Expr>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub width_expr: Option<String>,
+    pub width_expr: Option<crate::expr::Scalar>,
     #[serde(skip_serializing_if = "crate::style::is_zero")]
     pub width_steps: u32,
     #[serde(skip_serializing_if = "Cap::is_round")]
@@ -298,8 +295,8 @@ impl Shoreline {
             stroke: self.style.batch_stroke,
             layer: self.layer.as_deref().or(Some(crate::progress::SHORELINE)),
             color: self.color.as_deref(),
-            color_expr: self.color_expr.as_deref(),
-            width_expr: self.width_expr.as_deref(),
+            expr: self.color_expr.clone(),
+            width: self.width_expr.clone(),
             width_steps: self.width_steps,
             cap: self.cap,
         }

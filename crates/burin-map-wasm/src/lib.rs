@@ -599,6 +599,119 @@ fn parse_batches(json: &str) -> Result<Vec<Batch>, JsValue> {
     Ok(batches)
 }
 
+/// What a script's `burin` object needs from the engine, as plain functions.
+/// The script runs elsewhere (its own interpreter or the browser), and these
+/// turn what it wrote into the same batches a document would carry.
+pub mod script_api {
+    use super::*;
+    use burin_map_core::script;
+
+    fn read(v: &JsValue) -> Result<serde_json::Value, JsValue> {
+        if v.is_null() || v.is_undefined() {
+            return Ok(serde_json::Value::Null);
+        }
+        js_sys::JSON::stringify(v)
+            .map_err(|e| JsValue::from_str(&format!("{e:?}")))
+            .and_then(|s| {
+                let t = s.as_string().unwrap_or_default();
+                serde_json::from_str(&t)
+                    .map_err(|e| JsValue::from_str(&format!("not a value: {e}")))
+            })
+    }
+
+    fn give(v: serde_json::Value) -> Result<JsValue, JsValue> {
+        js_sys::JSON::parse(&v.to_string()).map_err(|e| JsValue::from_str(&format!("{e:?}")))
+    }
+
+    /// `burin.batch({ ... })`: an options object read into a batch's own
+    /// fields, ready to be added to an atlas.
+    #[wasm_bindgen(js_name = burinBatch)]
+    pub fn batch(options: &JsValue) -> Result<JsValue, JsValue> {
+        let value = read(options)?;
+        let b = script::batch_from(&value).map_err(|e| JsValue::from_str(&e))?;
+        give(serde_json::to_value(b).unwrap_or_default())
+    }
+
+    /// `burin.water.lines({ ... })`, and the same for `ripples` and `dots`.
+    #[wasm_bindgen(js_name = burinWater)]
+    pub fn water(kind: &str, options: &JsValue) -> Result<JsValue, JsValue> {
+        let value = read(options)?;
+        let mut pass = script::water_from(&value, Some(kind)).map_err(|e| JsValue::from_str(&e))?;
+        let mut o = serde_json::to_value(&mut pass).unwrap_or_default();
+        if let Some(m) = o.as_object_mut() {
+            m.insert("kind".into(), serde_json::json!("water"));
+        }
+        give(o)
+    }
+
+    /// `burin.shore({ ... })`.
+    #[wasm_bindgen(js_name = burinShore)]
+    pub fn shore(options: &JsValue) -> Result<JsValue, JsValue> {
+        let value = read(options)?;
+        let s = script::shore_from(&value).map_err(|e| JsValue::from_str(&e))?;
+        let mut o = serde_json::to_value(s).unwrap_or_default();
+        if let Some(m) = o.as_object_mut() {
+            m.insert("kind".into(), serde_json::json!("shore"));
+        }
+        give(o)
+    }
+
+    /// The style parameters, as the editor's completion and help want them.
+    #[wasm_bindgen(js_name = burinParameters)]
+    pub fn parameters() -> Result<JsValue, JsValue> {
+        give(script::parameters())
+    }
+}
+
+/// Draw an atlas a script built: `atlas` is its list of batches and water
+/// passes, as `burinBatch` / `burinWater` / `burinShore` return them, or as
+/// `atlasToJson` saved them.
+#[wasm_bindgen]
+pub fn draw_atlas(
+    elev: Vec<f32>,
+    width: u32,
+    height: u32,
+    px_m: f32,
+    atlas: &str,
+    geo: &JsValue,
+    mm_per_px: Option<f32>,
+    water: &JsValue,
+) -> Result<Drawing, JsValue> {
+    let (w, h) = (width as usize, height as usize);
+    if elev.len() != w * h {
+        return Err(JsValue::from_str(&format!(
+            "elevation length {} ≠ {}×{}",
+            elev.len(),
+            w,
+            h
+        )));
+    }
+    let value: serde_json::Value = serde_json::from_str(atlas)
+        .map_err(|e| JsValue::from_str(&format!("invalid atlas JSON: {e}")))?;
+    let atlas = burin_map_core::script::atlas_from(&value).map_err(|e| JsValue::from_str(&e))?;
+    if atlas.batches.is_empty() {
+        return Err(JsValue::from_str("the atlas has no batches"));
+    }
+    let t0 = now_ms();
+    let wet = read_water(water, w, h)?;
+    let from_elev = atlas
+        .water
+        .is_some()
+        .then(|| elev.iter().map(|&e| (e <= 0.5) as u8 as f32).collect::<Vec<f32>>());
+    let coverage = wet
+        .as_ref()
+        .map(|(c, _, _)| c.as_slice())
+        .or(from_elev.as_deref());
+    let d = atlas.draw_with(&elev, coverage, w, h, px_m);
+    Ok(finish(
+        d,
+        now_ms() - t0,
+        Vec::new(),
+        geo,
+        mm_per_px,
+    ))
+}
+
 #[cfg(feature = "gpu")]
 thread_local! {
     static GPU: std::cell::RefCell<Option<std::rc::Rc<burin_map_core::gpu::Gpu>>> = const { std::cell::RefCell::new(None) };

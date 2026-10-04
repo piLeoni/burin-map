@@ -67,11 +67,11 @@ impl Pen {
         }
     }
 
-    /// `color` wins; otherwise a `color_expr` that is only a hex literal works.
+    /// `color` wins; otherwise a colour expression that is a constant does.
     pub fn with_expr(
         stroke: f32,
         color: Option<&str>,
-        color_expr: Option<&str>,
+        color_expr: Option<&crate::expr::Expr>,
         layer: Option<&str>,
     ) -> Self {
         Pen {
@@ -83,8 +83,12 @@ impl Pen {
         }
     }
 
-    /// A fill in `color` (or a hex `color_expr`), light grey without either.
-    pub fn filling(color: Option<&str>, color_expr: Option<&str>, layer: Option<&str>) -> Self {
+    /// A fill in `color` (or a constant `color_expr`), light grey without either.
+    pub fn filling(
+        color: Option<&str>,
+        color_expr: Option<&crate::expr::Expr>,
+        layer: Option<&str>,
+    ) -> Self {
         Pen {
             stroke: 0.0,
             color: resolve_color(color, color_expr).unwrap_or_else(|| "#dddddd".into()),
@@ -97,24 +101,35 @@ impl Pen {
 
 /// How one batch inks its dashes: the settings beside its style that pick
 /// each dash's pen.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Ink<'a> {
     /// `batch_stroke`, px: the width `width_expr` multiplies.
     pub stroke: f32,
     pub layer: Option<&'a str>,
     pub color: Option<&'a str>,
-    pub color_expr: Option<&'a str>,
-    pub width_expr: Option<&'a str>,
+    /// The colour per point; ignored when `color` is set.
+    pub expr: Option<crate::expr::Expr>,
+    /// The line width as a multiple of `stroke`, per point.
+    pub width: Option<crate::expr::Scalar>,
     /// 0 for any width; 2 or more rounds widths to that many pens.
     pub width_steps: u32,
     pub cap: Cap,
 }
 
-fn resolve_color(color: Option<&str>, color_expr: Option<&str>) -> Option<String> {
+fn resolve_color(color: Option<&str>, color_expr: Option<&crate::expr::Expr>) -> Option<String> {
     if let Some(c) = color.filter(|s| !s.is_empty()) {
         return Some(c.to_string());
     }
-    color_expr
-        .filter(|s| !s.is_empty())
-        .and_then(crate::color_expr::parse_hex)
+    // A colour expression that is a constant is the pen's colour; anything
+    // else is decided per dash, in `colorize_paths`.
+    color_expr.filter(|e| e.constant()).map(|e| {
+        crate::expr::rgb_hex(match e {
+            crate::expr::Expr::Color(c) => crate::expr::eval_color_of(
+                &crate::expr::Expr::Color(c.clone()),
+                &crate::expr::ColorCtx { w: 0, h: 0, elev: None, tone: None, dist: None, depth: None },
+                [0.0, 0.0],
+            ),
+            other => crate::expr::eval_color_of(other, &crate::expr::ColorCtx { w: 0, h: 0, elev: None, tone: None, dist: None, depth: None }, [0.0, 0.0]),
+        })
+    })
 }

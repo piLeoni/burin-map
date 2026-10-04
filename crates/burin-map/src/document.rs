@@ -123,6 +123,30 @@ impl Document {
     pub fn parse(s: &str) -> Result<Document, String> {
         let bare_list = strip_json5_comments(s).trim_start().starts_with('[');
         if bare_list {
+            // A bare list is either the batches of a document — a plain array
+            // whose batches have no `kind` — or an atlas a script built, where
+            // the water passes and the shore sit among them, each with a
+            // `kind`. Both are read here, so a script's drawing runs from the
+            // command line as it stands.
+            let value: serde_json::Value = json5::from_str(s).map_err(|e| e.to_string())?;
+            let is_atlas = value
+                .as_array()
+                .is_some_and(|a| a.iter().any(|i| i.get("kind").is_some()));
+            if is_atlas {
+                let mut atlas =
+                    burin_map_core::script::atlas_from(&value).map_err(|e| e.to_string())?;
+                let water = atlas.water.take().map(|w| WaterDoc {
+                    classes: None,
+                    shoreline: w.shoreline,
+                    source: None,
+                    batches: w.batches,
+                });
+                return Ok(Document {
+                    batches: atlas.batches,
+                    water,
+                    ..Default::default()
+                });
+            }
             let batches = burin_map_core::batches_inheriting(&mut json5::Deserializer::from_str(s))
                 .map_err(|e| e.to_string())?;
             return Ok(Document {

@@ -182,13 +182,12 @@ pub struct Batch {
     /// Stroke colour as `#rgb` or `#rrggbb`. Black when omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Colour from a small expression; see SYNTAX.md. Ignored when `color` is set.
+    /// How the colour is decided at each dash; ignored when `color` is set.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub color_expr: Option<String>,
-    /// Line width as a multiple of `batch_stroke`, from an expression like
-    /// `color_expr`'s scalars; see SYNTAX.md.
+    pub color_expr: Option<crate::expr::Expr>,
+    /// The line width at each dash, as a multiple of `batch_stroke`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub width_expr: Option<String>,
+    pub width_expr: Option<crate::expr::Scalar>,
     /// Rounds the widths from `width_expr` to this many, each its own layer;
     /// 0 keeps them as they come.
     #[serde(skip_serializing_if = "is_zero")]
@@ -218,6 +217,91 @@ pub(crate) fn is_zero(n: &u32) -> bool {
 }
 
 impl Batch {
+    /// A run of streamlines with the default style. The typed API's way in,
+    /// and what a document's `batches` becomes.
+    pub fn lines() -> Self {
+        Batch::along(Style::default())
+    }
+
+    /// Stippling, denser where the shading is darker: a dot every `space` px.
+    pub fn dots() -> Self {
+        Batch {
+            draw: Draw::Dots,
+            style: Style {
+                water_size: LAND_DOT,
+                ..Style::default()
+            },
+            ..Batch::along(Style::default())
+        }
+    }
+
+    /// A filled area over `ground`, its own rings. `color` is the ink; a fill
+    /// with none is left light grey.
+    pub fn filling(color: Option<&str>, color_expr: Option<crate::expr::Expr>, name: Option<&str>) -> Self {
+        Batch {
+            name: name.map(str::to_string),
+            color: color.map(str::to_string),
+            color_expr,
+            draw: Draw::Fill,
+            ..Batch::along(Style::default())
+        }
+    }
+
+    /// The batch's name in reports and as its layer.
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = Some(name.to_string());
+        self
+    }
+
+    /// The colour every dash is inked with, as `#rgb` or `#rrggbb`.
+    pub fn color(mut self, c: &str) -> Self {
+        self.color = Some(c.to_string());
+        self.color_expr = None;
+        self
+    }
+
+    /// The colour at each dash, from a tree; wins over [`Batch::color`].
+    pub fn shade(mut self, e: impl Into<crate::expr::Expr>) -> Self {
+        self.color_expr = Some(e.into());
+        self
+    }
+
+    /// The width at each dash, as a multiple of `style.batch_stroke`.
+    pub fn width(mut self, e: impl Into<crate::expr::Scalar>) -> Self {
+        self.width_expr = Some(e.into());
+        self
+    }
+
+    /// How the ends of the dashes look.
+    pub fn cap(mut self, cap: Cap) -> Self {
+        self.cap = cap;
+        self
+    }
+
+    /// The field the streamlines run along, degrees.
+    pub fn angle(mut self, deg: f32) -> Self {
+        self.angle = deg;
+        self
+    }
+
+    /// What a fill is drawn over: land, or the sea.
+    pub fn ground(mut self, g: Ground) -> Self {
+        self.ground = g;
+        self
+    }
+
+    /// How many widths `width_expr` is rounded to, each with its own layer.
+    pub fn width_steps(mut self, n: u32) -> Self {
+        self.width_steps = n;
+        self
+    }
+
+    /// One style parameter by name, as a document's `style` block does.
+    pub fn set(mut self, name: &str, v: f64) -> Self {
+        self.style.set(name, v);
+        self
+    }
+
     pub fn along(style: Style) -> Self {
         Batch {
             name: None,
@@ -256,8 +340,8 @@ impl Batch {
             stroke: self.style.batch_stroke,
             layer: self.layer.as_deref(),
             color: self.color.as_deref(),
-            color_expr: self.color_expr.as_deref(),
-            width_expr: self.width_expr.as_deref(),
+            expr: self.color_expr.clone(),
+            width: self.width_expr.clone(),
             width_steps: self.width_steps,
             cap: self.cap,
         }
@@ -321,9 +405,9 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         #[serde(default)]
         color: Option<String>,
         #[serde(default)]
-        color_expr: Option<String>,
+        color_expr: Option<crate::expr::Expr>,
         #[serde(default)]
-        width_expr: Option<String>,
+        width_expr: Option<crate::expr::Scalar>,
         #[serde(default)]
         width_steps: u32,
         #[serde(default)]
@@ -351,9 +435,6 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
             return Err(serde::de::Error::custom(
                 "where on a land batch is for fills (draw: fill)",
             ));
-        }
-        if let Some(e) = &g.width_expr {
-            crate::color_expr::check_width(e).map_err(serde::de::Error::custom)?;
         }
         let mut style = Style::default();
         if g.draw == Draw::Dots {
@@ -442,6 +523,7 @@ pub fn to_json_batches(batches: &[Batch]) -> String {
 #[cfg(test)]
 mod json_tests {
     use super::*;
+    use crate::expr::{Bin, Field, Func, Scalar};
 
     #[test]
     fn round_trip_batches() {
@@ -452,7 +534,25 @@ mod json_tests {
                 layer: None,
                 color: None,
                 color_expr: None,
-                width_expr: Some("lerp(2, 0.5, clamp(elev / 500, 0, 1))".into()),
+                width_expr: Some(Scalar::Call(
+                Func::Lerp,
+                vec![
+                    Scalar::Lit(2.0),
+                    Scalar::Lit(0.5),
+                    Scalar::Call(
+                        Func::Clamp,
+                        vec![
+                            Scalar::Bin(
+                                Bin::Div,
+                                Box::new(Scalar::Field(Field::Elev)),
+                                Box::new(Scalar::Lit(500.0)),
+                            ),
+                            Scalar::Lit(0.0),
+                            Scalar::Lit(1.0),
+                        ],
+                    ),
+                ],
+            )),
                 width_steps: 3,
                 cap: Cap::RoundInside,
                 angle: 90.0,
@@ -556,10 +656,22 @@ mod json_tests {
     }
 
     #[test]
-    fn width_expr_is_checked() {
-        assert!(from_json_batches(r#"[{"width_expr": "lerp(2, 0.5, tone)"}]"#).is_ok());
-        assert!(from_json_batches(r#"[{"width_expr": "lerp(#000, #fff, tone)"}]"#).is_err());
+    fn width_expr_is_read_as_a_scalar() {
+        assert!(from_json_batches(r#"[{"width_expr": ["lerp", 2, 0.5, "tone"]}]"#).is_ok());
+        assert!(from_json_batches(r##"[{"width_expr": ["lerp", "#000", "#fff", "tone"]}]"##).is_ok());
+        assert!(from_json_batches(r#"[{"width_expr": ["nope", 1]}]"#).is_err());
         assert!(from_json_batches(r#"[{"cap": "pointy"}]"#).is_err());
+    }
+
+    #[test]
+    fn colour_expr_is_read_as_a_colour() {
+        let b = from_json_batches(
+            r##"[{"color_expr": ["lerp", "#e8dcc8", "#2a1810", "tone"]},
+                 {"color_expr": 0.25}]"##,
+        )
+        .unwrap();
+        assert!(matches!(b[0].color_expr, Some(crate::expr::Expr::Color(_))));
+        assert!(matches!(b[1].color_expr, Some(crate::expr::Expr::Shade(_))));
     }
 
     #[test]

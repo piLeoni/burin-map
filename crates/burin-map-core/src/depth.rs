@@ -99,24 +99,26 @@ pub fn build_depth_grid(elev: &[f32], coverage: &[f32], override_: Option<&[f32]
 pub fn needs_depth(batches: &[WaterBatch], shoreline: Option<&Shoreline>) -> bool {
     batches.iter().any(batch_needs_depth)
         || shoreline.is_some_and(|s| {
-            expr_uses_depth(s.color_expr.as_deref()) || expr_uses_depth(s.width_expr.as_deref())
+            expr_uses_depth(s.color_expr.as_ref()) || width_uses_depth(s.width_expr.as_ref())
         })
 }
 
 fn batch_needs_depth(b: &WaterBatch) -> bool {
     b.r#where.is_active()
-        || expr_uses_depth(b.color_expr.as_deref())
-        || expr_uses_depth(b.width_expr.as_deref())
+        || expr_uses_depth(b.color_expr.as_ref())
+        || width_uses_depth(b.width_expr.as_ref())
 }
 
-/// True when a colour or width expression references the `depth` scalar.
+/// True when a colour or width expression reads the `depth` grid.
 #[must_use]
-pub fn expr_uses_depth(expr: Option<&str>) -> bool {
-    let Some(s) = expr.filter(|t| !t.is_empty()) else {
-        return false;
-    };
-    s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .any(|w| w == "depth")
+pub fn expr_uses_depth(expr: Option<&crate::expr::Expr>) -> bool {
+    expr.is_some_and(|e| e.uses(crate::expr::Field::Depth))
+}
+
+/// As [`expr_uses_depth`], for a width expression.
+#[must_use]
+pub fn width_uses_depth(width: Option<&crate::expr::Scalar>) -> bool {
+    width.is_some_and(|w| crate::expr::Expr::Scalar(w.clone()).uses(crate::expr::Field::Depth))
 }
 
 /// Separate network fetch (GEBCO, custom tiles). `terrarium` / `auto` reuse elevation.
