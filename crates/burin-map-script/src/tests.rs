@@ -114,10 +114,15 @@ fn an_embedded_builder_runs_in_another_context() {
     assert_eq!(items[0]["angle"].as_f64(), Some(90.0));
     assert_eq!(items[1]["kind"], json!("water"));
     assert_eq!(items[2]["kind"], json!("shore"));
+    // `lines` is the shore's own field, not a style parameter: the atlas and the
+    // engine's own shape both carry the second line.
+    assert_eq!(items[2]["lines"], json!(2));
     // And it really is the engine's own shape.
     let parsed = burin_map_core::script::atlas_from(&atlas).expect("the engine reads it");
     assert_eq!(parsed.batches.len(), 1);
-    assert!(parsed.water.is_some(), "the sea is there");
+    let water = parsed.water.as_ref().expect("the sea is there");
+    let shore = water.shoreline.as_ref().expect("the shore is there");
+    assert_eq!(shore.lines, 2, "two lines follow the coast");
 }
 
 #[test]

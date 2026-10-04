@@ -14,6 +14,7 @@
 import atlases from '../presets/atlases.json'
 import contours from '../../../presets/contours.js?raw'
 import downhill from '../../../presets/downhill.js?raw'
+import engravedSea from '../../../presets/engraved-sea.js?raw'
 import seaDepth from '../../../presets/sea-depth.js?raw'
 import sculptedHills from '../../../presets/scripted-hills.js?raw'
 import contourBelts from '../../../presets/contour-belts.js?raw'
@@ -28,6 +29,7 @@ function titleOf(source) {
 const SHIPPED = [
   { id: 'contours', screen: 'fast', plot: 'quick', blurb: 'contour lines, lit and shaded', doc: contours },
   { id: 'downhill', screen: 'medium', plot: 'medium', blurb: 'lines running down every slope, denser in shadow; a stippled sea', doc: downhill },
+  { id: 'engraved-sea', screen: 'medium', plot: 'slow', blurb: 'crosshatched hills, coast lines, then a sea of evenly waving currents', doc: engravedSea },
   { id: 'sea-depth', screen: 'fast', plot: 'quick', blurb: 'the seabed in contour lines, and nothing on land', doc: seaDepth },
   { id: 'scripted-hills', screen: 'fast', plot: 'very slow', blurb: 'a loop over angles: crosshatching that tightens with the slope', doc: sculptedHills },
   { id: 'contour-belts', screen: 'fast', plot: 'slow', blurb: 'a loop in JavaScript: a coloured belt for every 100 m of height and depth', doc: contourBelts },

@@ -131,11 +131,12 @@
     /** The shore, the zero contour; or its own style. */
     shore(options) {
       const o = object(options, "burin.shore");
-      const { style, color: c, shade, width, ...rest } = o;
+      const { style, color: c, shade, width, lines, ...rest } = o;
       const out = { kind: "shore" };
       if (c !== undefined) out.color = color(c, "burin.shore color");
       if (shade !== undefined) out.shade = color(shade, "burin.shore shade");
       if (width !== undefined) out.width = scalar(width, "burin.shore width");
+      if (lines !== undefined) out.lines = number(lines, "burin.shore lines");
       out.style = { ...styleParams(style), ...styleParams(rest) };
       return push(B.shore(JSON.stringify(out)));
     },
