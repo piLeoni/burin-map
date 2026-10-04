@@ -37,6 +37,25 @@ const LIBRARY: &str = include_str!("library.js");
 pub const SCRIPT_PATH: &str = "document.js";
 const LIBRARY_PATH: &str = "burin:library";
 
+thread_local! {
+    /// The path user positions are read from. `document.js` for a document run
+    /// standalone; the embedding host sets its own script's path, so a burin
+    /// callback's errors point into the host's file.
+    static ACTIVE_PATH: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The path positions are read from now.
+fn active_path() -> String {
+    ACTIVE_PATH.with(|p| {
+        let p = p.borrow();
+        if p.is_empty() {
+            SCRIPT_PATH.to_string()
+        } else {
+            p.clone()
+        }
+    })
+}
+
 /// The most loop iterations one loop may run, and the deepest recursion: a
 /// mistaken `while (true)` ends with an error instead of hanging the page.
 pub const LOOP_LIMIT: u64 = 1_000_000;
@@ -86,6 +105,7 @@ pub fn evaluate_document(source: &str) -> Result<Document, ScriptError> {
     SAVED.with(|s| *s.borrow_mut() = None);
     AREA.with(|a| *a.borrow_mut() = None);
     FAILURE.with(|f| *f.borrow_mut() = None);
+    ACTIVE_PATH.with(|p| p.borrow_mut().clear());
     let mut ctx = Context::default();
     let limits = ctx.runtime_limits_mut();
     limits.set_loop_iteration_limit(LOOP_LIMIT);
@@ -109,10 +129,18 @@ thread_local! {
 }
 
 /// The sandbox, the natives and the library.
-fn install(ctx: &mut Context) -> JsResult<()> {
+pub fn install(ctx: &mut Context) -> JsResult<()> {
     ctx.eval(Source::from_bytes(
         "delete globalThis.Date; delete Math.random; delete globalThis.WeakRef; delete globalThis.FinalizationRegistry;",
     ))?;
+    register_natives(ctx)?;
+    ctx.eval(Source::from_bytes(LIBRARY).with_path(std::path::Path::new(LIBRARY_PATH)))?;
+    Ok(())
+}
+
+/// Register the `__burin` natives the library is built on. Split out so the
+/// library can be re-evaluated over a fresh copy of them.
+fn register_natives(ctx: &mut Context) -> JsResult<()> {
     let natives: [(&str, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 7] = [
         ("batch", 1, native_batch),
         ("water", 1, native_water),
@@ -131,8 +159,59 @@ fn install(ctx: &mut Context) -> JsResult<()> {
         b.set(js_string!(name), function, false, ctx)?;
     }
     ctx.register_global_property(js_string!("__burin"), b, boa_engine::property::Attribute::all())?;
-    ctx.eval(Source::from_bytes(LIBRARY).with_path(std::path::Path::new(LIBRARY_PATH)))?;
     Ok(())
+}
+
+/// Mount the burin library in a context that already exists, for embedding:
+/// the same `burin` object a document sees, so a burin script written for the
+/// page runs unchanged inside another host's script.
+///
+/// The library keeps the calls it has collected in a per-run closure, so a
+/// host that runs more than one document re-evaluates it; see [`run_builder`].
+pub fn mount(ctx: &mut Context) -> JsResult<()> {
+    install(ctx)
+}
+
+/// Run `callback` — a burin document written as a JavaScript function — with
+/// the same `burin` object a document script sees, and return the atlas it
+/// built, as JSON.
+///
+/// This is the embedding form of [`evaluate`]: the callback is a real function
+/// in the caller's own engine, so its positions, its type errors and its
+/// editor hints are the caller's, and nothing is passed as text. The library
+/// is re-mounted first, so every call starts from an empty document.
+pub fn run_builder(ctx: &mut Context, callback: &JsValue, path: &str) -> Result<Value, ScriptError> {
+    if callback.as_callable().is_none() {
+        return Err(ScriptError { message: "the burin document must be a function".into(), at: None });
+    }
+    ACTIVE_PATH.with(|p| *p.borrow_mut() = path.to_string());
+    // The library leaves its builder on `__burinDoc` (and sets `burin` too,
+    // for a standalone document); a host may already use `burin`, so read the
+    // private name and leave the host's own alone.
+    register_natives(ctx).map_err(|e| ScriptError { message: e.to_string(), at: None })?;
+    let _ = ctx.eval(Source::from_bytes(LIBRARY).with_path(std::path::Path::new(LIBRARY_PATH)))
+        .map_err(|e| script_error(e, "", ctx));
+    let burin = ctx
+        .eval(Source::from_bytes("globalThis.__burinDoc").with_path(std::path::Path::new(LIBRARY_PATH)))
+        .map_err(|e| ScriptError { message: e.to_string(), at: None })?;
+    let result = (|| {
+        callback
+            .as_callable()
+            .expect("checked above")
+            .call(&JsValue::undefined(), &[burin.clone()], ctx)
+            .map_err(|e| script_error(e, "", ctx))?;
+        let json = burin
+            .as_object()
+            .and_then(|o| o.get(js_string!("json"), ctx).ok())
+            .ok_or_else(|| ScriptError { message: "the burin library is not mounted".into(), at: None })?;
+        json.as_callable()
+            .ok_or_else(|| ScriptError { message: "burin.json is missing".into(), at: None })?
+            .call(&burin, &[], ctx)
+            .and_then(|v| v.to_json(ctx))
+            .map_err(|e| script_error(e, "", ctx))?
+            .ok_or_else(|| ScriptError { message: "the burin document built nothing to draw".into(), at: None })
+    })();
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +223,7 @@ fn user_at(ctx: &mut Context) -> Option<At> {
     let error = ctx.intrinsics().constructors().error().constructor();
     let error = error.construct(&[], None, ctx).ok()?;
     let stack = error.get(js_string!("stack"), ctx).ok()?.to_string(ctx).ok()?.to_std_string_escaped();
-    let marker = format!("({SCRIPT_PATH}:");
+    let marker = format!("({}:", active_path());
     stack.lines().find_map(|line| {
         let spot = &line[line.find(&marker)? + marker.len()..];
         let (l, c) = spot.trim_end_matches(')').split_once(':')?;
@@ -265,7 +344,7 @@ fn script_error(err: JsError, source: &str, ctx: &mut Context) -> ScriptError {
         }
     }
     // Runtime errors: `TypeError: … (document.js:2:7)`.
-    let marker = format!("({SCRIPT_PATH}:");
+    let marker = format!("({}:", active_path());
     if let Some(i) = first.rfind(&marker) {
         let spot = &first[i + marker.len()..first.len().saturating_sub(1)];
         if let Some((line, column)) = spot.split_once(':') {

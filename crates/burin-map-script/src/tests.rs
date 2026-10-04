@@ -97,6 +97,30 @@ fn a_syntax_error_has_a_line() {
 }
 
 #[test]
+fn an_embedded_builder_runs_in_another_context() {
+    // The embedding form: the burin document is a real function in the host's
+    // own engine, run with the same `burin` object, and read back as the atlas.
+    use boa_engine::{Context, Source};
+    let mut ctx = Context::default();
+    crate::install(&mut ctx).expect("the library mounts");
+    let builder = ctx
+        .eval(Source::from_bytes(
+            "(function (b) { b.batch({ angle: 90 }); b.water('dots', { color: '#9db4c0' }); b.shore({ lines: 2 }); })",
+        ))
+        .expect("the function evaluates");
+    let atlas = crate::run_builder(&mut ctx, &builder, "profile.js").expect("the builder runs");
+    let items = atlas.as_array().expect("an atlas is a list");
+    assert_eq!(items.len(), 3, "a batch, a water pass and the shore");
+    assert_eq!(items[0]["angle"].as_f64(), Some(90.0));
+    assert_eq!(items[1]["kind"], json!("water"));
+    assert_eq!(items[2]["kind"], json!("shore"));
+    // And it really is the engine's own shape.
+    let parsed = burin_map_core::script::atlas_from(&atlas).expect("the engine reads it");
+    assert_eq!(parsed.batches.len(), 1);
+    assert!(parsed.water.is_some(), "the sea is there");
+}
+
+#[test]
 fn every_shipped_preset_runs() {
     // The template scripts the CLI and the page both offer. A broken one is a
     // broken first impression, so they are all run here.

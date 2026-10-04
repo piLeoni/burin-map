@@ -255,5 +255,6 @@
     return out;
   }
 
-  globalThis.burin = Object.freeze(burin);
+  globalThis.__burinDoc = burin;
+  if (!globalThis.burin) globalThis.burin = Object.freeze(burin);
 })();
