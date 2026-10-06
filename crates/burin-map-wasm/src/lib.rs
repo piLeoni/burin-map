@@ -656,7 +656,8 @@ pub fn draw_atlas(
         .as_ref()
         .map(|(c, _, _)| c.as_slice())
         .or(from_elev.as_deref());
-    let d = atlas.draw_with(&elev, coverage, w, h, px_m);
+    let px_per_mm = mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0);
+    let d = atlas.draw_with(&elev, coverage, w, h, px_m, px_per_mm);
     Ok(finish(
         d,
         now_ms() - t0,

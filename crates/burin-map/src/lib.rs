@@ -154,11 +154,13 @@ pub fn draw_with_water(
     let style = &batches[0].style;
     let mut width = frame.px;
     let mut mm_per_px = None;
+    let mut px_per_mm = 1.0; // Default: 1 px/mm
     if let Some([fw, fh]) = frame.size_mm {
         let k = frame.pen_width / style.batch_stroke as f64;
         let width_mm = fw.min(fh / projected_aspect(bounds));
         width = (width_mm / k).round() as usize;
         mm_per_px = Some(k);
+        px_per_mm = 1.0 / k;
     }
     let dem = dem::load_dem_with(bounds, width, &progress)?;
     let (w, h) = (dem.width, dem.height);
@@ -201,6 +203,7 @@ pub fn draw_with_water(
         batches,
         layer.as_ref(),
         &Steps(&progress),
+        px_per_mm as f32,
     );
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });

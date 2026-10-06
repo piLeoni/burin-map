@@ -56,7 +56,7 @@ impl Atlas {
     /// Draw it over an elevation grid, `width` × `height` px at `px_m` metres
     /// per pixel. The sea comes from the elevation, as `draw_batches` does.
     pub fn draw(&self, elev: &[f32], width: usize, height: usize, px_m: f32) -> Drawing {
-        self.draw_with(elev, None, width, height, px_m)
+        self.draw_with(elev, None, width, height, px_m, 1.0)
     }
 
     /// As [`Atlas::draw`], on a water coverage grid given from outside.
@@ -67,7 +67,8 @@ impl Atlas {
         width: usize,
         height: usize,
         px_m: f32,
+        px_per_mm: f32,
     ) -> Drawing {
-        crate::draw_atlas(self, elev, coverage, width, height, px_m)
+        crate::draw_atlas(self, elev, coverage, width, height, px_m, px_per_mm)
     }
 }

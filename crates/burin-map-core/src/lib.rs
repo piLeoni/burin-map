@@ -126,7 +126,7 @@ pub fn draw_batches(
             build_fields_with(elev, width, height, px_m, &batches[i].style, cov)
         })
         .collect();
-    draw_fields(&fields, batches, elev)
+    draw_fields(&fields, batches, elev, 1.0)
 }
 
 /// An [`Atlas`] over an elevation grid: the water coverage worked out from
@@ -138,6 +138,7 @@ pub fn draw_atlas(
     width: usize,
     height: usize,
     px_m: f32,
+    px_per_mm: f32,
 ) -> Drawing {
     let own = if atlas.water.is_some() {
         // The land's mask when there is one, else from the elevation itself.
@@ -172,6 +173,7 @@ pub fn draw_atlas(
         elev,
         || 0.0,
         &(),
+        px_per_mm,
     )
     .0
 }
@@ -262,7 +264,7 @@ pub fn draw_batches_auto(
                 g.build_fields_with_blocking(elev, width, height, px_m, &batches[i].style, cov)
             })
             .collect();
-        return draw_fields(&fields, batches, elev);
+        return draw_fields(&fields, batches, elev, 1.0);
     }
     draw_batches(elev, width, height, px_m, batches)
 }
@@ -277,7 +279,7 @@ pub fn draw_batches_auto_with(
     batches: &[Batch],
     water: Option<&WaterLayer>,
 ) -> Drawing {
-    draw_batches_auto_told(elev, width, height, px_m, batches, water, &())
+    draw_batches_auto_told(elev, width, height, px_m, batches, water, &(), 1.0)
 }
 
 /// [`draw_batches_auto_with`], telling `progress` each step as it goes,
@@ -290,6 +292,7 @@ pub fn draw_batches_auto_told(
     batches: &[Batch],
     water: Option<&WaterLayer>,
     progress: &dyn Progress,
+    px_per_mm: f32,
 ) -> Drawing {
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
@@ -307,7 +310,7 @@ pub fn draw_batches_auto_told(
             })
             .collect();
         progress.reach(Step::Terrain, Stage::Done);
-        return draw_fields_timed(&fields, batches, water, elev, || 0.0, progress).0;
+        return draw_fields_timed(&fields, batches, water, elev, || 0.0, progress, px_per_mm).0;
     }
     let fields: Vec<Fields> = firsts
         .iter()
@@ -317,13 +320,13 @@ pub fn draw_batches_auto_told(
         })
         .collect();
     progress.reach(Step::Terrain, Stage::Done);
-    draw_fields_timed(&fields, batches, water, elev, || 0.0, progress).0
+    draw_fields_timed(&fields, batches, water, elev, || 0.0, progress, px_per_mm).0
 }
 
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`): one per
 /// entry of [`terrain_groups`], from that batch's style.
-pub fn draw_fields(fields: &[Fields], batches: &[Batch], elev: &[f32]) -> Drawing {
-    draw_fields_timed(fields, batches, None, elev, || 0.0, &()).0
+pub fn draw_fields(fields: &[Fields], batches: &[Batch], elev: &[f32], px_per_mm: f32) -> Drawing {
+    draw_fields_timed(fields, batches, None, elev, || 0.0, &(), px_per_mm).0
 }
 
 /// Milliseconds per phase of a draw, in the order they ran. Phases that run
@@ -345,6 +348,7 @@ pub fn draw_fields_timed(
     elev: &[f32],
     now: fn() -> f64,
     progress: &dyn Progress,
+    px_per_mm: f32,
 ) -> (Drawing, Timings) {
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (fields[0].w, fields[0].h);
@@ -362,9 +366,10 @@ pub fn draw_fields_timed(
                 water.map(|wl| wl.coverage),
                 now,
                 progress,
+                px_per_mm,
             )
         },
-        || water.map(|wl| trace_water(wl, width, height, depth, now, progress)),
+        || water.map(|wl| trace_water(wl, width, height, depth, now, progress, px_per_mm)),
     );
     // Layers go up in batch order. Equal pens share a run, but never across
     // a fill, which would then cover what it should not.
@@ -426,6 +431,7 @@ fn trace_land(
     water: Option<&[f32]>,
     now: fn() -> f64,
     progress: &dyn Progress,
+    px_per_mm: f32,
 ) -> Traced {
     use rayon::prelude::*;
     let (firsts, of) = terrain_groups(batches);
@@ -474,7 +480,7 @@ fn trace_land(
             };
             let ink = Ink {
                 layer: Some(&layer),
-                ..b.ink()
+                ..b.ink_scaled(px_per_mm)
             };
             let ink = expr::colorize_paths(paths, &ink, &ctx);
             at(Stage::Done);
@@ -491,6 +497,7 @@ fn trace_water(
     depth: Option<&[f32]>,
     now: fn() -> f64,
     progress: &dyn Progress,
+    px_per_mm: f32,
 ) -> Traced {
     use rayon::prelude::*;
     progress.reach(Step::Shore, Stage::Start);
@@ -516,7 +523,7 @@ fn trace_water(
             let layer = b.layer_name(i);
             let ink = Ink {
                 layer: Some(&layer),
-                ..b.ink()
+                ..b.ink_scaled(px_per_mm)
             };
             let t0 = now();
             if b.draw != water::Draw::Lines {
@@ -585,7 +592,7 @@ fn trace_water(
         progress.reach(Step::Shoreline, Stage::Done);
         lines.extend(l);
         let ctx = water_ctx(w, h, None, &dist, depth);
-        paths.extend(expr::colorize_paths(p, &sh.ink(), &ctx));
+        paths.extend(expr::colorize_paths(p, &sh.ink_scaled(px_per_mm), &ctx));
     }
     (lines, paths, timings)
 }
@@ -917,8 +924,8 @@ mod tests {
         }
         assert_eq!(cpu.walkable, gpu.walkable, "walkable");
 
-        let dc = draw_fields(std::slice::from_ref(&cpu), &[Batch::along(st.clone())], &e);
-        let dg = draw_fields(std::slice::from_ref(&gpu), &[Batch::along(st)], &e);
+        let dc = draw_fields(std::slice::from_ref(&cpu), &[Batch::along(st.clone())], &e, 1.0);
+        let dg = draw_fields(std::slice::from_ref(&gpu), &[Batch::along(st)], &e, 1.0);
         let ratio = dg.lines.len() as f32 / dc.lines.len() as f32;
         assert!(
             (0.8..1.25).contains(&ratio),
@@ -1162,7 +1169,7 @@ mod tests {
             .map(|&i| build_fields(&elev, w, h, 200.0, &batches[i].style))
             .collect();
         let log = Log(Default::default());
-        draw_fields_timed(&fields, &batches, None, &elev, || 0.0, &log);
+        draw_fields_timed(&fields, &batches, None, &elev, || 0.0, &log, 1.0);
         let log = log.0.into_inner().unwrap();
         let stages = |step| -> Vec<Stage> {
             log.iter()

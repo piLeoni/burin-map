@@ -105,8 +105,12 @@ impl WaterBatch {
     }
 
     pub fn ink(&self) -> Ink<'_> {
+        self.ink_scaled(1.0)
+    }
+
+    pub fn ink_scaled(&self, px_per_mm: f32) -> Ink<'_> {
         Ink {
-            stroke: self.style.batch_stroke,
+            stroke: self.style.batch_stroke * px_per_mm,
             layer: self.layer.as_deref(),
             color: self.color.as_deref(),
             expr: self.color_expr.clone(),
@@ -291,8 +295,12 @@ pub struct Shoreline {
 
 impl Shoreline {
     pub fn ink(&self) -> Ink<'_> {
+        self.ink_scaled(1.0)
+    }
+
+    pub fn ink_scaled(&self, px_per_mm: f32) -> Ink<'_> {
         Ink {
-            stroke: self.style.batch_stroke,
+            stroke: self.style.batch_stroke * px_per_mm,
             layer: self.layer.as_deref().or(Some(crate::progress::SHORELINE)),
             color: self.color.as_deref(),
             expr: self.color_expr.clone(),
