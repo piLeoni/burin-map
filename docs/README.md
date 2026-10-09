@@ -5,7 +5,7 @@ Design notes and specifications that are not yet (or not fully) reflected in
 
 | Document | Status |
 |----------|--------|
-| [dash-style-model.md](dash-style-model.md) | **Proposed** — clearer mental model for along-line dash (duty, period, irregularity, flat lottery) |
+| [dash-style-model.md](dash-style-model.md) | **Proposed** — dash + spacing mental model (duty, period, px spacing, quantization) |
 | [land-edge-fray.md](land-edge-fray.md) | **Proposed** — fray/fade land contours toward a host mask boundary (draw.land city ground) |
 
 User-facing syntax and parameters live in [SYNTAX.md](../SYNTAX.md). Session
