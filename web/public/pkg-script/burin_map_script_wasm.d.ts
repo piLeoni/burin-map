@@ -2,8 +2,8 @@
 /* eslint-disable */
 
 /**
- * Run `source`; the atlas as JSON, or an error carrying `line` and `column`
- * when the script position is known.
+ * Run `source`; `{ "atlas": …, "area": … }` as JSON (same shape as the Node
+ * binding), or an error carrying `line` and `column` when the position is known.
  */
 export function evaluate(source: string): string;
 

@@ -9,7 +9,8 @@ import { docFromHash, docToHash } from '../lib/doc'
 import { areaFromFrame, frameFromArea } from '../lib/frame'
 import Panel from './Panel'
 import {
-  areaAtom, atlasAtom, cameraRequestAtom, frameAtom, mapViewAtom, scriptAtom,
+  appliedScriptAtom, areaAtom, atlasAtom, cameraRequestAtom, editorAtom, frameAtom,
+  loadPersistedDocument, mapViewAtom,
 } from '../state'
 
 const PHASE_LABEL = {
@@ -43,8 +44,11 @@ function takeDocFromHash() {
 /*  Sidebar — the document, as a JavaScript script                   */
 /* ---------------------------------------------------------------- */
 
+let documentBooted = false
+
 export default function Sidebar({ open, onClose, status }) {
-  const [script, setScript] = useAtom(scriptAtom)
+  const [editor, setEditor] = useAtom(editorAtom)
+  const [applied, setApplied] = useAtom(appliedScriptAtom)
   const atlas = useAtomValue(atlasAtom)
   const [, setAtlas] = useAtom(atlasAtom)
   const [, setArea] = useAtom(areaAtom)
@@ -52,16 +56,13 @@ export default function Sidebar({ open, onClose, status }) {
   const [frame, setFrame] = useAtom(frameAtom)
   const setCameraRequest = useSetAtom(cameraRequestAtom)
 
-  const [draft, setDraft] = useState(null)   // text typed but not applied yet
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(null)   // { text, error? }
   const fileRef = useRef(null)
   const presetMenuRef = useRef(null)
   const noticeTimer = useRef(0)
   const applyDraftRef = useRef(() => {})
-
-  const shown = draft ?? script
-  const dirty = draft != null && draft !== script
+  const dirty = editor !== applied
 
   const flash = (text, isError = false) => {
     clearTimeout(noticeTimer.current)
@@ -92,33 +93,48 @@ export default function Sidebar({ open, onClose, status }) {
 
   // ---------- init ----------
   useEffect(() => {
-    // A #d=… fragment wins over whatever is in localStorage; otherwise the
-    // app opens on the first preset (with its atlas precomputed).
+    if (documentBooted) return
+    documentBooted = true
+
+    // A #d=… fragment wins over whatever is in localStorage; otherwise read
+    // storage synchronously so we never overwrite a saved document with the preset.
     const fromHash = takeDocFromHash()
     if (fromHash) {
       const source = scriptFromLink(fromHash)
-      setScript(source)
+      setEditor(source)
+      setApplied(source)
       setAtlas(docToAtlas(fromHash))
       applyArea(fromHash.area ?? null)
       return
     }
-    if (!script) {
+
+    const stored = loadPersistedDocument()
+    if (!stored.editor.trim()) {
       const p = PRESETS[0]
-      setScript(p.doc)
+      setEditor(p.doc)
+      setApplied(p.doc)
       if (p.atlas) {
         setAtlas(p.atlas)
         applyArea(null)
       }
+      return
     }
+
+    setEditor(stored.editor)
+    setApplied(stored.applied)
+    const draw = stored.applied.trim() ? stored.applied : stored.editor
+    const preset = PRESETS.find((p) => p.doc === draw)
+    const precomputed = preset?.atlas ? { atlas: preset.atlas, area: null } : null
+    loadScript(draw, precomputed ? { precomputed } : {})
+      .catch((e) => setError(e.message || 'Can\'t read this'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const applyDraft = async () => {
     if (!dirty) return
     try {
-      await loadScript(draft)
-      setScript(draft)
-      setDraft(null)
+      await loadScript(editor)
+      setApplied(editor)
       setError('')
     } catch (e) {
       setError(e.message || 'Can\'t read this')
@@ -127,15 +143,15 @@ export default function Sidebar({ open, onClose, status }) {
   applyDraftRef.current = applyDraft
 
   const revertDraft = () => {
-    setDraft(null)
+    setEditor(applied)
     setError('')
   }
 
   const loadPreset = async (p) => {
     presetMenuRef.current?.removeAttribute('open')
-    setDraft(null)
     setError('')
-    setScript(p.doc)
+    setEditor(p.doc)
+    setApplied(p.doc)
     try {
       await loadScript(p.doc, p.atlas ? { precomputed: { atlas: p.atlas, area: null } } : {})
       flash(`Loaded ${p.label}`)
@@ -152,8 +168,8 @@ export default function Sidebar({ open, onClose, status }) {
       const looksLikeLink = /(?:^|[#&])(d|doc)=/.test(text.trim())
       const source = looksLikeLink ? scriptFromLink(docFromHash(text.trim().replace(/^[^#]*/, ''))) : text
       await loadScript(source)
-      setScript(source)
-      setDraft(null)
+      setEditor(source)
+      setApplied(source)
       setError('')
       flash(`Loaded ${file.name}`)
     } catch (e) {
@@ -162,7 +178,7 @@ export default function Sidebar({ open, onClose, status }) {
   }
 
   const download = () => {
-    const url = URL.createObjectURL(new Blob([shown], { type: 'text/javascript' }))
+    const url = URL.createObjectURL(new Blob([editor], { type: 'text/javascript' }))
     const a = document.createElement('a')
     a.href = url
     a.download = 'burin-map.js'
@@ -197,8 +213,8 @@ export default function Sidebar({ open, onClose, status }) {
       const doc = takeDocFromHash()
       if (!doc) return
       const source = scriptFromLink(doc)
-      setScript(source)
-      setDraft(null)
+      setEditor(source)
+      setApplied(source)
       loadScript(source, { precomputed: { atlas: docToAtlas(doc), area: doc.area ?? null } })
         .then(() => flash('Opened URL'))
         .catch((e) => flash(`Can't open this URL: ${e.message || 'unreadable'}`, true))
@@ -246,7 +262,7 @@ export default function Sidebar({ open, onClose, status }) {
           <button type="button" {...KEY} title="Open a .js document" onClick={() => fileRef.current?.click()}>
             import
           </button>
-          <button type="button" {...KEY} title="Save as burin-map.js" disabled={!shown} onClick={download}>
+          <button type="button" {...KEY} title="Save as burin-map.js" disabled={!editor} onClick={download}>
             download
           </button>
           <button type="button" {...KEY} title="Copy a link that opens this map and these batches" onClick={copyLink}>
@@ -308,13 +324,13 @@ export default function Sidebar({ open, onClose, status }) {
         {error && <p className="mt-[0.5lh] shrink-0 font-bold break-words">✗ {error}</p>}
 
         <div className="relative mt-[0.5lh] min-h-0 flex-1 overflow-hidden border-t border-black pt-[0.5lh]">
-          {shown && (
+          {editor && (
             <button
               type="button"
               {...KEY}
               title="Copy the document"
               className="absolute top-[0.5lh] right-[2ch] z-10"
-              onClick={() => copy(shown, 'Document')}
+              onClick={() => copy(editor, 'Document')}
             >
               copy
             </button>
@@ -323,8 +339,8 @@ export default function Sidebar({ open, onClose, status }) {
             height="100%"
             language="burin-doc"
             theme={EDITOR_THEME}
-            value={shown}
-            onChange={(v) => { setDraft(v ?? ''); setError('') }}
+            value={editor}
+            onChange={(v) => { setEditor(v ?? ''); setError('') }}
             beforeMount={(monaco) => {
               registerDocLanguage(monaco, BURIN_TYPES)
               defineEditorTheme(monaco)

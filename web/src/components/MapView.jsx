@@ -318,6 +318,7 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       }
       readyRef.current = true
       movingRef.current = false
+      skipStyleOnceRef.current = false
       persistView()
       onStatus({ phase: 'working' })
       convertRef.current()
@@ -345,9 +346,8 @@ export default function MapView({ batches, water, bathymetry, onStatus, onDrawin
       return
     }
     batchesRef.current = batches
-    onDrawing(null)
     scheduleConvert(120)
-  }, [batches, scheduleConvert, onDrawing])
+  }, [batches, scheduleConvert])
 
   const shownWaterRef = useRef(water)
   useEffect(() => {

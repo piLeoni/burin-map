@@ -57,7 +57,16 @@ export async function librarySource() {
 export async function runJs(source) {
   const m = await loadScript()
   try {
-    return JSON.parse(m.evaluate(source))
+    const parsed = JSON.parse(m.evaluate(source))
+    // Older wasm builds returned the atlas array only; the Node binding returns
+    // `{ atlas, area }`.
+    if (Array.isArray(parsed)) {
+      return { atlas: parsed, area: null }
+    }
+    return {
+      atlas: parsed?.atlas ?? [],
+      area: parsed?.area ?? null,
+    }
   } catch (e) {
     // The interpreter's errors carry `line`/`column`; a readable prefix helps
     // the editor point at the mistake.

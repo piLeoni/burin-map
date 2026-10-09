@@ -18,6 +18,9 @@ npm install -g burin-map       # or: npx burin-map …
 *A burin is the steel tool maps were engraved with on copper plates for
 centuries.*
 
+Document syntax: [SYNTAX.md](SYNTAX.md). Design specs and planned features:
+[docs/](docs/).
+
 <p align="center">
   <img src="examples/bay-area.png" width="720" alt="San Francisco Bay Area" />
   <br />

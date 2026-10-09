@@ -34,7 +34,7 @@ const { createElement } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = await import('react')
 const { Provider, createStore } = await import('jotai')
-const { scriptAtom, atlasAtom } = await import('../src/state.js')
+const { editorAtom, atlasAtom } = await import('../src/state.js')
 
 const errors = []
 const origError = console.error
@@ -58,7 +58,7 @@ if (START_SCRIPT !== PRESETS[0].doc) missing.push('START_SCRIPT should be the fi
 
 // ---------- The Sidebar renders the JS-only UI ----------
 const store = createStore()
-store.set(scriptAtom, START_SCRIPT)
+store.set(editorAtom, START_SCRIPT)
 store.set(atlasAtom, PRESETS[0].atlas)
 
 const root = createRoot(document.getElementById('root'))

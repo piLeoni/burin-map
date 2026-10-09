@@ -17,16 +17,56 @@ export const cameraRequestAtom = atom(
   /** @type {{ center: [number, number] } | null} */ (null),
 )
 
+const EDITOR_STORAGE_KEY = 'burin-map.editor.v1'
+const APPLIED_STORAGE_KEY = 'burin-map.applied.v1'
+const LEGACY_SCRIPT_KEY = 'burin-map.script.v3'
+
+/** @returns {string | null} */
+function readStoredString(key) {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const v = JSON.parse(raw)
+    return typeof v === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
 /**
- * The document: a burin-map script. This is the whole editable state — the
- * batches, the water, the comments — because a document *is* its script. The
- * page keeps the text and the atlas it last produced; nothing else is stored,
- * so there is no second copy of the drawing to keep in step.
- *
- * Older builds stored a flat batch list and a water block under their own
- * keys; those are gone, and the app opens on a preset.
+ * What is in localStorage for the document editor and the last apply, read
+ * synchronously so startup does not flash the default preset over a saved doc.
  */
-export const scriptAtom = atomWithStorage('burin-map.script.v3', '')
+export function loadPersistedDocument() {
+  let editor = readStoredString(EDITOR_STORAGE_KEY)
+  let applied = readStoredString(APPLIED_STORAGE_KEY)
+  if (editor == null) {
+    const legacy = readStoredString(LEGACY_SCRIPT_KEY)
+    if (legacy != null) {
+      editor = legacy
+      applied = legacy
+    }
+  }
+  if (applied == null) applied = editor
+  return { editor: editor ?? '', applied: applied ?? '' }
+}
+
+const bootDocument = typeof window !== 'undefined'
+  ? loadPersistedDocument()
+  : { editor: '', applied: '' }
+
+/**
+ * The script in the Monaco editor — persisted across reloads (every keystroke).
+ * Choosing a preset again replaces this with that preset's original file.
+ */
+export const editorAtom = atomWithStorage(EDITOR_STORAGE_KEY, bootDocument.editor)
+
+/** The script the map last drew successfully; revert returns here. */
+export const appliedScriptAtom = atomWithStorage(APPLIED_STORAGE_KEY, bootDocument.applied)
+
+/** @deprecated use editorAtom */
+export const scriptAtom = editorAtom
 
 /** The atlas the current script last built (not persisted). */
 export const atlasAtom = atom(/** @type {Array<object> | null} */ (null))
