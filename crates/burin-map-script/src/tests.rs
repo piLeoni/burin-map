@@ -47,7 +47,7 @@ fn a_loop_over_bands_makes_stacked_contours() {
 
 #[test]
 fn json_saves_the_atlas_without_drawing() {
-    let atlas = evaluate(r#"burin.batch({ style: { space: 1 } }); burin.json();"#)
+    let atlas = evaluate(r#"burin.batch({ style: { space_light: 1 } }); burin.json();"#)
         .expect("the script runs");
     assert_eq!(atlas.as_array().unwrap().len(), 1);
 }

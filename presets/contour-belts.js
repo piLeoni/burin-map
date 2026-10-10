@@ -20,7 +20,7 @@ for (let i = 0; i < land.length; i++)
 
 // Contours over the belts, coloured by height, and the coast.
 burin.batch({ angle: 0, shade: burin.lerp("#6a5230", "#241206", burin.clamp(burin.tone, 0, 1)), style: { dash_light: 0.5 } });
-burin.batch({ angle: 0, ground: "sea", shade: burin.lerp("#4a6f88", "#0b2236", burin.tone), style: { space: 5, engine_stripes: 1 } });
+burin.batch({ angle: 0, ground: "sea", shade: burin.lerp("#4a6f88", "#0b2236", burin.tone), style: { space_light: 5, space_dark: 3.5, engine_stripes: 1 } });
 burin.shore({ color: "#1d3a52" });
 
 burin.draw();

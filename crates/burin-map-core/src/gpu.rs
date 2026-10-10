@@ -233,8 +233,8 @@ impl Gpu {
             st.input_light_floor,
             st.space_steep,
             st.space_steep_gamma,
-            st.space_light,
-            st.space_dark,
+            1.0,
+            st.space_mul(1.0),
         ];
         r.grid(
             "input_space",
@@ -245,7 +245,7 @@ impl Gpu {
         let (space, walk) = (gy, elev_px);
         r.grid(
             "finish",
-            r.p(0, &[st.space]),
+            r.p(0, &[st.space_base()]),
             &[(1, &a), (2, &space), (3, &land), (4, &mag), (5, &walk)],
         );
 

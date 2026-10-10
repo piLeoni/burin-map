@@ -1,8 +1,7 @@
 /** Stub of src/lib/burin.js for the SSR render smoke test. */
 export async function loadBurin() {
   const params = [
-    { name: 'space', default: 4.8, help: 'base distance between lines', group: 'space' },
-    { name: 'space_light', default: 1, help: 'space multiplier in light', group: 'space' },
+    { name: 'space_light', default: 4.8, help: 'distance between lines in light, px', group: 'space' },
     { name: 'dash_light', default: 0.15, help: 'ink fraction in light', group: 'dash' },
     { name: 'batch_stroke', default: 1.2, help: 'stroke width', group: 'batch' },
   ]

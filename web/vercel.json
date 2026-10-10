@@ -3,6 +3,10 @@
     {
       "source": "/terrarium/:path*",
       "destination": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/:path*"
+    },
+    {
+      "source": "/docs/:path*",
+      "destination": "/index.html"
     }
   ],
   "headers": [

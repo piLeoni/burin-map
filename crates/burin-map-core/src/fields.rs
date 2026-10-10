@@ -114,7 +114,7 @@ pub fn build_fields_with(
     }
 
     // Flat ground at input_flat; dark raises it towards solid, light lowers
-    // it towards input_light_floor. Space lerps space_light → space_dark by input.
+    // it towards input_light_floor. Space lerps space_light → space_dark px by input.
     let coast = blur(
         &land.par_iter().map(|&l| l as u8 as f32).collect::<Vec<_>>(),
         w,
@@ -141,12 +141,12 @@ pub fn build_fields_with(
             // space_steep: 0 = off, 1 = max densification on steep ground
             let steep_k =
                 1.0 - st.space_steep.clamp(0.0, 1.0) * steep[i].powf(st.space_steep_gamma);
-            let shade_k = st.space_light + (st.space_dark - st.space_light) * t;
+            let shade_k = st.space_mul(t);
             *loosen = (steep_k * shade_k).clamp(0.05, 4.0);
         });
     let space: Vec<f32> = blur(&loosen, w, h, 3.0)
         .par_iter()
-        .map(|k| st.space * k.clamp(0.05, 4.0))
+        .map(|k| st.space_base() * k.clamp(0.05, 4.0))
         .collect();
     let walkable: Vec<bool> = (0..n)
         .into_par_iter()
@@ -236,8 +236,8 @@ pub fn heighten(f: &mut Fields, elev: &[f32], st: &Style) {
             r
         })
         .collect();
-    let shade_k = |t: f32| (st.space_light + (st.space_dark - st.space_light) * t).max(0.05);
-    let (smin, smax) = (st.space * 0.05, st.space * 4.0);
+    let shade_k = |t: f32| st.space_mul(t).max(0.05);
+    let (smin, smax) = (st.space_base() * 0.05, st.space_base() * 4.0);
     f.input
         .par_iter_mut()
         .zip(&mut f.space)
@@ -256,11 +256,11 @@ pub fn heighten(f: &mut Fields, elev: &[f32], st: &Style) {
 }
 
 /// Fields for one batch: rotate the contour direction by `batch.angle` degrees,
-/// rescale pitch to `batch.style.space`, and optionally gate on `batch_floor`.
+/// rescale pitch to `batch.style.space_base()`, and optionally gate on `batch_floor`.
 pub fn batch_fields(base: &Fields, batch: &crate::style::Batch, base_space: f32) -> Fields {
     let a = batch.angle.to_radians();
     let (sa, ca) = a.sin_cos();
-    let pitch = batch.style.space / base_space.max(1e-6);
+    let pitch = batch.style.space_base() / base_space.max(1e-6);
     let floor = batch.style.batch_floor;
     let (tx, ty): (Vec<f32>, Vec<f32>) = base
         .tx

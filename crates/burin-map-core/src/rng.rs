@@ -76,28 +76,6 @@ impl Rng {
         (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
     }
 
-    /// Gamma(shape, scale) by Marsaglia–Tsang; mean = shape × scale.
-    pub fn gamma(&mut self, shape: f64, scale: f64) -> f64 {
-        if shape < 1.0 {
-            let u = self.f64().max(1e-300);
-            return self.gamma(shape + 1.0, scale) * u.powf(1.0 / shape);
-        }
-        let d = shape - 1.0 / 3.0;
-        let c = 1.0 / (9.0 * d).sqrt();
-        loop {
-            let x = self.normal();
-            let v = 1.0 + c * x;
-            if v <= 0.0 {
-                continue;
-            }
-            let v = v * v * v;
-            let u = self.f64();
-            if u < 1.0 - 0.0331 * x * x * x * x || u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln()) {
-                return d * v * scale;
-            }
-        }
-    }
-
     pub fn shuffle<T>(&mut self, v: &mut [T]) {
         for i in (1..v.len()).rev() {
             let j = (self.f64() * (i + 1) as f64) as usize;

@@ -19,6 +19,13 @@ import seaDepth from '../../../presets/sea-depth.js?raw'
 import sculptedHills from '../../../presets/scripted-hills.js?raw'
 import contourBelts from '../../../presets/contour-belts.js?raw'
 import layerTints from '../../../presets/layer-tints.js?raw'
+import inkClassic from '../../../presets/ink-classic.js?raw'
+import inkSolid from '../../../presets/ink-solid.js?raw'
+import inkHalf from '../../../presets/ink-half.js?raw'
+import inkJitter from '../../../presets/ink-jitter.js?raw'
+import inkLevels from '../../../presets/ink-levels.js?raw'
+import inkFlat from '../../../presets/ink-flat.js?raw'
+import inkThresholds from '../../../presets/ink-thresholds.js?raw'
 
 /** The first comment line of a script, as its title. */
 function titleOf(source) {
@@ -34,6 +41,13 @@ const SHIPPED = [
   { id: 'scripted-hills', screen: 'fast', plot: 'very slow', blurb: 'a loop over angles: crosshatching that tightens with the slope', doc: sculptedHills },
   { id: 'contour-belts', screen: 'fast', plot: 'slow', blurb: 'a loop in JavaScript: a coloured belt for every 100 m of height and depth', doc: contourBelts },
   { id: 'layer-tints', screen: 'fast', plot: 'slow', blurb: 'bands of colour by height and depth under coloured contours', doc: layerTints },
+  { id: 'ink-classic', screen: 'fast', plot: 'quick', blurb: 'the old default look: jitter, flat lottery, breaks, cutoff', doc: inkClassic },
+  { id: 'ink-solid', screen: 'fast', plot: 'quick', blurb: 'contour lines only: full ink in light and shadow', doc: inkSolid },
+  { id: 'ink-half', screen: 'fast', plot: 'quick', blurb: 'mechanical 50 % dashes in light, solid in shadow', doc: inkHalf },
+  { id: 'ink-jitter', screen: 'fast', plot: 'quick', blurb: 'ink-half by hand: same average ink', doc: inkJitter },
+  { id: 'ink-levels', screen: 'fast', plot: 'quick', blurb: 'three flat zones of ink: solid, 50 %, 10 %', doc: inkLevels },
+  { id: 'ink-flat', screen: 'fast', plot: 'quick', blurb: 'ink-half with only the flat-ground lottery', doc: inkFlat },
+  { id: 'ink-thresholds', screen: 'fast', plot: 'quick', blurb: 'a constant 30 %, cut below and solid above two tones', doc: inkThresholds },
 ]
 
 export const PRESETS = SHIPPED.map((p) => ({

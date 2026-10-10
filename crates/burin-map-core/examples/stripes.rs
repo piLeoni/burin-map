@@ -109,14 +109,14 @@ fn main() {
     let batches = [Batch::along(Style::default())];
     let st = &batches[0].style;
     let f = build_fields(&e, w, h, 20.0, st);
-    let bf = batch_fields(&f, &batches[0], st.space);
+    let bf = batch_fields(&f, &batches[0], st.space_base());
 
     let _ = trace_streamlines(&bf, st);
     let t = Instant::now();
     let seq = trace_streamlines(&bf, st);
     let seq_ms = t.elapsed().as_secs_f64() * 1e3;
     let seq_d = dash_lines(&seq, &f.input, w, h, st);
-    let (s_p5, s_med) = density(&seq_d, &f, st.space);
+    let (s_p5, s_med) = density(&seq_d, &f, st.space_base());
     let seq_ink = ink(&seq_d);
     println!("\n{w}×{h}, {threads} threads; density is ink px per ground px");
     println!(
@@ -131,7 +131,7 @@ fn main() {
         let par = trace_stripes(&bf, st, stripe);
         let ms = t.elapsed().as_secs_f64() * 1e3;
         let par_d = dash_lines(&par, &f.input, w, h, st);
-        let (p5, med) = density(&par_d, &f, st.space);
+        let (p5, med) = density(&par_d, &f, st.space_base());
         println!(
             "stripe {stripe:>3}: {ms:4.0} ms · {:6} dashes · ink {:3.0}% · density p5 {:.4} median {:.4} · seams {:.2}×",
             par_d.len(),

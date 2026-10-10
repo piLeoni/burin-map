@@ -24,7 +24,7 @@ burin.fill({ color: "#cbb589", where: { elevMin: 600 }, style: smooth });
 
 // Contours over the tints, and a coloured coast.
 burin.batch({ angle: 0, color: "#5c4630", style: { dash_light: 0.5 } });
-burin.batch({ angle: 0, ground: "sea", color: "#2f5573", style: { engine_stripes: 1, space: 5, space_light: 3, space_dark: 0.9, space_steep: 0.6, dash_light: 1, dash_dark: 1, dash_cutoff: 0, mod_breaks: 0.02, mod_smooth: 8 } });
+burin.batch({ angle: 0, ground: "sea", color: "#2f5573", style: { engine_stripes: 1, space_light: 15, space_dark: 4.5, space_steep: 0.6, dash_light: 1, dash_dark: 1, mod_breaks: 0.02, mod_smooth: 8 } });
 burin.shore({ color: "#1d3a52" });
 
 burin.draw();

@@ -170,7 +170,7 @@ pub fn draw_with_water(
             height_mm: h as f64 * k,
             scale: dem.px_m * 1000.0 / k,
             pen_width: frame.pen_width,
-            pitch_mm: style.space as f64 * k,
+            pitch_mm: style.space_base() as f64 * k,
         });
     }
 

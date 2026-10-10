@@ -40,7 +40,7 @@ fn main() {
     let fields = t.elapsed().as_secs_f64() * 1e3;
 
     let t = Instant::now();
-    let bf = batch_fields(&f, &batches[0], st.space);
+    let bf = batch_fields(&f, &batches[0], st.space_base());
     let batch = t.elapsed().as_secs_f64() * 1e3;
 
     let t = Instant::now();

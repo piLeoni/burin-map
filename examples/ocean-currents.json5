@@ -8,27 +8,25 @@
   batches: [
     {
       angle: 0,
-      style: { space_light: 1.8, space_dark: 0.6, space_steep: 0.3, dash_light: 0.1 },
+      style: { space_light: 8.6, space_dark: 2.9, space_steep: 0.3, dash_light: 0.1 },
     },
   ],
   water: {
-    shoreline: { lines: 2, style: { space: 1.5 } },
+    shoreline: { lines: 2, style: { space_light: 1.5 } },
     batches: [
-      { follow: "shore", angle: 0, style: { space: 3, water_start: 3, water_reach: 20 } },
+      { follow: "shore", angle: 0, style: { space_light: 5.4, space_dark: 2.4, water_start: 3, water_reach: 20 } },
       {
         follow: "map",
         angle: 90,
         style: {
-          space: 5,
-          space_light: 1,
-          space_dark: 1,
+          space_light: 5,
+          space_dark: 5,
           water_start: 27,
           water_reach: 4000,
           water_fade: 0.2,
           dash_light: 0.85,
           dash_dark: 0.95,
-          dash_period: 9,
-          dash_drop: 0,
+          dash_period: 45,
           mod_jitter: 0.3,
           mod_wobble: 70,
           mod_wobble_size: 60,

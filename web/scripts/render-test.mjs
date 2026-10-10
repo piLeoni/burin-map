@@ -93,7 +93,7 @@ for (const stale of ['>YAML<', '>JSON5<', '>CLI<', 'Parameters']) {
 // Land batches come out as the worker takes them; water passes and the shore
 // are split off into the water spec.
 const atlas = [
-  { angle: 90, style: { space: 6, dash_light: 0.2 }, name: 'ridges' },
+  { angle: 90, style: { space_light: 6, dash_light: 0.2 }, name: 'ridges' },
   { kind: 'water', follow: 'shore', angle: 0, style: { water_reach: 80 }, name: 'coast' },
   { kind: 'water', follow: 'map', draw: 'dots', angle: 10, style: { water_size: 18 } },
   { kind: 'shore', lines: 2, color: '#123456', style: { dash_dark: 0.5 } },
@@ -101,7 +101,7 @@ const atlas = [
 ]
 const land = D.atlasBatches(atlas)
 if (land.length !== 2) missing.push(`atlasBatches should keep 2 land batches, got ${land.length}`)
-if (land[0].name !== 'ridges' || land[0].angle !== 90 || land[0].style.space !== 6) missing.push('atlasBatches: first batch')
+if (land[0].name !== 'ridges' || land[0].angle !== 90 || land[0].style.space_light !== 6) missing.push('atlasBatches: first batch')
 if (land[1].draw !== 'fill' || land[1].ground !== 'sea' || land[1].color !== '#aaccee') missing.push('atlasBatches: sea fill')
 if (!land[1].where || land[1].where.depth_min !== 200) missing.push('atlasBatches: fill where')
 
@@ -145,13 +145,13 @@ if (JSON.stringify(D.docToAtlas(back)) !== JSON.stringify(D.docToAtlas(docFromHa
 const { PARAM_SHORTS } = await import('../src/lib/shorts.js')
 const doc = {
   area: { at: '37.75111,-122.44722', size_mm: [210, 297], scale: 25000, pen_mm: 0.25 },
-  batches: [{ angle: 90, style: { space: 6, dash_light: 0.2, batch_floor: 0.45 } }],
+  batches: [{ angle: 90, style: { space_light: 6, dash_light: 0.2, batch_floor: 0.45 } }],
 }
 const hash = docToHash(doc)
 if (hash.startsWith('#d=')) {
   const b = docFromHash(hash)
   if (b.batches[0].angle !== 90) missing.push('notation angle')
-  if (b.batches[0].style.space !== 6) missing.push('notation space')
+  if (b.batches[0].style.space_light !== 6) missing.push('notation space')
   if (b.batches[0].style.batch_floor !== 0.45) missing.push('notation batch_floor')
   if (b.area?.size_mm?.[1] !== 297) missing.push('notation area size_mm')
   if (b.area?.scale !== 25000) missing.push('notation area scale')
@@ -168,9 +168,9 @@ const wet = {
   ...doc,
   water: {
     batches: [
-      { name: 'coast; waves', follow: 'shore', angle: 0, style: { space: 5, water_reach: 80 } },
+      { name: 'coast; waves', follow: 'shore', angle: 0, style: { space_light: 5, water_reach: 80 } },
       { follow: 'map', angle: 70, style: {} },
-      { follow: 'shore', draw: 'dots', angle: 10, style: { space: 50, water_size: 18 } },
+      { follow: 'shore', draw: 'dots', angle: 10, style: { space_light: 50, water_size: 18 } },
     ],
     shoreline: false,
     classes: ['ocean', 'lake'],
@@ -194,9 +194,9 @@ if (JSON.stringify(coastBack) !== JSON.stringify(coast)) missing.push(`notation 
 const named = {
   area: { at: '37.75,-122.44' },
   batches: [
-    { name: 'north, ridges; 50% | "steep"', angle: 0, style: { space: 5 } },
-    { name: 'Vallées ñ', angle: 90, style: { space: 4 } },
-    { angle: 45, style: { space: 3 } },
+    { name: 'north, ridges; 50% | "steep"', angle: 0, style: { space_light: 5 } },
+    { name: 'Vallées ñ', angle: 90, style: { space_light: 4 } },
+    { angle: 45, style: { space_light: 3 } },
   ],
 }
 const namedBack = docFromHash(docToHash(named))
@@ -207,7 +207,7 @@ if (JSON.stringify(namedBack.batches) !== JSON.stringify(named.batches)) missing
   const fill = { area: {}, batches: [{ angle: 0, ground: 'sea', draw: 'fill', style: { input_blur: 3 } }] }
   const back = docFromHash(docToHash(fill))
   if (JSON.stringify(back.batches) !== JSON.stringify(fill.batches)) missing.push(`link loses a sea fill ${JSON.stringify(back.batches)}`)
-  const dots = { area: {}, batches: [{ angle: 0, draw: 'dots', style: { space: 3, input_height: 0.5 } }] }
+  const dots = { area: {}, batches: [{ angle: 0, draw: 'dots', style: { space_light: 3, input_height: 0.5 } }] }
   if (JSON.stringify(docFromHash(docToHash(dots)).batches) !== JSON.stringify(dots.batches)) missing.push('link loses land dots')
 }
 
@@ -215,7 +215,7 @@ if (JSON.stringify(namedBack.batches) !== JSON.stringify(named.batches)) missing
 if (noteToDoc('|a0,salt45').batches[0].style.sun_altitude !== 45) missing.push('salt vs sa')
 if (noteToDoc('|a0,sa315').batches[0].style.sun_azimuth !== 315) missing.push('sa vs s')
 if (noteToDoc('|a0,ssg1').batches[0].style.space_steep_gamma !== 1) missing.push('ssg vs ss')
-if (noteToDoc('|a0,ddrop0').batches[0].style.dash_drop !== 0) missing.push('ddrop vs dd')
+if (noteToDoc('|a0,dlv3').batches[0].style.dash_levels !== 3) missing.push('dlv vs dl')
 if (noteToDoc('|a0,mws12').batches[0].style.mod_wobble_size !== 12) missing.push('mws vs mw')
 
 // Unknown names and garbage are hard errors, not misreads.
@@ -229,9 +229,9 @@ for (const bad of mustThrow) {
 // The short-name table must match the Rust one (drift guard). The list below
 // is the exact `style!` table from crates/burin-map-core/src/style.rs.
 const rustShorts = {
-  space: 's', space_light: 'sl', space_dark: 'sd', space_steep: 'ss',
-  space_steep_gamma: 'ssg', dash_light: 'dl', dash_dark: 'dd', dash_period: 'dp',
-  dash_cutoff: 'dc', dash_drop: 'ddrop', mod_jitter: 'mj', mod_breaks: 'mb',
+  space_light: 'sl', space_dark: 'sd', space_steep: 'ss',
+  space_steep_gamma: 'ssg', dash_light: 'dl', dash_dark: 'dd', dash_mid: 'dm', dash_period: 'dp',
+  dash_levels: 'dlv', dash_cutoff: 'dc', dash_solid: 'dsol', mod_jitter: 'mj', mod_flat: 'mf', mod_breaks: 'mb',
   mod_wobble: 'mw', mod_wobble_size: 'mws', mod_smooth: 'ms', mod_wave: 'mwv',
   mod_wave_size: 'mwvs', mod_wave_zone: 'mwz',
   mod_wave_even: 'mwe', input_flat: 'if',
@@ -248,7 +248,7 @@ for (const [full, short] of Object.entries(rustShorts)) {
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 45) missing.push(`expected 45 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 47) missing.push(`expected 47 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`
@@ -257,7 +257,7 @@ if (legacyBack?.batches?.[0]?.angle !== 90) missing.push('legacy #doc= link')
 
 // Object and bare-array JSON both parse.
 if (parseDoc(JSON.stringify(doc)).batches.length !== 1) missing.push('parseDoc object')
-if (parseDoc('[{"angle":0,"style":{"space":5}}]').batches.length !== 1) missing.push('parseDoc array')
+if (parseDoc('[{"angle":0,"style":{"space_light":5}}]').batches.length !== 1) missing.push('parseDoc array')
 
 // The removed frame keys are errors that name the key, in JSON and in links.
 const throwsWith = (fn, text) => { try { fn() } catch (e) { return String(e.message).includes(text) } return false }

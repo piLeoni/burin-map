@@ -1,16 +1,16 @@
-// Shelf concentrics: spacing from `space` + water_space_reach (not water_reach).
+// Shelf concentrics: spacing from space_dark at the shore to space_light over water_space_reach (not water_reach).
 // water_reach only controls how far tracing stays active; depth_max ends shelf.
 {
   area: { at: "37.7,-122.62", size_km: [40, 28] },
   batches: [
     {
       angle: 0,
-      style: { space_light: 1.8, space_dark: 0.6, space_steep: 0.3, dash_light: 0.1 },
+      style: { space_light: 8.6, space_dark: 2.9, space_steep: 0.3, dash_light: 0.1 },
     },
   ],
   bathymetry: { source: "terrarium" },
   water: {
-    shoreline: { lines: 2, style: { space: 1.5 } },
+    shoreline: { lines: 2, style: { space_light: 1.5 } },
     batches: [
       {
         name: "shelf",
@@ -18,10 +18,9 @@
         angle: 0,
         where: { depth_max: 100, depth_fade: 35 },
         style: {
-          space: 7,
           // Higher space_dark = wider rings near coast; lower = tighter (not “darker ink”).
-          space_dark: 1.05,
-          space_light: 1.4,
+          space_dark: 7.35,
+          space_light: 9.8,
           water_start: 4,
           water_reach: 4000,
           water_space_reach: 220,
@@ -35,9 +34,8 @@
         angle: 90,
         where: { depth_min: 100, depth_fade: 35 },
         style: {
-          space: 4,
-          space_light: 1,
-          space_dark: 1,
+          space_light: 4,
+          space_dark: 4,
           water_start: 2,
           water_reach: 4000,
           water_space_reach: 0,
@@ -46,8 +44,7 @@
           water_depth_fray: 28,
           dash_light: 0.95,
           dash_dark: 1,
-          dash_period: 9,
-          dash_drop: 0,
+          dash_period: 36,
           mod_jitter: 0.3,
           mod_wobble: 45,
           mod_wobble_size: 120,

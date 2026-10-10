@@ -6,13 +6,13 @@ import { boundsAround, drawElevation, evaluate, styleParams, version } from './i
 test('version and style params', () => {
   assert.equal(version(), '0.1.0')
   const params = styleParams()
-  assert.ok(params.some(([name]) => name === 'space'))
+  assert.ok(params.some(([name]) => name === 'space_light'))
 })
 
 test('evaluate runs a document script and returns its atlas', () => {
   const script = `
     burin.area({ at: '46,7.7', size_km: [8, 6] })
-    burin.batch({ angle: 0, style: { space: 5 } })
+    burin.batch({ angle: 0, style: { space_light: 5 } })
     burin.water('dots', { color: '#9db4c0' })
     burin.shore()
     burin.draw()
@@ -49,7 +49,7 @@ test('drawElevation produces a drawing', () => {
       elev[y * w + x] = 200 - Math.hypot(dx, dy) * 4
     }
   }
-  const d = drawElevation(elev, w, h, 30, { space: 6, mod_wobble: 0, mod_jitter: 0 })
+  const d = drawElevation(elev, w, h, 30, { space_light: 6, mod_wobble: 0 })
   assert.equal(d.width, w)
   assert.equal(d.height, h)
   const [pts, ends] = d.paths()

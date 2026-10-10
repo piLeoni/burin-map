@@ -121,3 +121,165 @@ a.mapboxgl-ctrl-logo {
     bottom: 1rem;
   }
 }
+
+/* ——— Docs (/docs) ——— */
+.docs-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background0);
+}
+
+.docs-header {
+  display: flex;
+  align-items: center;
+  gap: 2ch;
+  flex-shrink: 0;
+  margin: 1lh 1ch;
+}
+
+.docs-header-title {
+  font-weight: var(--font-weight-bold);
+  flex: 1;
+}
+
+.docs-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--foreground0);
+}
+
+.docs-nav {
+  flex-shrink: 0;
+  width: 14rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--foreground0);
+  padding: 1lh 1ch;
+}
+
+.docs-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs-nav li {
+  margin-bottom: 0.5lh;
+}
+
+.docs-nav a {
+  color: var(--foreground1);
+  text-decoration: none;
+}
+
+.docs-nav a:hover,
+.docs-nav a.docs-nav-active {
+  color: var(--foreground0);
+  text-decoration: underline;
+}
+
+.docs-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1lh 2ch 3lh;
+  max-width: 52rem;
+}
+
+.docs-prose h1 {
+  font-size: 1.25em;
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 1lh;
+}
+
+.docs-prose h2 {
+  font-size: 1.1em;
+  font-weight: var(--font-weight-bold);
+  margin: 1.5lh 0 0.5lh;
+}
+
+.docs-prose p,
+.docs-prose li {
+  margin: 0 0 0.75lh;
+  max-width: 65ch;
+}
+
+.docs-prose ul {
+  padding-left: 2ch;
+}
+
+.docs-prose table {
+  border-collapse: collapse;
+  margin: 1lh 0;
+  font-size: 0.95em;
+}
+
+.docs-prose th,
+.docs-prose td {
+  border: 1px solid var(--foreground0);
+  padding: 0.25lh 1ch;
+  text-align: left;
+}
+
+.docs-figures,
+.docs-figure-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1lh;
+  margin: 1.5lh 0;
+  color: var(--foreground0);
+}
+
+.docs-figure {
+  width: 100%;
+  max-width: 20rem;
+  height: auto;
+}
+
+.docs-figure-label,
+.docs-figure-caption,
+.docs-figure-micro {
+  font-size: 0.9em;
+  fill: var(--foreground1);
+}
+
+.docs-figure-micro {
+  font-size: 7px;
+}
+
+.docs-code {
+  background: var(--background1);
+  border: 1px solid var(--foreground0);
+  padding: 1lh 1ch;
+  overflow-x: auto;
+  margin: 1lh 0;
+}
+
+.docs-inline-code {
+  background: var(--background1);
+  padding: 0 0.25ch;
+}
+
+.docs-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 1lh;
+  margin: 1.5lh 0;
+}
+
+.docs-preview-card {
+  margin: 0;
+  border: 1px solid var(--foreground0);
+}
+
+.docs-preview-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.docs-preview-card figcaption {
+  padding: 0.25lh 0.5ch;
+  font-size: 0.9em;
+}

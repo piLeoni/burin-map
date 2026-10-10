@@ -37,7 +37,7 @@ Same place, same extent (Twin Peaks, 8 km), two styles:
 
 | | Freehand | Mechanical |
 | --- | --- | --- |
-| `space` | 6.5 | 10 |
+| `space_light` / `space_dark` | 6.5 / 4.5 | 10 / 7 |
 | `mod_smooth` | 2.5 | 20 |
 | `mod_wobble` | 55 | 0 |
 | `mod_jitter` | 0.75 | 0 |
@@ -160,7 +160,7 @@ writeFileSync("tp.png", d.png());
 writeFileSync("tp.svg", d.svg());
 
 // Or any elevation grid you already have (metres, row 0 = north):
-// const d = drawElevation(elevFloat32Array, width, height, pxM, { space: 6 });
+// const d = drawElevation(elevFloat32Array, width, height, pxM, { space_light: 6 });
 
 // Run a document (JavaScript) and get the graph it builds, as JSON:
 // const { atlas, area } = JSON.parse(evaluate(readFileSync("presets/contours.js", "utf8")));
@@ -248,27 +248,30 @@ The ones worth touching first:
 
 | parameter | default | effect |
 |---|---|---|
-| `space` | 4.8 | base distance between lines, px |
-| `space_light` | 1.0 | space multiplier in full light (>1 = more open) |
-| `space_dark` | 0.7 | space multiplier in full dark (<1 = denser) |
+| `space_light` | 4.8 | distance between lines in full light, px |
+| `space_dark` | 3.4 | distance between lines in full shadow, px |
 | `space_steep` | 0.4 | how much steep ground tightens space (`0` = off, `1` = max) |
 | `dash_light` | 0.15 | ink fraction in full light |
-| `dash_dark` | 1.0 | ink fraction in full dark |
-| `dash_drop` | 1.0 | drop random dashes on flat/light (`0` = off) |
-| `dash_period` | 2.2 | dash+gap length, × `space` |
-| `mod_jitter` | 0.45 | dash irregularity; 0 looks machine-made |
-| `mod_breaks` | 0.15 | breaks in otherwise solid runs |
+| `dash_dark` | 1.0 | ink fraction in full shadow |
+| `dash_mid` | −1 | ink fraction at mid tone (below 0: halfway) |
+| `dash_period` | 10.5 | dash+gap length, px |
+| `dash_levels` | 0 | round the tone to this many levels: flat zones of ink |
+| `dash_cutoff` / `dash_solid` | 0 / 1 | no ink below / always solid above this tone (off) |
+| `mod_jitter` | 0 | uneven dashes, same average ink; 0 looks machine-made |
+| `mod_flat` | 0 | lottery on flat, lit ground: dashes left out or flat-inked |
+| `mod_breaks` | 0 | breaks in otherwise solid runs |
 | `mod_smooth` | 6 | smoothness of the line curves |
 | `input_gain` | 3.0 | contrast of the relief |
 | `batch_stroke` | 1.2 | stroke width, px |
 | `batch_seed` | 1 | different drawing of the same place |
 
-Flat ranges mean a flat channel: `--space-light 1 --space-dark 1` keeps
-uniform space; `--dash-light 1 --dash-dark 1 --dash-drop 0` draws continuous
-lines.
+Flat ranges mean a flat channel: `--space-light 5 --space-dark 5` keeps
+uniform space; `--dash-light 1 --dash-dark 1` draws continuous lines. Every
+`mod_*` that touches the ink is off by default. Narrative guide:
+[docs/guide/README.md](docs/guide/README.md) (also **Docs** in the web app).
 
 Every flag has a short form made of its initials (`--space-light` → `--sl`,
-`--dash-drop` → `--ddrop`, `--terrain-at` → `--tat`, `--frame-size` → `--fs`,
+`--dash-levels` → `--dlv`, `--terrain-at` → `--tat`, `--frame-size` → `--fs`,
 `--out-format` → `--fmt`). `burin-map --help` (or
 `print(burin_map.style_help())` in Python) lists all of them. They are declared once in `crates/burin-map-core/src/style.rs`.
 
@@ -290,11 +293,11 @@ to their defaults. The same holds for `batches` in a document.
 burin-map --terrain-place bern
 
 # still one pass, with style (short forms)
-burin-map --tp bern --s 5 --dl 0.3
+burin-map --tp bern --sl 5 --dl 0.3
 
 # along + broken cross-hatch in shadow
 burin-map --terrain-at "Twin Peaks, San Francisco" --terrain-size 8km --out-file tp.png \
-  --batch --space 6 --mod-breaks 0.12 \
+  --batch --space-light 6 --mod-breaks 0.12 \
   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45
 
 # three angles, short forms
@@ -316,7 +319,7 @@ and each water batch fills the water with its own lines:
 ```js
 burin.batch({ angle: 0 })         // the land, drawn first
 burin.water({ classes: ["ocean", "lake"] })   // default: ocean, lake, river, dock
-burin.water("lines", { follow: "shore", style: { space: 4, water_reach: 60 } })
+burin.water("lines", { follow: "shore", style: { space_light: 7, space_dark: 3, water_reach: 60 } })
 burin.water("lines", { follow: "map", angle: 70 })   // hatching clockwise from north
 burin.shore()                     // stroke the shoreline
 burin.draw()
@@ -347,9 +350,9 @@ and a `style`:
 
 ```js
 burin.shore({
-  lines: 2,               // the shore, then one more `space` px out to sea
+  lines: 2,               // the shore, then one more `space_light` px out to sea
   style: {
-    space: 5,
+    space_light: 5,
     dash_dark: 0.7,       // dashed: ink at the shore, as on dark ground
     dash_light: 0.35,     // further lines fade towards this, over water_reach
     mod_wobble: 25,       // wanders as if drawn by hand
@@ -502,7 +505,7 @@ await init();
 
 // elev: Float32Array of height in metres, row 0 = north
 const result = draw(elev, width, height, pxM /* metres per pixel */, {
-  space: 4.8,
+  space_light: 4.8,
   mod_wobble: 20,
 });
 result.paths;   // packed Float32Array for canvas stroking
@@ -574,8 +577,8 @@ draw, exactly like a CLI flag; explicit flags always win.
 ```js
 // Twin Peaks, two passes
 burin.area({ at: "Twin Peaks, San Francisco", size_km: [8, 8] })
-burin.batch({ angle: 0,  style: { space: 7, mod_breaks: 0.1 } })
-burin.batch({ angle: 90, style: { space: 7, mod_breaks: 0.85, batch_floor: 0.45 } })  // steep ground
+burin.batch({ angle: 0,  style: { space_light: 7, space_dark: 5, mod_breaks: 0.1 } })
+burin.batch({ angle: 90, style: { mod_breaks: 0.85, batch_floor: 0.45 } })  // steep ground
 burin.draw()
 ```
 
@@ -618,7 +621,7 @@ comments), using a compact notation of the CLI's own short names:
 
 `|` separates area from batches, `,` separates parameters, `;` separates
 passes, and `a` is the pass angle. Values follow their short name with no
-space — the same abbreviations the CLI accepts (`--s`, `--dl`, `--bf`).
+space — the same abbreviations the CLI accepts (`--sl`, `--dl`, `--bf`).
 Water, when there is some, is a third `|` section: its settings (`noshore`,
 `cocean+lake`), then its passes, each led by `shore` or `map`:
 `…|a0|;shore,a0,wr80;map,a70`.

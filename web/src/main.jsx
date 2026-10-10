@@ -5,7 +5,7 @@ import '@fontsource/ibm-plex-mono/400-italic.css'
 import '@fontsource/ibm-plex-mono/600.css'
 import '@fontsource/ibm-plex-mono/700.css'
 import './index.css'
-import App from './App.jsx'
+import Root from './Root.jsx'
 import { clearServiceWorkers } from './lib/devCache.js'
 
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {
@@ -16,6 +16,6 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <Root />
   </StrictMode>,
 )

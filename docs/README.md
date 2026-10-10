@@ -1,12 +1,13 @@
 # burin-map docs
 
-Design notes and specifications that are not yet (or not fully) reflected in
-[SYNTAX.md](../SYNTAX.md).
+| Document | Audience |
+|----------|----------|
+| [guide/](guide/README.md) | **Style model** — spacing, ink, modifiers, ink presets, water (humans + agents) |
+| [AGENTS.md](AGENTS.md) | Short checklist for coding agents |
+| [land-edge-fray.md](land-edge-fray.md) | **Proposed** — land contours fray toward a mask boundary |
 
-| Document | Status |
-|----------|--------|
-| [dash-style-model.md](dash-style-model.md) | **Proposed** — dash + spacing mental model (duty, period, px spacing, quantization) |
-| [land-edge-fray.md](land-edge-fray.md) | **Proposed** — fray/fade land contours toward a host mask boundary (draw.land city ground) |
+User-facing **syntax and parameter tables**: [SYNTAX.md](../SYNTAX.md) in the repo root.
 
-User-facing syntax and parameters live in [SYNTAX.md](../SYNTAX.md). Session
-history and engine rationale: [NOTES.md](../NOTES.md).
+**Web app:** [Docs](/docs) (same guide, with diagrams and preset previews).
+
+Session history and engine notes: [NOTES.md](../NOTES.md).

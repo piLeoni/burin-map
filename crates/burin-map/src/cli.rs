@@ -78,8 +78,8 @@ pub fn command() -> Command {
         .after_help("Examples:\n  \
             burin-map --script presets/contours.js --out-file sf.png\n  \
             burin-map --terrain-at \"Twin Peaks, San Francisco\" --terrain-size 20km --out-file sf.png\n  \
-            burin-map --tp bern --s 5 --dl 0.3\n  \
-            burin-map --terrain-place bern --batch --space 6 --mod-breaks 0.1 \\\n  \
+            burin-map --tp bern --sl 5 --dl 0.3\n  \
+            burin-map --terrain-place bern --batch --space-light 6 --mod-breaks 0.1 \\\n  \
             \x20   --batch --batch-angle 90 --mod-breaks 0.85 --batch-floor 0.45\n  \
             burin-map --tat Zermatt --fs 297 420 --esc 1:50000 --fmt svg")
         .next_help_heading("Terrain — the ground to draw")
@@ -966,10 +966,10 @@ mod tests {
     #[test]
     fn short_and_long_style_flags_agree() {
         let m = command()
-            .try_get_matches_from(argv(&["--s", "6", "--dash-light", "0.3"]))
+            .try_get_matches_from(argv(&["--sl", "6", "--dash-light", "0.3"]))
             .unwrap();
         let st = shared_style(&m);
-        assert!((st.space - 6.0).abs() < 1e-6);
+        assert!((st.space_light - 6.0).abs() < 1e-6);
         assert!((st.dash_light - 0.3).abs() < 1e-6);
     }
 
@@ -982,6 +982,8 @@ mod tests {
             "--svg",
             "--hatch",
             "--shade-gap",
+            "--space",
+            "--dash-drop",
         ] {
             assert!(
                 command().try_get_matches_from(argv(&[old, "1"])).is_err(),
@@ -995,7 +997,7 @@ mod tests {
         let args = argv(&[
             "--tp",
             "bern",
-            "--space",
+            "--space-light",
             "6",
             "--batch",
             "--mod-breaks",
@@ -1018,14 +1020,14 @@ mod tests {
         let m = command().try_get_matches_from(prefix).unwrap();
         assert_eq!(m.get_one::<String>("out-file").unwrap(), "x.png");
         let base = shared_style(&m);
-        assert!((base.space - 6.0).abs() < 1e-6);
+        assert!((base.space_light - 6.0).abs() < 1e-6);
         let b0 = parse_batch_section(&base, &secs[0]).unwrap();
         let b1 = parse_batch_section(&base, &secs[1]).unwrap();
         assert_eq!(b0.angle, 0.0);
         assert_eq!(b0.name, None);
         assert_eq!(b1.name.as_deref(), Some("Steep valleys"));
         assert!((b0.style.mod_breaks - 0.1).abs() < 1e-6);
-        assert!((b0.style.space - 6.0).abs() < 1e-6);
+        assert!((b0.style.space_light - 6.0).abs() < 1e-6);
         assert_eq!(b1.angle, 90.0);
         assert!((b1.style.mod_breaks - 0.9).abs() < 1e-6);
         assert!((b1.style.batch_floor - 0.4).abs() < 1e-6);

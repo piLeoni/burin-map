@@ -11,17 +11,19 @@
 
 /** full_name → short (e.g. `space_light` → `sl`). */
 export const PARAM_SHORTS = {
-  space: 's',
   space_light: 'sl',
   space_dark: 'sd',
   space_steep: 'ss',
   space_steep_gamma: 'ssg',
   dash_light: 'dl',
   dash_dark: 'dd',
+  dash_mid: 'dm',
   dash_period: 'dp',
+  dash_levels: 'dlv',
   dash_cutoff: 'dc',
-  dash_drop: 'ddrop',
+  dash_solid: 'dsol',
   mod_jitter: 'mj',
+  mod_flat: 'mf',
   mod_breaks: 'mb',
   mod_wobble: 'mw',
   mod_wobble_size: 'mws',

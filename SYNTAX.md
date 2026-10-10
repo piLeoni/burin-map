@@ -1,5 +1,8 @@
 # burin-map document syntax
 
+**Style model (spacing, ink, modifiers):** [docs/guide/README.md](docs/guide/README.md).
+On the web app, open **Docs** (`/docs`) for diagrams and ink-preset previews.
+
 A document describes a whole drawing, and a document is a **JavaScript script**:
 it calls `burin.*` and ends with `burin.draw()`, and running it builds a *graph*
 of typed operations (the *atlas*) — the batches and water passes the engine
@@ -27,10 +30,10 @@ There are four kinds of block:
 ```js
 burin.area({ at: "44.3035,9.2145", size_km: [14, 10] })
 
-burin.batch({ angle: 0, style: { space: 4.8 } })
+burin.batch({ angle: 0, style: { space_light: 4.8 } })
 
-burin.water("lines", { follow: "shore", style: { water_start: 10, water_reach: 30, space: 7 } })
-burin.shore({ lines: 2, style: { space: 4 } })
+burin.water("lines", { follow: "shore", style: { water_start: 10, water_reach: 30, space_light: 7 } })
+burin.shore({ lines: 2, style: { space_light: 4 } })
 burin.draw()
 ```
 
@@ -44,20 +47,20 @@ area:
 batches:
   - angle: 0
     style:
-      space: 4.8
+      space_light: 4.8
 
 water:
   classes: [ocean, lake]
   shoreline:
     lines: 2
     style:
-      space: 4
+      space_light: 4
   batches:
     - follow: shore
       style:
         water_start: 10
         water_reach: 30
-        space: 7
+        space_light: 7
 ```
 
 ---
@@ -89,7 +92,7 @@ batches:
   - name: "optional"
     angle: 0
     style:
-      space: 4.8
+      space_light: 4.8
 ```
 
 `land: { batches: [...] }` is the long form of the same thing. Use one or the other, not both.
@@ -117,7 +120,7 @@ batches:
 batches:
   - angle: 0
     ground: sea
-    style: { space: 5, space_light: 3, input_blur: 8 }
+    style: { space_light: 15, space_dark: 4.5, input_blur: 8 }
 water:
   shoreline: { lines: 1 }
   batches: []
@@ -130,18 +133,18 @@ By default the shading sets how dense the lines are: dark slopes get them close,
 ```yaml
 batches:
   - { angle: 0, style: { input_height: 0.4 } }
-  - { angle: 0, ground: sea, style: { space: 5, space_light: 3, input_blur: 8, input_height: -0.5 } }
+  - { angle: 0, ground: sea, style: { space_light: 15, space_dark: 4.5, input_blur: 8, input_height: -0.5 } }
 ```
 
 ### Land dots
 
-`draw: dots` stipples the land instead of tracing lines: the dots sit as close as lines would (`space`, `space_light`, `space_dark`, `space_steep`, `input_height`), and nothing is drawn where the input is below `dash_cutoff`. The dot size and clumping come from the water parameters `water_size` (default 1.2 on land) and `water_patches`, as for dots at sea: `mod_jitter` varies their size and `mod_wobble` bends them. Ripples are only for water.
+`draw: dots` stipples the land instead of tracing lines: the dots sit as close as lines would (`space_light`, `space_dark`, `space_steep`, `input_height`), and nothing is drawn where the input is below `dash_cutoff`. The dot size and clumping come from the water parameters `water_size` (default 1.2 on land) and `water_patches`, as for dots at sea: `mod_jitter` varies their size and `mod_wobble` bends them. Ripples are only for water.
 
 ```yaml
 batches:
   - angle: 0
     draw: dots
-    style: { space: 3, space_light: 2.2, space_dark: 0.5, space_steep: 0.3, dash_cutoff: 0 }
+    style: { space_light: 6.6, space_dark: 1.5, space_steep: 0.3 }
 ```
 
 ### Fills
@@ -173,7 +176,7 @@ water:
 
 ### Colour expressions
 
-`color` and `color_expr` are on each batch (land or water), not in `style`, because colour is not a number like `space`.
+`color` and `color_expr` are on each batch (land or water), not in `style`, because colour is not a number like `space_light`.
 
 - `color: "#2a1810"` sets a fixed stroke colour for the whole batch.
 - `color_expr: "#336699"` works the same (a lone hex literal).
@@ -212,7 +215,7 @@ batches:
     width_expr: 'lerp(0.4, 2.5, clamp(elev / 300, 0, 1))'   # thin in the valleys, bold on the hills
     width_steps: 3
     layer: hills
-    style: { space: 6 }
+    style: { space_light: 6, space_dark: 4.5 }
 water:
   shoreline: { lines: 1, width_expr: 'lerp(2, 0.8, clamp(dist / 40, 0, 1))' }
   batches:
@@ -221,7 +224,7 @@ water:
       width_expr: 'lerp(2.6, 0.5, clamp(dist / 150, 0, 1))'   # big dots at the coast, fine ones offshore
 ```
 
-Each width is its own group in the SVG, rounded to a hundredth of a px. That suits the screen and print. For a pen plotter, `width_steps: 3` rounds the widths to 3, evenly spaced from the thinnest dash to the widest, each in its own layer named after the batch's `layer` (`hills-1`, `hills-2`, `hills-3`; `width-1`… without one), so each can get its own pen. Wide lines need room: raise `space` along with the width, or the darkest areas fill in.
+Each width is its own group in the SVG, rounded to a hundredth of a px. That suits the screen and print. For a pen plotter, `width_steps: 3` rounds the widths to 3, evenly spaced from the thinnest dash to the widest, each in its own layer named after the batch's `layer` (`hills-1`, `hills-2`, `hills-3`; `width-1`… without one), so each can get its own pen. Wide lines need room: raise `space_light` and `space_dark` along with the width, or the darkest areas fill in.
 
 `cap` picks how the dashes end:
 
@@ -238,18 +241,20 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 
 | Group | Parameter | Default | Terrain |
 |---|---|---|---|
-| Space | `space` | 4.8 |  |
-|  | `space_light` | 1 | yes |
-|  | `space_dark` | 0.7 | yes |
+| Space | `space_light` | 4.8 | yes |
+|  | `space_dark` | 3.4 | yes |
 |  | `space_steep` | 0.4 | yes |
 |  | `space_steep_gamma` | 1 | yes |
 | Dash | `dash_light` | 0.15 |  |
 |  | `dash_dark` | 1 |  |
-|  | `dash_period` | 2.2 |  |
-|  | `dash_cutoff` | 0.03 |  |
-|  | `dash_drop` | 1 |  |
-| Mod | `mod_jitter` | 0.45 |  |
-|  | `mod_breaks` | 0.15 |  |
+|  | `dash_mid` | -1 |  |
+|  | `dash_period` | 10.5 |  |
+|  | `dash_levels` | 0 |  |
+|  | `dash_cutoff` | 0 |  |
+|  | `dash_solid` | 1 |  |
+| Mod | `mod_jitter` | 0 |  |
+|  | `mod_flat` | 0 |  |
+|  | `mod_breaks` | 0 |  |
 |  | `mod_wobble` | 20 | yes |
 |  | `mod_wobble_size` | 12 | yes |
 |  | `mod_wave` | 0 |  |
@@ -287,8 +292,8 @@ batches:
   - angle: 0
     style:
       sun_azimuth: 270    # light from the west
-      space: 6
-  - angle: 90             # still sun_azimuth 270; space is back to 4.8
+      dash_light: 0.5
+  - angle: 90             # still sun_azimuth 270; dash_light is back to 0.15
   - angle: 45
     style:
       sun_azimuth: 135    # this one, and any batch after it, lit from the south-east
@@ -355,7 +360,7 @@ water:
   batches:
     - follow: shore
       where: { depth_max: 100 }   # shallow shelf: concentric lines only
-      style: { space: 3, water_start: 3, water_reach: 4000, water_fade: 0.35 }
+      style: { space_light: 5.4, space_dark: 2.4, water_start: 3, water_reach: 4000, water_fade: 0.35 }
       # water_reach in px must be large: it is distance-from-shore, not depth.
       # depth_max ends the shelf; a tiny water_reach leaves white bands on wide shelves.
     - follow: map
@@ -393,26 +398,25 @@ On water there is no sun shading on a flat sea. The same **names** as land are r
 | `space_dark` / `space_light` | tighter / wider line spacing in shadow / light | tighter / wider spacing **near / far** from the coast (via `water_space_reach`) |
 | `dash_dark` / `dash_light` | more / less ink in shadow / light | more / less ink **near / far** from the coast (via `water_reach`) |
 
-Lower `space_dark` (e.g. 0.5) means **closer together** near the shore, not wider. To loosen shelf rings, **raise** `space` or `space_dark`, or lengthen `water_space_reach`.
+Lower `space_dark` (e.g. 2 px) means **closer together** near the shore, not wider. To loosen shelf rings, **raise** `space_dark`, or lengthen `water_space_reach`.
 
 `follow: shore` with `angle: 0` draws **distance contours** (true concentrics), not the land streamline tracer — so changing `space_dark` cannot cross the rings. A second batch at another angle (e.g. engraved open sea at 90°) can still cross the first in the `depth_fade` overlap; that reads as cross-hatching.
 
-Ink and tracing extent use `water_reach`; **line spacing** uses `space` and `water_space_reach` only. A second water batch at another angle (e.g. engraved sea at 90°) can cross the first in the depth-fade overlap — that reads as cross-hatching, not a broken `space`.
+Ink and tracing extent use `water_reach`; **line spacing** uses `space_light`, `space_dark` and `water_space_reach` only. A second water batch at another angle (e.g. engraved sea at 90°) can cross the first in the depth-fade overlap — that reads as cross-hatching, not broken spacing.
 
 **Depth** (metres below the surface) is optional. Nothing extra is downloaded unless a batch asks for depth *and* the document sets `bathymetry.source` to something other than `terrarium` / `auto` (GEBCO or a custom tile URL — not wired in the web app yet). By default, depth comes from the **same elevation mosaic** already fetched for the map (negative heights on water pixels). The depth grid is built only when a water batch has a `where` depth limit or a `color_expr` or `width_expr` that uses `depth`.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|
-| Space | `space` | 4 | |
-| | `space_light` | 1.8 | spacing multiplier far from the shore (wider rings) |
-| | `space_dark` | 0.8 | spacing multiplier near the shore (tighter rings); not “shadow” |
+| Space | `space_light` | 7.2 | spacing far from the shore, px (wider rings) |
+| | `space_dark` | 3.2 | spacing near the shore, px (tighter rings); not “shadow” |
 | Dash | `dash_light` | 0.25 | ink far from the shore |
 | | `dash_dark` | 1 | ink near the shore |
-| | `dash_period` | 2.2 | |
-| | `dash_cutoff` | 0.03 | |
-| | `dash_drop` | 0.6 | leaves out dashes where the tone is below `input_flat` |
-| Mod | `mod_jitter` | 0.45 | |
-| | `mod_breaks` | 0.15 | |
+| | `dash_period` | 10.5 | |
+| | `dash_cutoff` | 0 | |
+| Mod | `mod_jitter` | 0 | |
+| | `mod_flat` | 0.6 | leaves out dashes where the tone is below `input_flat` |
+| | `mod_breaks` | 0 | |
 | | `mod_wobble` | 0 | |
 | | `mod_wobble_size` | 12 | |
 | | `mod_wave` | 0 | see [Hand-drawn waves](#hand-drawn-waves) |
@@ -420,7 +424,7 @@ Ink and tracing extent use `water_reach`; **line spacing** uses `space` and `wat
 | | `mod_wave_zone` | 0 | |
 | | `mod_wave_even` | 0 | |
 | | `mod_smooth` | 3 | |
-| Input | `input_flat` | 0.25 | the tone below which `dash_drop` works |
+| Input | `input_flat` | 0.25 | the tone below which `mod_flat` works |
 | Engine | `engine_step` | 1 | |
 | | `engine_min` | 4 | |
 | | `engine_stop` | 0.5 | |
@@ -429,7 +433,7 @@ Ink and tracing extent use `water_reach`; **line spacing** uses `space` and `wat
 | | `batch_seed` | 1 | |
 | Water | `water_start` | 2 | gap between the shore and the first line, px |
 | | `water_reach` | 60 | how far out ink and tracing stay active, px; not line spacing |
-| | `water_space_reach` | 120 | how far out spacing eases from `space_dark` to `space_light`, px; 0 = fixed `space` |
+| | `water_space_reach` | 120 | how far out spacing eases from `space_dark` to `space_light`, px; 0 = fixed `space_light` |
 | | `water_fade` | 1 | how they fade out: above 1 sooner, below 1 later |
 | | `water_fray` | 0 | how far out from `water_start`, px, the lines break up into shorter dashes and dots towards the shore, with a ragged edge; 0 a clean edge |
 
@@ -443,13 +447,12 @@ Left out, as they mean nothing on water: `space_steep`, `space_steep_gamma`, `ba
 water:
   batches:
     - follow: shore        # concentric lines along the coast, out to 23 px
-      style: { space: 3, water_start: 3, water_reach: 20 }
+      style: { space_light: 5.4, space_dark: 2.4, water_start: 3, water_reach: 20 }
     - follow: map
       angle: 90
       style:
-        space: 5
-        space_light: 1
-        space_dark: 1
+        space_light: 5
+        space_dark: 5
         water_start: 27    # clear of the coast lines
         water_reach: 4000
         dash_light: 0.85
@@ -466,7 +469,7 @@ With `draw: ripples` or `dots`, a batch covers the open sea with something other
 
 | `draw` | What it draws |
 |---|---|
-| `ripples` | rows `space` px apart, broken into strokes about `water_size` px long, bent together by a swell and waving by hand, as in Olaus Magnus' Carta Marina |
+| `ripples` | rows `space_light` px apart, broken into strokes about `water_size` px long, bent together by a swell and waving by hand, as in Olaus Magnus' Carta Marina |
 | `dots` | stippling, closer near the coast, as on Ortelius' maps |
 
 ```yaml
@@ -483,7 +486,7 @@ Ripples use:
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Space | `space` | 9 | gap between rows, px |
+| Space | `space_light` | 9 | gap between rows, px |
 | Dash | `dash_dark` | 0.9 | how much of a row is inked at `water_start` |
 | | `dash_light` | 0.6 | how much is inked from `water_reach` further out |
 | Mod | `mod_wobble` | 18 | how much the swell bends the rows, degrees |
@@ -504,10 +507,9 @@ Dots use:
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Space | `space` | 5 | distance between dots, px |
-| | `space_dark` | 0.45 | spacing multiplier at `water_start` |
-| | `space_light` | 1.3 | spacing multiplier from `water_reach` further out |
-| Mod | `mod_jitter` | 0.45 | how much dot size varies |
+| Space | `space_dark` | 2.25 | distance between dots at `water_start`, px |
+| | `space_light` | 6.5 | distance between dots from `water_reach` further out, px |
+| Mod | `mod_jitter` | 0 | how much dot size varies |
 | Batch | `batch_stroke` | 1.2 | line width |
 | | `batch_seed` | 1 | random seed |
 | Water | `water_start` | 3 | no dots nearer the shore than this, px |
@@ -535,12 +537,12 @@ water:
   shoreline:
     lines: 2
     style:
-      space: 4
+      space_light: 4
 ```
 
 | Field | What it does | Default |
 |---|---|---|
-| `lines` | how many: the shore, then more out to sea, `space` px apart | 1 |
+| `lines` | how many: the shore, then more out to sea, `space_light` px apart | 1 |
 | `layer`, `color`, `color_expr`, `width_expr`, `width_steps`, `cap` | as on land; the layer is `shoreline` unless set | |
 | `style` | parameters, see below | one clean, solid line |
 
@@ -550,12 +552,12 @@ Only those that mean something on a line that is already drawn.
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Space | `space` | 3 | gap between lines, when `lines` is above 1 |
+| Space | `space_light` | 3 | gap between lines, when `lines` is above 1 |
 | Dash | `dash_dark` | 1 | ink on the line at the shore (1 is solid) |
 | | `dash_light` | 1 | ink on the lines further out (1 is solid) |
-| | `dash_period` | 2.2 | length of one dash plus gap, times `space` |
-| | `dash_cutoff` | 0.03 | below this tone a dash disappears |
-| Mod | `mod_jitter` | 0.45 | random variation in dash length |
+| | `dash_period` | 10.5 | length of one dash plus gap, px |
+| | `dash_cutoff` | 0 | below this tone a dash disappears |
+| Mod | `mod_jitter` | 0 | random variation in dash length, same average ink |
 | | `mod_breaks` | 0 | chance of a small break in the line |
 | | `mod_wobble` | 0 | hand-drawn wander, degrees |
 | | `mod_wobble_size` | 12 | length of each wander, px |
@@ -572,7 +574,7 @@ Only those that mean something on a line that is already drawn.
 
 | Look | `shoreline` |
 |---|---|
-| clean double line | `{ lines: 2, style: { space: 4 } }` |
+| clean double line | `{ lines: 2, style: { space_light: 4 } }` |
 | dashed | `{ style: { dash_dark: 0.6 } }` |
 | hand-drawn | `{ style: { mod_wobble: 25, mod_smooth: 2 } }` |
 | thicker | `{ style: { batch_stroke: 2 } }` |
@@ -592,7 +594,7 @@ A saved atlas is still one JSON argument to `--water`, or a `--style-file` /
 
 ```bash
 burin-map --terrain-at "44.3035,9.2145" --terrain-size 14km \
-  --water '{"shoreline":{"lines":2,"style":{"space":4}},"batches":[{"follow":"shore","style":{"water_start":10,"water_reach":30,"space":7}}]}'
+  --water '{"shoreline":{"lines":2,"style":{"space_light":4}},"batches":[{"follow":"shore","style":{"water_start":10,"water_reach":30,"space_light":7}}]}'
 ```
 
 ## In a share link

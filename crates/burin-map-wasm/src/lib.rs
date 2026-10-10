@@ -567,6 +567,7 @@ pub fn draw_batches(
         elev,
         now_ms,
         &board::Board,
+        mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0),
     );
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
@@ -747,6 +748,7 @@ pub async fn draw_batches_gpu(
         &elev,
         now_ms,
         &board::Board,
+        mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0),
     );
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))

@@ -324,7 +324,7 @@ fn trace_beside(f: &Fields, st: &Style, fixed: &[Line], open: &[Line]) -> (Vec<L
     let mut grid_i = 0;
     let mut queue = Seeds::new();
     let mut lines: Vec<Line> = Vec::new();
-    let seed_every = ((st.space / st.engine_step).round() as usize).max(1);
+    let seed_every = ((st.space_base() / st.engine_step).round() as usize).max(1);
 
     for (i, l) in fixed.iter().enumerate() {
         let lid = OTHERS + i as i32;

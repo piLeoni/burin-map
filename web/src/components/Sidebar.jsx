@@ -238,6 +238,9 @@ export default function Sidebar({ open, onClose, status }) {
         className="shrink-0"
         aside={(
           <>
+            <a is-="button" {...KEY} href="/docs" title="Style guide: spacing, ink, presets">
+              docs
+            </a>
             <a is-="button" {...KEY} href="https://github.com/piLeoni/burin-map" target="_blank" rel="noreferrer" title="burin-map on GitHub">
               github ↗
             </a>

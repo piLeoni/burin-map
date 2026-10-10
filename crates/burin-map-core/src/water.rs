@@ -210,11 +210,10 @@ impl Style {
     /// breaking up further out, and no wandering, which would read as waves.
     pub fn water() -> Style {
         Style {
-            space: 4.0,
-            space_light: 1.8,
-            space_dark: 0.8,
+            space_light: 7.2,
+            space_dark: 3.2,
             dash_light: 0.25,
-            dash_drop: 0.6,
+            mod_flat: 0.6,
             mod_wobble: 0.0,
             mod_smooth: 3.0,
             ..Style::default()
@@ -228,7 +227,8 @@ impl Style {
             // Rows 9 px apart of strokes about 140 px long, waving gently by
             // hand over the whole sea, a little fuller near the coast.
             Draw::Ripples => Style {
-                space: 9.0,
+                space_light: 9.0,
+                space_dark: 9.0,
                 water_size: 140.0,
                 dash_light: 0.6,
                 dash_dark: 0.9,
@@ -242,9 +242,8 @@ impl Style {
             },
             // A dot every 5 px, closer at the coast, sparser 250 px out.
             Draw::Dots => Style {
-                space: 5.0,
-                space_dark: 0.45,
-                space_light: 1.3,
+                space_light: 6.5,
+                space_dark: 2.25,
                 water_size: 1.2,
                 water_start: 3.0,
                 water_reach: 250.0,
@@ -270,7 +269,7 @@ fn shore_style<'de, D: Deserializer<'de>>(d: D) -> Result<Style, D::Error> {
 /// The shoreline, drawn with the land's modifiers: `dash_*` break it up,
 /// `mod_wobble` makes it wander as if drawn by hand, `mod_smooth` rounds off
 /// the pixel steps, `batch_stroke` is its width. With `lines` above 1 more
-/// lines follow it out to sea, `space` px apart, their input fading over
+/// lines follow it out to sea, `space_light` px apart, their input fading over
 /// `water_reach` as a water batch's does.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -330,11 +329,10 @@ impl Style {
     /// Defaults for the shoreline: one clean, solid line.
     pub fn shoreline() -> Style {
         Style {
-            space: 3.0,
+            space_light: 3.0,
+            space_dark: 3.0,
             dash_light: 1.0,
             dash_dark: 1.0,
-            dash_drop: 0.0,
-            mod_breaks: 0.0,
             mod_wobble: 0.0,
             mod_smooth: 0.0,
             ..Style::default()
@@ -474,15 +472,13 @@ pub fn water_fields(
             if st.water_space_reach <= 0.0 {
                 return 1.0f32;
             }
-            let t = spacing_tone(dist, st);
-            st.space_light + (st.space_dark - st.space_light) * t
+            st.space_mul(spacing_tone(dist, st))
         })
         .collect();
-    // Very small multipliers pack streamlines until they cross; keep a sane floor.
-    const SPACE_MUL_MIN: f32 = 0.72;
+    let base = st.space_base();
     let space = blur(&loosen, w, h, 3.0)
         .par_iter()
-        .map(|k| st.space * k.clamp(SPACE_MUL_MIN, 4.0))
+        .map(|k| (base * k.clamp(0.05, 4.0)).max(SPACE_MIN))
         .collect();
     let walkable = (0..w * h)
         .into_par_iter()
@@ -498,6 +494,9 @@ pub fn water_fields(
         space,
     }
 }
+
+/// Closest two lines on water ever come, px: closer, streamlines cross.
+const SPACE_MIN: f32 = 1.5;
 
 /// 1 at `water_start` px from the shore, fading to 0 `water_reach` px further
 /// out; 0 nearer the shore than `water_start`.
@@ -552,9 +551,8 @@ fn directions(
     }
 }
 
-/// Dots scattered over the water: evenly, `space` px apart
-/// (times `space_dark` at `water_start`, easing to `space_light` over
-/// `water_reach`), never nearer the shore than `water_start`. Each is
+/// Dots scattered over the water: `space_dark` px apart at `water_start`,
+/// easing to `space_light` px over `water_reach`, never nearer the shore than `water_start`. Each is
 /// `water_size` px across, turned as the batch follows, varied by
 /// `mod_jitter` and bent by `mod_wobble`; `water_patches` gathers them in
 /// patches. Solid: no dashes.
@@ -597,16 +595,16 @@ pub fn wave_marks(
     };
     let spacing = |i: usize| {
         let t = tone(d[i], st);
-        st.space.max(1.0) * (st.space_light + (st.space_dark - st.space_light) * t).clamp(0.05, 4.0)
+        (st.space_base() * st.space_mul(t).clamp(0.05, 4.0)).max(1.0)
     };
-    let lo = st.space.max(1.0) * st.space_light.min(st.space_dark).clamp(0.05, 4.0);
-    let hi = st.space.max(1.0) * st.space_light.max(st.space_dark).clamp(0.05, 4.0);
+    let lo = st.space_light.min(st.space_dark).max(1.0);
+    let hi = st.space_light.max(st.space_dark).max(1.0);
     scatter(w, h, st, b.draw, (lo, hi), open, spacing, |i| {
         (tx[i], ty[i])
     })
 }
 
-/// Dots on land: `space` px apart as the batch's fields set it — closer in
+/// Dots on land: as far apart as the batch's fields set the spacing — closer in
 /// shadow and on steep ground, as lines would be — wherever the batch may
 /// draw and the input reaches `dash_cutoff`. Each is `water_size` px across,
 /// turned along the batch's direction.
@@ -744,7 +742,7 @@ fn mark(draw: Draw, size: f32) -> Vec<crate::Line> {
     }
 }
 
-/// Rows `space` px apart, broken into strokes about `water_size` px long:
+/// Rows `space_light` px apart, broken into strokes about `water_size` px long:
 /// ink `dash_dark` at `water_start`, easing to `dash_light` over
 /// `water_reach`. The rows run at `angle` from north, or along the shore,
 /// bend together by `mod_wobble` over `mod_wobble_size` px like a swell, and
@@ -774,7 +772,7 @@ pub fn ripples(
         (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
             .then(|| y as usize * w + x as usize)
     };
-    let gap = st.space.max(1.5);
+    let gap = st.space_base().max(1.5);
     let stroke = st.water_size.max(4.0);
 
     // The rows before they ripple: straight across the map, or the
@@ -978,7 +976,7 @@ fn fray_along(
     whole: impl Fn([f32; 2]) -> f32 + Send + Sync,
 ) -> Vec<crate::Line> {
     let _ = (w, h);
-    let period = (st.space * 1.5).max(3.0);
+    let period = (st.space_base() * 1.5).max(3.0);
     paths
         .into_par_iter()
         .enumerate()
@@ -1061,7 +1059,7 @@ pub fn shore_contour_trace(b: &WaterBatch) -> bool {
 }
 
 /// Concentric lines parallel to the shore: distance contours stepped by
-/// [`Style::space`] (times the near/far multipliers over [`Style::water_space_reach`]).
+/// `space_dark` px at the shore easing to `space_light` px over [`Style::water_space_reach`].
 pub fn shore_rings(
     dist: &[f32],
     coverage: &[f32],
@@ -1081,8 +1079,8 @@ pub fn shore_rings(
     if max_d <= st.water_start + 0.01 || w == 0 || h == 0 {
         return Vec::new();
     }
-    const SPACE_MUL_MIN: f32 = 0.72;
-    let max_rings = (((max_d - st.water_start) / st.space.max(1.0)).ceil() as usize)
+    let max_rings = (((max_d - st.water_start) / st.space_light.min(st.space_dark).max(SPACE_MIN))
+        .ceil() as usize)
         .saturating_add(4)
         .clamp(1, 800);
 
@@ -1096,9 +1094,9 @@ pub fn shore_rings(
         let mul = if st.water_space_reach <= 0.0 {
             1.0
         } else {
-            st.space_light + (st.space_dark - st.space_light) * t
+            st.space_mul(t)
         };
-        let step = (st.space * mul.clamp(SPACE_MUL_MIN, 4.0)).max(1.0);
+        let step = (st.space_base() * mul.clamp(0.05, 4.0)).max(SPACE_MIN);
 
         let cov: Vec<f32> = dist
             .iter()
@@ -1155,7 +1153,7 @@ pub fn shoreline(
     let rings: Vec<(Vec<crate::Line>, f32)> = (0..sh.lines.max(1))
         .into_par_iter()
         .map(|k| {
-            let out = k as f32 * st.space.max(0.5);
+            let out = k as f32 * st.space_base().max(0.5);
             let lines = if k == 0 {
                 outlines.to_vec()
             } else {
@@ -1336,12 +1334,12 @@ mod tests {
     #[test]
     fn partial_style_starts_from_water_defaults() {
         let b: WaterBatch = serde_json::from_str(
-            r#"{"follow": "map", "angle": 20, "style": {"wr": 90, "space": 5}}"#,
+            r#"{"follow": "map", "angle": 20, "style": {"wr": 90, "sd": 5}}"#,
         )
         .unwrap();
         assert_eq!(b.follow, Follow::Map);
         assert_eq!(b.style.water_reach, 90.0);
-        assert_eq!(b.style.space, 5.0);
+        assert_eq!(b.style.space_dark, 5.0);
         assert_eq!(b.style.space_light, Style::water().space_light);
         let bare: WaterBatch = serde_json::from_str("{}").unwrap();
         assert_eq!(bare, WaterBatch::default());
@@ -1393,9 +1391,8 @@ mod tests {
         let (dist, _) = shore(&c, w, h);
         let batch = |space_dark: f32| WaterBatch {
             style: Style {
-                space: 6.0,
                 space_dark,
-                space_light: 1.4,
+                space_light: 8.4,
                 water_start: 3.0,
                 water_reach: 80.0,
                 water_space_reach: 60.0,
@@ -1403,8 +1400,8 @@ mod tests {
             },
             ..WaterBatch::default()
         };
-        let tight = shore_rings(&dist, &c, None, w, h, &batch(0.85));
-        let loose = shore_rings(&dist, &c, None, w, h, &batch(1.2));
+        let tight = shore_rings(&dist, &c, None, w, h, &batch(5.1));
+        let loose = shore_rings(&dist, &c, None, w, h, &batch(7.2));
         assert!(
             loose.len() < tight.len(),
             "wider spacing near the shore → fewer rings"
@@ -1426,12 +1423,12 @@ mod tests {
         dashed.style.dash_dark = 0.5;
         assert!(shoreline(&outlines, &dist, w, h, &dashed).1.len() > 10);
 
-        // Two lines: the second one `space` px out, inside the lake.
+        // Two lines: the second one `space_light` px out, inside the lake.
         let mut double = Shoreline {
             lines: 2,
             ..Shoreline::default()
         };
-        double.style.space = 6.0;
+        double.style.space_light = 6.0;
         let (lines, _) = shoreline(&outlines, &dist, w, h, &double);
         assert_eq!(lines.len(), 2);
         let r = |l: &crate::Line| {

@@ -459,7 +459,7 @@ fn trace_land(
             }
             at(Stage::Start);
             let g = of[i];
-            let mut bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space);
+            let mut bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space_base());
             fields::heighten(&mut bf, elev, &st);
             let t1 = now();
             at(Stage::Trace);
@@ -1237,9 +1237,8 @@ mod tests {
         let st = Style {
             dash_light: 1.0,
             dash_dark: 1.0,
-            dash_drop: 0.0,
-            space_dark: 0.5,
-            space_light: 1.6,
+            space_dark: 2.4,
+            space_light: 7.7,
             ..Style::default()
         };
         let d = draw(&e, w, h, 30.0, &st);

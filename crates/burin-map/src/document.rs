@@ -216,13 +216,13 @@ mod tests {
               area: { at: "46.02,7.74", size_mm: [210, 297], },  // trailing commas are fine
               "batches": [
                 /* one pass */
-                { "angle": 0, "style": { "space": 6, /* "dash_light": 0.2, */ } },
+                { "angle": 0, "style": { "space_light": 6, /* "dash_light": 0.2, */ } },
               ],
             }"#,
         )
         .unwrap();
         assert_eq!(doc.area.unwrap().at.as_deref(), Some("46.02,7.74"));
-        assert_eq!(doc.batches[0].style.space, 6.0);
+        assert_eq!(doc.batches[0].style.space_light, 6.0);
         assert_eq!(doc.batches[0].style.dash_light, Style::default().dash_light);
         let list = Document::parse("// passes\n[{\"angle\": 90}]").unwrap();
         assert_eq!(list.batches[0].angle, 90.0);
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn parses_bare_batch_array() {
-        let doc = Document::parse(r#"[{"angle": 90, "style": {"space": 6}}]"#).unwrap();
+        let doc = Document::parse(r#"[{"angle": 90, "style": {"space_light": 6}}]"#).unwrap();
         assert!(doc.area.is_none());
         assert_eq!(doc.batches.len(), 1);
         assert_eq!(doc.batches[0].angle, 90.0);
@@ -241,8 +241,8 @@ mod tests {
         let json = r#"{
             "area": {"at": "Twin Peaks, San Francisco", "size_km": [8, 8], "size_mm": [200], "pen_mm": 0.25},
             "batches": [
-                {"angle": 0, "style": {"space": 5}},
-                {"name": "Valleys", "angle": 90, "style": {"space": 6, "batch_floor": 0.4}}
+                {"angle": 0, "style": {"space_light": 5}},
+                {"name": "Valleys", "angle": 90, "style": {"space_light": 6, "batch_floor": 0.4}}
             ]
         }"#;
         let doc = Document::parse(json).unwrap();

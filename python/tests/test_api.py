@@ -27,9 +27,9 @@ def drawing(island):
 
 def test_style_mirrors_the_engine():
     st = Style()
-    assert st.space == pytest.approx(4.8) and st.batch_seed == 1
-    assert dataclasses.replace(st, space=6).space == 6
-    assert "space" in burin_map.style_help()
+    assert st.space_light == pytest.approx(4.8) and st.batch_seed == 1
+    assert dataclasses.replace(st, space_light=6).space_light == 6
+    assert "space_light" in burin_map.style_help()
     assert any(g[0] == "space" for g in burin_map.style_groups())
     with pytest.raises(TypeError):
         Style(nope=1)
@@ -51,8 +51,8 @@ def test_nothing_drawn_at_sea(drawing, island):
 
 
 def test_style_changes_the_drawing(island):
-    sparse = draw_elevation(island, PX_M, Style(space=8))
-    dense = draw_elevation(island, PX_M, Style(space=4))
+    sparse = draw_elevation(island, PX_M, Style(space_light=8, space_dark=8))
+    dense = draw_elevation(island, PX_M, Style(space_light=4, space_dark=4))
     assert len(dense.lines) > 1.5 * len(sparse.lines)
 
 
@@ -98,7 +98,7 @@ def test_evaluate_runs_a_document():
     """A document is a script; `evaluate` is the front end that runs it."""
     doc = burin_map.evaluate(
         "burin.area({ at: '46,7.7', size_km: [8, 6] })\n"
-        "burin.batch({ angle: 0, style: { space: 5 } })\n"
+        "burin.batch({ angle: 0, style: { space_light: 5 } })\n"
         "burin.water('dots', { color: '#9db4c0' })\n"
         "burin.shore()\n"
         "burin.draw()\n"

@@ -3,9 +3,9 @@
 //!
 //! Every parameter has a descriptive name, prefixed by its group, and a short
 //! form for when you know what you're doing:
-//!   space_*   distance between lines (range via space_light / space_dark)
-//!   dash_*    ink along each line   (range via dash_light / dash_dark)
-//!   mod_*     character (jitter, breaks, wobble, smooth)
+//!   space_*   distance between lines, px in light and in shadow
+//!   dash_*    ink along each line, share in light and in shadow
+//!   mod_*     character (jitter, flat, breaks, wobble, smooth), all off but the path ones
 //!   input_*   0…1 field from DEM + sun
 //!   sun_*     sun direction / elevation
 //!   engine_*  streamline tracer
@@ -30,7 +30,7 @@ pub struct Param {
 pub const GROUPS: &[(&str, &str)] = &[
     ("space", "Distance between neighbouring lines, from open on lit slopes to dense in shadow."),
     ("dash", "How much of each line is inked, from broken dashes in light to solid in shadow."),
-    ("mod", "Hand-drawn character: uneven dashes, small breaks, wandering on flat ground, smooth curves."),
+    ("mod", "Hand-drawn character: uneven dashes, a lottery on flat ground, small breaks, wandering, smooth curves."),
     ("input", "The shading input, 0 to 1, computed from the terrain and the sun. Spacing and dashes follow it."),
     ("sun", "Where the light comes from."),
     ("engine", "How lines are traced. Usually best left alone."),
@@ -92,23 +92,59 @@ impl Style {
             .find(|p| p.name == name || p.short == name)
             .map(|p| p.name)
     }
+
+    /// The one distance between lines where a single one is needed, and the
+    /// px the spacing fields scale from: the lit spacing.
+    pub fn space_base(&self) -> f32 {
+        self.space_light.max(0.1)
+    }
+
+    /// Spacing at tone `t` (0 lit, 1 shadow) as a multiple of [`Style::space_base`].
+    pub fn space_mul(&self, t: f32) -> f32 {
+        1.0 + (self.space_dark / self.space_base() - 1.0) * t
+    }
+
+    /// Inked share of a dash period at tone `t`, before any modifier.
+    pub fn duty(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        let d = if self.dash_mid < 0.0 {
+            self.dash_light + (self.dash_dark - self.dash_light) * t
+        } else if t < 0.5 {
+            self.dash_light + (self.dash_mid - self.dash_light) * t * 2.0
+        } else {
+            self.dash_mid + (self.dash_dark - self.dash_mid) * (t * 2.0 - 1.0)
+        };
+        d.clamp(0.0, 1.0)
+    }
+
+    /// `t` rounded to `dash_levels` even levels from 0 to 1; as is below 2.
+    pub fn quantize(&self, t: f32) -> f32 {
+        let n = self.dash_levels;
+        if n < 2 {
+            return t;
+        }
+        let bin = ((t.clamp(0.0, 1.0) * n as f32) as u32).min(n - 1);
+        bin as f32 / (n - 1) as f32
+    }
 }
 
 style! {
-    space: space ("s"): f32 = 4.8, "distance between neighbouring lines, in px";
-    space: space_light ("sl"): f32 = 1.0, "spacing multiplier on fully lit slopes; above 1 opens them up";
-    space: space_dark ("sd"): f32 = 0.7, "spacing multiplier in full shadow; below 1 packs lines closer";
+    space: space_light ("sl"): f32 = 4.8, "distance between neighbouring lines on fully lit slopes, in px";
+    space: space_dark ("sd"): f32 = 3.4, "distance between neighbouring lines in full shadow, in px";
     space: space_steep ("ss"): f32 = 0.4, "how much steep ground tightens the spacing: 0 off, 1 full";
     space: space_steep_gamma ("ssg"): f32 = 1.0, "shape of that tightening; higher values keep it for the steepest ground";
 
-    dash: dash_light ("dl"): f32 = 0.15, "inked share of each dash period on fully lit slopes, 0 to 1";
-    dash: dash_dark ("dd"): f32 = 1.0, "inked share of each dash period in full shadow, 0 to 1";
-    dash: dash_period ("dp"): f32 = 2.2, "length of one dash plus its gap, as a multiple of the spacing";
-    dash: dash_cutoff ("dc"): f32 = 0.03, "draw nothing where the shading input is below this";
-    dash: dash_drop ("ddrop"): f32 = 1.0, "randomly leave out dashes on flat and lit ground: 0 off, 1 full";
+    dash: dash_light ("dl"): f32 = 0.15, "inked share of each dash period at tone 0 (full light), 0 to 1";
+    dash: dash_dark ("dd"): f32 = 1.0, "inked share of each dash period at tone 1 (full shadow), 0 to 1";
+    dash: dash_mid ("dm"): f32 = -1.0, "inked share at tone 0.5; below 0 halfway between dash_light and dash_dark";
+    dash: dash_period ("dp"): f32 = 10.5, "length of one dash plus its gap, in px";
+    dash: dash_levels ("dlv"): u32 = 0, "round the tone to this many even levels before inking, for flat zones of ink; 0 smooth";
+    dash: dash_cutoff ("dc"): f32 = 0.0, "no ink where the tone is below this; 0 off";
+    dash: dash_solid ("dsol"): f32 = 1.0, "solid line where the tone is above this, whatever the modifiers; 1 off";
 
-    mod: mod_jitter ("mj"): f32 = 0.45, "random variation in dash length (0 is mechanical); fades out where lines go solid";
-    mod: mod_breaks ("mb"): f32 = 0.15, "chance of a small break in an otherwise solid line";
+    mod: mod_jitter ("mj"): f32 = 0.0, "uneven dashes: varies dash and period length, keeping the average ink; 0 mechanical";
+    mod: mod_flat ("mf"): f32 = 0.0, "on flat and lit ground, chance a dash is left out or takes the flat ground's ink; 0 off";
+    mod: mod_breaks ("mb"): f32 = 0.0, "chance of a small break in an otherwise solid dash; 0 off";
     mod: mod_wobble ("mw"): f32 = 20.0, "how far lines wander off course on flat ground, in degrees";
     mod: mod_wobble_size ("mws"): f32 = 12.0, "length of each wander, in px";
     mod: mod_wave ("mwv"): f32 = 0.0, "how far each line swings to either side as it waves along its path, in px; 0 off";
@@ -143,7 +179,7 @@ style! {
 
     water: water_start ("wst"): f32 = 2.0, "gap between the shore and the first line, in px";
     water: water_reach ("wr"): f32 = 60.0, "how far out from the shore ink and tracing stay active, in px; does not set line spacing";
-    water: water_space_reach ("wsr"): f32 = 120.0, "how far from the shore line spacing eases from space_dark to space_light, in px; 0 keeps spacing fixed at space";
+    water: water_space_reach ("wsr"): f32 = 120.0, "how far from the shore line spacing eases from space_dark to space_light, in px; 0 keeps spacing fixed at space_light";
     water: water_fade ("wf"): f32 = 1.0, "how the lines fade towards that distance: above 1 sooner, below 1 later";
     water: water_size ("ws"): f32 = 14.0, "length of each ripple stroke or dot, in px (draw ripples or dots; dots on land too)";
     water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches (dots on land too)";
@@ -223,7 +259,7 @@ impl Batch {
         Batch::along(Style::default())
     }
 
-    /// Stippling, denser where the shading is darker: a dot every `space` px.
+    /// Stippling, denser where the shading is darker: a dot every `space_light` px in light.
     pub fn dots() -> Self {
         Batch {
             draw: Draw::Dots,
@@ -479,15 +515,17 @@ mod tests {
     #[test]
     fn set_and_get_by_name() {
         let mut st = Style::default();
-        assert!(st.set("space", 6.0));
-        assert_eq!(st.get("space"), Some(6.0));
-        assert!(st.set("sl", 1.8));
-        assert_eq!(st.space_light, 1.8);
+        assert!(st.set("space_light", 6.0));
+        assert_eq!(st.get("space_light"), Some(6.0));
+        assert!(st.set("sd", 1.8));
+        assert_eq!(st.space_dark, 1.8);
+        assert!(!st.set("space", 6.0));
+        assert!(!st.set("dash_drop", 1.0));
         assert!(st.set("bseed", 9.0));
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 47);
+        assert_eq!(Style::PARAMS.len(), 49);
     }
 
     #[test]
@@ -564,7 +602,7 @@ mod json_tests {
                 draw: Draw::Dots,
                 band: Band::default(),
                 style: Style {
-                    space: 6.0,
+                    space_light: 6.0,
                     batch_floor: 0.4,
                     ..Style::default()
                 },
@@ -582,17 +620,17 @@ mod json_tests {
         assert_eq!(back[1].cap, Cap::RoundInside);
         assert!(json.contains(r#""cap":"round_inside""#));
         assert!(!to_json_batches(&batches[..1]).contains("cap"));
-        assert_eq!(back[1].style.space, 6.0);
+        assert_eq!(back[1].style.space_light, 6.0);
         assert_eq!(back[1].style.batch_floor, 0.4);
     }
 
     #[test]
     fn partial_style_uses_defaults() {
-        let json = r#"[{"angle": 45, "style": {"space": 7.5}}]"#;
+        let json = r#"[{"angle": 45, "style": {"space_light": 7.5}}]"#;
         let back = from_json_batches(json).expect("should parse");
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].angle, 45.0);
-        assert_eq!(back[0].style.space, 7.5);
+        assert_eq!(back[0].style.space_light, 7.5);
         // untouched field keeps its default
         assert_eq!(back[0].style.batch_stroke, Style::default().batch_stroke);
     }
@@ -605,15 +643,16 @@ mod json_tests {
     #[test]
     fn terrain_carries_over_to_the_next_batch() {
         let json = r#"[
-            {"style": {"sun_azimuth": 45, "space": 6}},
+            {"style": {"sun_azimuth": 45, "space_light": 6, "dash_light": 0.5}},
             {"angle": 90},
             {"style": {"sun_azimuth": 200}}
         ]"#;
         let b = from_json_batches(json).unwrap();
         assert_eq!(b[1].style.sun_azimuth, 45.0, "inherited");
+        assert_eq!(b[1].style.space_light, 6.0, "spacing is terrain: inherited");
         assert_eq!(
-            b[1].style.space,
-            Style::default().space,
+            b[1].style.dash_light,
+            Style::default().dash_light,
             "not terrain: default"
         );
         assert_eq!(b[2].style.sun_azimuth, 200.0);
@@ -680,8 +719,8 @@ mod json_tests {
 
     #[test]
     fn unknown_fields_ignored() {
-        let json = r#"[{"angle": 0, "style": {"space": 5, "nonsense": 99}}]"#;
+        let json = r#"[{"angle": 0, "style": {"space_light": 5, "nonsense": 99}}]"#;
         let back = from_json_batches(json).expect("should parse");
-        assert_eq!(back[0].style.space, 5.0);
+        assert_eq!(back[0].style.space_light, 5.0);
     }
 }
