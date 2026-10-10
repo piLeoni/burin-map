@@ -1,4 +1,6 @@
-# Agent / LLM notes
+# Agent / LLM notes — style & parameters
+
+**Architecture and agent workflow:** [../AGENTS.md](../AGENTS.md) and [architecture/INDEX.md](architecture/INDEX.md).
 
 When editing Burin Map styles or explaining behaviour to users:
 

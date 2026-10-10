@@ -19,7 +19,7 @@ npm install -g burin-map       # or: npx burin-map …
 centuries.*
 
 Document syntax: [SYNTAX.md](SYNTAX.md). Design specs and planned features:
-[docs/](docs/).
+[docs/](docs/). AI/architecture index for contributors: [AGENTS.md](AGENTS.md).
 
 <p align="center">
   <img src="examples/bay-area.png" width="720" alt="San Francisco Bay Area" />
@@ -282,8 +282,8 @@ By default there is one pass at angle 0° (lines along the contours). Each
 that pass until the next `--batch` (`-b`). `--batch-angle` (`--ba`) is degrees
 from the contour tangent (0 = along, 90 = downslope).
 
-The terrain parameters (`input_*`, `sun_*`, `space_light`, `space_dark`,
-`space_steep*`, `mod_wobble*`, `mod_smooth`) carry over: a pass that leaves one
+Some parameters carry over (`input_*`, `sun_*`, `space_light`, `space_dark`,
+`space_steep*`, `mod_wobble*`, `mod_smooth`): a pass that leaves one
 out takes it from the pass before, so one sun set in the first pass lights
 them all, and a later pass can still set its own. Other parameters fall back
 to their defaults. The same holds for `batches` in a document.

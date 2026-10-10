@@ -50,3 +50,11 @@ everywhere, and an exaggerated near/far gradient.
 `mod_wave` with `mod_wave_zone: 1` makes neighbours wave together. Set
 `water_start` past where the coast batch's `water_start + water_reach` ends,
 so currents stay clear of the shore rings. See `examples/ocean-currents.json5`.
+
+## Two water passes: the engraved sea
+
+The best showcase of water lines is [`presets/engraved-sea.js`](../../presets/engraved-sea.js):
+one `follow: "shore"` pass from 3 to 20 px off the coast, then a `follow: "map"`
+pass from 26 px out over the whole sea, with `mod_wave_even: 1` so every
+current waves in step with its neighbours, like an engraved plate. The web docs
+(`/docs/examples`) show it whole and zoomable, with each pass explained.

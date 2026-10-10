@@ -9,22 +9,12 @@ import fills from '../../../docs/guide/fills.md?raw'
 
 /** Sidebar order and markdown body (repo source of truth: docs/guide/). */
 export const GUIDE_SECTIONS = [
-  { slug: 'model', title: 'The shared model', body: model },
-  { slug: 'land-lines', title: 'Land — lines', body: landLines, presetPreviews: true },
-  { slug: 'land-dots', title: 'Land — dots', body: landDots },
-  { slug: 'water-lines', title: 'Water — lines', body: waterLines },
-  { slug: 'water-ripples', title: 'Water — ripples', body: waterRipples },
-  { slug: 'water-dots', title: 'Water — dots', body: waterDots },
-  { slug: 'shoreline', title: 'Shoreline', body: shoreline },
-  { slug: 'fills', title: 'Fills', body: fills },
-]
-
-export const INK_PRESET_PREVIEWS = [
-  { id: 'ink-classic', label: 'classic' },
-  { id: 'ink-solid', label: 'solid' },
-  { id: 'ink-half', label: 'half' },
-  { id: 'ink-jitter', label: 'jitter' },
-  { id: 'ink-levels', label: 'levels' },
-  { id: 'ink-flat', label: 'flat' },
-  { id: 'ink-thresholds', label: 'thresholds' },
+  { slug: 'model', group: 'Model', title: 'Tone, spacing, ink', body: model },
+  { slug: 'land-lines', group: 'Land', title: 'Lines', body: landLines },
+  { slug: 'land-dots', group: 'Land', title: 'Dots', body: landDots },
+  { slug: 'fills', group: 'Land', title: 'Fills (land and sea)', body: fills },
+  { slug: 'water-lines', group: 'Water', title: 'Lines', body: waterLines },
+  { slug: 'water-ripples', group: 'Water', title: 'Ripples', body: waterRipples },
+  { slug: 'water-dots', group: 'Water', title: 'Dots', body: waterDots },
+  { slug: 'shoreline', group: 'Water', title: 'Shoreline', body: shoreline },
 ]

@@ -10,12 +10,12 @@ burin.batch({ angle: 0, style: { dash_light: 0.5, dash_dark: 1 } });
 
 ## Parameters
 
-| Group | Parameter | Default | Terrain† |
+| Group | Parameter | Default | Carries over |
 |---|---|---|---|
-| Space | `space_light` | 4.8 | yes |
-| | `space_dark` | 3.4 | yes |
-| | `space_steep` | 0.4 | yes |
-| | `space_steep_gamma` | 1 | yes |
+| Space | `space_light` | 4.8 | ✓ |
+| | `space_dark` | 3.4 | ✓ |
+| | `space_steep` | 0.4 | ✓ |
+| | `space_steep_gamma` | 1 | ✓ |
 | Dash | `dash_light` | 0.15 | |
 | | `dash_dark` | 1 | |
 | | `dash_mid` | -1 | |
@@ -26,25 +26,25 @@ burin.batch({ angle: 0, style: { dash_light: 0.5, dash_dark: 1 } });
 | Mod | `mod_jitter` | 0 | |
 | | `mod_flat` | 0 | |
 | | `mod_breaks` | 0 | |
-| | `mod_wobble` | 20 | yes |
-| | `mod_wobble_size` | 12 | yes |
+| | `mod_wobble` | 20 | ✓ |
+| | `mod_wobble_size` | 12 | ✓ |
 | | `mod_wave` | 0 | |
 | | `mod_wave_size` | 16 | |
 | | `mod_wave_zone` | 0 | |
 | | `mod_wave_even` | 0 | |
-| | `mod_smooth` | 6 | yes |
-| Input | `input_flat` | 0.25 | yes |
-| | `input_gain` | 3 | yes |
-| | `input_dark_gamma` | 0.7 | yes |
-| | `input_light_gain` | 1.5 | yes |
-| | `input_light_floor` | 0.06 | yes |
-| | `input_blur` | 1.8 | yes |
-| | `input_broad_blur` | 11.5 | yes |
-| | `input_broad` | 0.5 | yes |
+| | `mod_smooth` | 6 | ✓ |
+| Input | `input_flat` | 0.25 | ✓ |
+| | `input_gain` | 3 | ✓ |
+| | `input_dark_gamma` | 0.7 | ✓ |
+| | `input_light_gain` | 1.5 | ✓ |
+| | `input_light_floor` | 0.06 | ✓ |
+| | `input_blur` | 1.8 | ✓ |
+| | `input_broad_blur` | 11.5 | ✓ |
+| | `input_broad` | 0.5 | ✓ |
 | | `input_height` | 0 | |
-| Sun | `sun_azimuth` | 315 | yes |
-| | `sun_altitude` | 45 | yes |
-| | `sun_exag` | 4 | yes |
+| Sun | `sun_azimuth` | 315 | ✓ |
+| | `sun_altitude` | 45 | ✓ |
+| | `sun_exag` | 4 | ✓ |
 | Engine | `engine_step` | 1 | |
 | | `engine_min` | 4 | |
 | | `engine_stop` | 0.5 | |
@@ -54,9 +54,10 @@ burin.batch({ angle: 0, style: { dash_light: 0.5, dash_dark: 1 } });
 | | `batch_stroke` | 1.2 | |
 | | `batch_seed` | 1 | |
 
-† **Terrain** parameters carry over from one batch to the next in a document
-(see [SYNTAX.md](../../SYNTAX.md#terrain-carries-over)); the rest fall back to
-their default on every batch.
+**Carries over (✓):** in a document with several batches, a batch that leaves one of these out
+takes it from the batch above, so a second pass (say a 45° crosshatch) follows the same light and
+spacing as the first without repeating them. Every other parameter left out goes back to its
+default. Details: [SYNTAX.md](../../SYNTAX.md#carries-over).
 
 ## Spacing: `space_light` / `space_dark`
 
@@ -89,8 +90,12 @@ three flat zones (10% / 50% / solid) before duty is computed.
 
 ## Ink presets
 
-`presets/ink-*.js` isolate each behaviour above on the same area as Contours.
-See the previews on the [Docs](/docs) ink-presets page, or run e.g.:
+`presets/ink-*.js` isolate each behaviour above, all on the same area as
+Contours. Below, the same few hills from each:
+
+![Ink presets: classic, solid, half, jitter, levels, flat, thresholds](img/ink-presets.png)
+
+Run any of them, e.g.:
 
 ```bash
 burin-map --script presets/ink-levels.js --out-file out.png

@@ -1,7 +1,7 @@
 # burin-map document syntax
 
 **Style model (spacing, ink, modifiers):** [docs/guide/README.md](docs/guide/README.md).
-On the web app, open **Docs** (`/docs`) for diagrams and ink-preset previews.
+On the web app, open **Docs** (`/docs`) for zoomable comparisons of every style and whole examples.
 
 A document describes a whole drawing, and a document is a **JavaScript script**:
 it calls `burin.*` and ends with `burin.draw()`, and running it builds a *graph*
@@ -110,7 +110,7 @@ batches:
 | `ground` | `land` (default) or `sea`: `sea` draws the seabed instead, and nothing on land |
 | `draw` | `lines` (default), `dots`: stippling, denser where lines would be (see [Land dots](#land-dots)), or `fill`: a flat area (see [Fills](#fills)) |
 | `where` | for a fill, the heights or depths it keeps to: `elev_min`, `elev_max`, `depth_min`, `depth_max`, in metres |
-| `style` | parameters, see below; those left out keep their defaults, except the terrain ones (see [Terrain carries over](#terrain-carries-over)) |
+| `style` | parameters, see below; those left out keep their defaults, except the ones that carry over from the batch before (see [Carries over](#carries-over)) |
 
 `name` is only for you; `layer` is what plotters and SVG editors group by.
 
@@ -158,7 +158,7 @@ Layers stack in batch order, the first at the bottom: a fill covers whatever the
 | `elev_min` / `elev_max` | ground at least / at most this high, m |
 | `depth_min` / `depth_max` | sea floor at least / at most this deep, m |
 
-A limit left out is open. Depths come from the same elevation tiles as `ground: sea`. Of the style only `input_blur` matters: it smooths the band's edges, px (the coast is never smoothed); raise it where coarse elevation tiles leave steps. A fill's style is its own: it doesn't carry over to the batches after it (see [Terrain carries over](#terrain-carries-over)). Fills don't carry `angle`, and the width and cap settings mean nothing to them.
+A limit left out is open. Depths come from the same elevation tiles as `ground: sea`. Of the style only `input_blur` matters: it smooths the band's edges, px (the coast is never smoothed); raise it where coarse elevation tiles leave steps. A fill's style is its own: it doesn't carry over to the batches after it (see [Carries over](#carries-over)). Fills don't carry `angle`, and the width and cap settings mean nothing to them.
 
 A plotter has no use for fills; they are for the screen, print and SVG editors. The PNG paints them, the SVG has them as `<g fill="…" fill-rule="evenodd">` groups, and the GeoJSON adds one MultiPolygon feature per fill with its `fill` colour and `layer`.
 
@@ -239,12 +239,12 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 
 ### Land parameters
 
-| Group | Parameter | Default | Terrain |
+| Group | Parameter | Default | Carries over |
 |---|---|---|---|
-| Space | `space_light` | 4.8 | yes |
-|  | `space_dark` | 3.4 | yes |
-|  | `space_steep` | 0.4 | yes |
-|  | `space_steep_gamma` | 1 | yes |
+| Space | `space_light` | 4.8 | ✓ |
+|  | `space_dark` | 3.4 | ✓ |
+|  | `space_steep` | 0.4 | ✓ |
+|  | `space_steep_gamma` | 1 | ✓ |
 | Dash | `dash_light` | 0.15 |  |
 |  | `dash_dark` | 1 |  |
 |  | `dash_mid` | -1 |  |
@@ -255,25 +255,25 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 | Mod | `mod_jitter` | 0 |  |
 |  | `mod_flat` | 0 |  |
 |  | `mod_breaks` | 0 |  |
-|  | `mod_wobble` | 20 | yes |
-|  | `mod_wobble_size` | 12 | yes |
+|  | `mod_wobble` | 20 | ✓ |
+|  | `mod_wobble_size` | 12 | ✓ |
 |  | `mod_wave` | 0 |  |
 |  | `mod_wave_size` | 16 |  |
 |  | `mod_wave_zone` | 0 |  |
 |  | `mod_wave_even` | 0 |  |
-|  | `mod_smooth` | 6 | yes |
-| Input | `input_flat` | 0.25 | yes |
-|  | `input_gain` | 3 | yes |
-|  | `input_dark_gamma` | 0.7 | yes |
-|  | `input_light_gain` | 1.5 | yes |
-|  | `input_light_floor` | 0.06 | yes |
-|  | `input_blur` | 1.8 | yes |
-|  | `input_broad_blur` | 11.5 | yes |
-|  | `input_broad` | 0.5 | yes |
+|  | `mod_smooth` | 6 | ✓ |
+| Input | `input_flat` | 0.25 | ✓ |
+|  | `input_gain` | 3 | ✓ |
+|  | `input_dark_gamma` | 0.7 | ✓ |
+|  | `input_light_gain` | 1.5 | ✓ |
+|  | `input_light_floor` | 0.06 | ✓ |
+|  | `input_blur` | 1.8 | ✓ |
+|  | `input_broad_blur` | 11.5 | ✓ |
+|  | `input_broad` | 0.5 | ✓ |
 |  | `input_height` | 0 |  |
-| Sun | `sun_azimuth` | 315 | yes |
-|  | `sun_altitude` | 45 | yes |
-|  | `sun_exag` | 4 | yes |
+| Sun | `sun_azimuth` | 315 | ✓ |
+|  | `sun_altitude` | 45 | ✓ |
+|  | `sun_exag` | 4 | ✓ |
 | Engine | `engine_step` | 1 |  |
 |  | `engine_min` | 4 |  |
 |  | `engine_stop` | 0.5 |  |
@@ -283,9 +283,11 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 |  | `batch_stroke` | 1.2 |  |
 |  | `batch_seed` | 1 |  |
 
-### Terrain carries over
+### Carries over
 
-The terrain parameters (marked above: the `input_*` and `sun_*` groups, `space_light`, `space_dark`, `space_steep`, `space_steep_gamma`, `mod_wobble`, `mod_wobble_size`, `mod_smooth`) shape the terrain a batch follows. A batch that leaves one out takes it from the batch above; the first batch takes the default. Every other parameter always falls back to its default. Fills follow no terrain, so they are skipped: they neither take these parameters nor hand them on.
+Some parameters shape what a batch follows rather than how it inks: the shading (`input_*`, `sun_*`), the spacing it sets (`space_light`, `space_dark`, `space_steep`, `space_steep_gamma`), and how lines wander and smooth (`mod_wobble`, `mod_wobble_size`, `mod_smooth`). These are marked ✓ above. A batch that leaves one out takes it from the batch above it; the first batch takes the default. Every other parameter left out falls back to its default.
+
+This is what makes multi-pass drawings line up: a crosshatch at 45° over contours at 0° sees the same light and the same spacing field as the pass beneath it, without repeating them. Fills follow nothing, so they are skipped: they neither take these parameters nor hand them on.
 
 ```yaml
 batches:

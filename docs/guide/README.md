@@ -4,8 +4,8 @@ Burin Map draws seven kinds of thing. All share one `style` object and the same
 spacing/ink model from [00-model.md](00-model.md); each page below gives the
 **full parameter table** for that one, plus close-up comparisons.
 
-**On the web app:** open **Docs** (`/docs`) for this guide with the same images,
-rendered larger, with a topic list on the left.
+**On the web app:** open **Docs** (`/docs`) for this guide with the comparisons
+as zoomable SVG, plus an overview of the project and a page of whole examples.
 
 ## Draw styles
 
@@ -21,6 +21,16 @@ rendered larger, with a topic list on the left.
 | [fills.md](fills.md) | land/sea batch, `draw: "fill"` | Flat colour bands by height or depth |
 
 Full parameter reference (every group, every default): [SYNTAX.md](../../SYNTAX.md).
+
+## Whole documents
+
+The pages above take one parameter at a time. To see what they add up to, read
+the documents in [`presets/`](../../presets/) — above all
+[`engraved-sea.js`](../../presets/engraved-sea.js) (hatched hills, a doubled
+coast, and an open sea of currents waving in step), `sea-depth.js`,
+`layer-tints.js`, `contour-belts.js`, `downhill.js` and `scripted-hills.js`.
+The web docs (`/docs/examples`) show each one whole, with a zoomable vector
+detail and the role of every pass.
 
 ## Quick recipes
 

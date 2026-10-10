@@ -41,6 +41,8 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,  // WASM can be large
         navigateFallback: '/index.html',
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        // Docs figures are large and only needed on /docs: fetched on demand, not precached.
+        globIgnores: ['docs/**'],
         runtimeCaching: [
           {
             urlPattern: /\/terrarium\/.*/i,

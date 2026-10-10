@@ -1,0 +1,267 @@
+{
+  "figures": {
+    "land-lines-spacing": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-lines-spacing-0.svg",
+          "label": "uniform 5 px",
+          "code": "style: { space_light: 5, space_dark: 5 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-spacing-1.svg",
+          "label": "default (4.8 / 3.4)",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/land-lines-spacing-2.svg",
+          "label": "exaggerated (11 / 2)",
+          "code": "style: { space_light: 11, space_dark: 2 }"
+        }
+      ]
+    },
+    "land-lines-ink": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-lines-ink-0.svg",
+          "label": "solid everywhere",
+          "code": "style: { dash_light: 1, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-ink-1.svg",
+          "label": "even 50% dashes in light",
+          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-ink-2.svg",
+          "label": "same ink, by hand",
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 1 }"
+        }
+      ]
+    },
+    "land-lines-modifiers": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-lines-modifiers-0.svg",
+          "label": "modifiers off",
+          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-modifiers-1.svg",
+          "label": "mod_flat: 1",
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_flat: 1 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-modifiers-2.svg",
+          "label": "mod_breaks: 1",
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_breaks: 1 }"
+        }
+      ]
+    },
+    "land-lines-levels": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-lines-levels-0.svg",
+          "label": "smooth (default)",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/land-lines-levels-1.svg",
+          "label": "three levels",
+          "code": "style: { dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1 }"
+        }
+      ]
+    },
+    "land-dots": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-dots-0.svg",
+          "label": "default",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/land-dots-1.svg",
+          "label": "water_patches: 1",
+          "code": "style: { water_patches: 1 }"
+        },
+        {
+          "src": "/docs/svg/land-dots-2.svg",
+          "label": "mod_jitter: 1 (dot size)",
+          "code": "style: { mod_jitter: 1 }"
+        }
+      ]
+    },
+    "water-lines": {
+      "w": 480,
+      "h": 450,
+      "tiles": [
+        {
+          "src": "/docs/svg/water-lines-0.svg",
+          "label": "default (tight near shore)",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/water-lines-1.svg",
+          "label": "uniform spacing",
+          "code": "style: { space_light: 2, space_dark: 2 }"
+        },
+        {
+          "src": "/docs/svg/water-lines-2.svg",
+          "label": "exaggerated gradient",
+          "code": "style: { space_dark: 1.5, space_light: 10 }"
+        }
+      ]
+    },
+    "water-ripples": {
+      "w": 480,
+      "h": 450,
+      "tiles": [
+        {
+          "src": "/docs/svg/water-ripples-0.svg",
+          "label": "default (swell + wave)",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/water-ripples-1.svg",
+          "label": "straight rows",
+          "code": "style: { mod_wobble: 0, mod_wave: 0 }"
+        },
+        {
+          "src": "/docs/svg/water-ripples-2.svg",
+          "label": "water_patches: 1",
+          "code": "style: { water_patches: 1 }"
+        }
+      ]
+    },
+    "water-dots": {
+      "w": 480,
+      "h": 450,
+      "tiles": [
+        {
+          "src": "/docs/svg/water-dots-0.svg",
+          "label": "default (dense near shore)",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/water-dots-1.svg",
+          "label": "uniform spacing",
+          "code": "style: { space_dark: 6, space_light: 6 }"
+        },
+        {
+          "src": "/docs/svg/water-dots-2.svg",
+          "label": "water_patches: 1",
+          "code": "style: { water_patches: 1 }"
+        }
+      ]
+    },
+    "shoreline": {
+      "w": 480,
+      "h": 450,
+      "tiles": [
+        {
+          "src": "/docs/svg/shoreline-0.svg",
+          "label": "one solid line (default)",
+          "code": "burin.shore({ lines: 1 })  // the default"
+        },
+        {
+          "src": "/docs/svg/shoreline-1.svg",
+          "label": "three lines, 4 px apart",
+          "code": "burin.shore({ lines: 3, style: { space_light: 4 } })"
+        },
+        {
+          "src": "/docs/svg/shoreline-2.svg",
+          "label": "dashed and wobbly",
+          "code": "burin.shore({ lines: 1, style: { dash_dark: 0.4, mod_wobble: 15 } })"
+        }
+      ]
+    },
+    "ink-presets": {
+      "w": 420,
+      "h": 300,
+      "tiles": [
+        {
+          "src": "/docs/svg/ink-classic.svg",
+          "label": "presets/ink-classic.js",
+          "code": "style: { dash_cutoff: 0.03, mod_jitter: 0.8, mod_flat: 1, mod_breaks: 0.15 }"
+        },
+        {
+          "src": "/docs/svg/ink-solid.svg",
+          "label": "presets/ink-solid.js",
+          "code": "style: { dash_light: 1, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/ink-half.svg",
+          "label": "presets/ink-half.js",
+          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/ink-jitter.svg",
+          "label": "presets/ink-jitter.js",
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 1 }"
+        },
+        {
+          "src": "/docs/svg/ink-levels.svg",
+          "label": "presets/ink-levels.js",
+          "code": "style: { dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1 }"
+        },
+        {
+          "src": "/docs/svg/ink-flat.svg",
+          "label": "presets/ink-flat.js",
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_flat: 1 }"
+        },
+        {
+          "src": "/docs/svg/ink-thresholds.svg",
+          "label": "presets/ink-thresholds.js",
+          "code": "style: { dash_light: 0.3, dash_dark: 0.3, dash_cutoff: 0.15, dash_solid: 0.6 }"
+        }
+      ],
+      "columns": 3
+    }
+  },
+  "examples": {
+    "contours": {
+      "src": "/docs/svg/example-contours.svg",
+      "w": 2400,
+      "h": 1667
+    },
+    "engraved-sea": {
+      "src": "/docs/svg/example-engraved-sea.svg",
+      "w": 2400,
+      "h": 1680
+    },
+    "sea-depth": {
+      "src": "/docs/svg/example-sea-depth.svg",
+      "w": 2400,
+      "h": 1680
+    },
+    "layer-tints": {
+      "src": "/docs/svg/example-layer-tints.svg",
+      "w": 2400,
+      "h": 1680
+    },
+    "contour-belts": {
+      "src": "/docs/svg/example-contour-belts.svg",
+      "w": 2400,
+      "h": 1667
+    },
+    "downhill": {
+      "src": "/docs/svg/example-downhill.svg",
+      "w": 2400,
+      "h": 1667
+    },
+    "scripted-hills": {
+      "src": "/docs/svg/example-scripted-hills.svg",
+      "w": 2400,
+      "h": 1667
+    }
+  }
+}
