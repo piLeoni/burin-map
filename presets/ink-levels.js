@@ -3,7 +3,7 @@
  *
  * The tone rounded to three levels before inking: no gradient, three
  * mechanical textures with sharp borders.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-levels.js --out-file ink-levels.png
  */

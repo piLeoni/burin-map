@@ -3,7 +3,7 @@
  *
  * As ink-half with full jitter: dashes and periods vary, the average ink
  * stays the same, solid lines stay solid.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-jitter.js --out-file ink-jitter.png
  */

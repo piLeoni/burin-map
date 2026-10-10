@@ -3,7 +3,7 @@
  *
  * Half the period inked at tone 0, solid at tone 1, no jitter: in full
  * light dash and gap are the same length.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-half.js --out-file ink-half.png
  */

@@ -4,18 +4,16 @@ import PresetPreviewGrid from './PresetPreviewGrid.jsx'
 import { GUIDE_SECTIONS } from './guideSections.js'
 
 function SectionPage({ section }) {
-  const Figures = section.figures
   return (
     <article className="docs-article">
       <MarkdownBody>{section.body.replace(/^# .+\n+/, '')}</MarkdownBody>
-      {Figures ? <div className="docs-figures">{typeof Figures === 'function' ? <Figures /> : Figures}</div> : null}
       {section.presetPreviews ? <PresetPreviewGrid /> : null}
     </article>
   )
 }
 
 export default function Docs() {
-  const first = GUIDE_SECTIONS[0]?.slug ?? 'overview'
+  const first = GUIDE_SECTIONS[0]?.slug ?? 'model'
   return (
     <div className="docs-shell">
       <header className="docs-header" box-="">

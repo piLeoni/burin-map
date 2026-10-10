@@ -3,7 +3,7 @@
  *
  * On flat and lit ground dashes are left out or take the flat ink at
  * random; slopes keep their mechanical dashes.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-flat.js --out-file ink-flat.png
  */

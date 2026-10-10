@@ -2,7 +2,7 @@
  * Ink: solid — contour lines only.
  *
  * Full ink in light and in shadow, no modifier: every line is whole.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-solid.js --out-file ink-solid.png
  */

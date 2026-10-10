@@ -222,30 +222,13 @@ a.mapboxgl-ctrl-logo {
   text-align: left;
 }
 
-.docs-figures,
-.docs-figure-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1lh;
-  margin: 1.5lh 0;
-  color: var(--foreground0);
-}
-
-.docs-figure {
+.docs-prose img {
+  display: block;
   width: 100%;
-  max-width: 20rem;
+  max-width: 48rem;
   height: auto;
-}
-
-.docs-figure-label,
-.docs-figure-caption,
-.docs-figure-micro {
-  font-size: 0.9em;
-  fill: var(--foreground1);
-}
-
-.docs-figure-micro {
-  font-size: 7px;
+  margin: 1lh 0;
+  border: 1px solid var(--foreground0);
 }
 
 .docs-code {

@@ -3,7 +3,7 @@
  *
  * The default ink, plus every modifier the old default had on: uneven
  * dashes, the flat-ground lottery, small breaks and a cutoff in full light.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-classic.js --out-file ink-classic.png
  */

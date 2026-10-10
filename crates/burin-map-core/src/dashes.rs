@@ -3,7 +3,7 @@
 //! Each `dash_period` px of line is one period, inked from its start for the
 //! share [`Style::duty`] gives at the tone there. With every modifier off,
 //! `dash_light` = `dash_dark` = 1 leaves each line whole and 0.5 gives even
-//! dashes. See `docs/guide/03-ink.md` for the order the rules apply in.
+//! dashes. See `docs/guide/00-model.md` for the order the rules apply in.
 
 use crate::rng::Rng;
 use crate::streamlines::Line;

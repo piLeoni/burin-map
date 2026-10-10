@@ -3,7 +3,7 @@
  *
  * The same 30 % everywhere, then no ink below tone 0.15 and solid above
  * tone 0.6: only the two thresholds draw the relief.
- * See docs/guide/06-ink-presets.md.
+ * See docs/guide/land-lines.md.
  *
  *   burin-map --script presets/ink-thresholds.js --out-file ink-thresholds.png
  */

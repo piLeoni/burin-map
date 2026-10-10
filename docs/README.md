@@ -2,7 +2,7 @@
 
 | Document | Audience |
 |----------|----------|
-| [guide/](guide/README.md) | **Style model** — spacing, ink, modifiers, ink presets, water (humans + agents) |
+| [guide/](guide/README.md) | **Style guide** — one page per draw style (land lines/dots, water lines/ripples/dots, shoreline, fills), full parameter tables, side-by-side comparisons |
 | [AGENTS.md](AGENTS.md) | Short checklist for coding agents |
 | [land-edge-fray.md](land-edge-fray.md) | **Proposed** — land contours fray toward a mask boundary |
 
