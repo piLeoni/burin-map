@@ -1,0 +1,32 @@
+---
+description: Maintain the architecture knowledge base; load docs selectively
+alwaysApply: true
+---
+
+# Architecture knowledge base
+
+Full agent entry point: [AGENTS.md](../../AGENTS.md). Subsystem index: [docs/architecture/INDEX.md](../../docs/architecture/INDEX.md).
+
+## Start of a substantial task
+
+1. From the index, name the affected subsystem(s).
+2. Read only the matching `docs/architecture/<subsystem>.md` files.
+3. Verify assumptions in the cited source files — docs are a map, not the ground truth.
+
+Avoid broad repo tours when the index already points to the right crate or `web/src` module.
+
+## While implementing
+
+- Match existing patterns in the subsystem you are editing.
+- Preserve the document model: scripts build an **atlas** (ordered batches + water); the engine consumes typed `Batch` / `WaterBatch` / `Atlas` in `burin-map-core` (see `document-and-atlas.md`).
+- Style parameter semantics for users: [SYNTAX.md](../../SYNTAX.md) and [docs/AGENTS.md](../../docs/AGENTS.md).
+
+## Before finishing a substantial task
+
+Update documentation only when something **architecturally** changed (subsystem boundaries, public contracts, data flow, invariants, dependencies, CI/wasm surfaces, or recorded decisions).
+
+1. Edit the relevant `docs/architecture/*.md` (not every typo fix).
+2. Update [INDEX.md](../../docs/architecture/INDEX.md) if subsystem docs were added, removed, or renamed.
+3. In your reply, list doc files touched or state that no doc update was needed.
+
+Do **not** paste chat logs into docs, duplicate SYNTAX tables, or document every file.
