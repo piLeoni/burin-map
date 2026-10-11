@@ -6,7 +6,7 @@
 | [../AGENTS.md](../AGENTS.md) | **Coding agents** — how to use the architecture knowledge base |
 | [architecture/INDEX.md](architecture/INDEX.md) | **Architecture** — subsystem index (token-efficient; read selectively) |
 | [AGENTS.md](AGENTS.md) | Style-parameter checklist for agents (ink rules, removed params) |
-| [land-edge-fray.md](land-edge-fray.md) | **Proposed** — land contours fray toward a mask boundary |
+| [regions.md](regions.md) | **Proposed** — host-supplied regions (polygons or rasters) that batches keep to or give way to, with lines easing out and fraying at the edge |
 
 User-facing **syntax and parameter tables**: [SYNTAX.md](../SYNTAX.md) in the repo root.
 
