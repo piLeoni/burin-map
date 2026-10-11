@@ -68,8 +68,27 @@ pub fn batch_from(v: &Value) -> Result<Batch, String> {
     if let Some(where_) = get("where") {
         b.band = band_of(where_)?;
     }
+    b.within = names_of(get("within"), "within")?;
+    b.outside = names_of(get("outside"), "outside")?;
+    if b.draw == crate::Draw::Fill && b.is_masked() {
+        return Err(crate::style::FILL_REGIONS.into());
+    }
     apply_style(&mut b.style, get("style"))?;
     Ok(b)
+}
+
+/// Region names: one string, or a list of them.
+fn names_of(v: Option<&Value>, what: &str) -> Result<Vec<String>, String> {
+    let bad = || format!("{what} is a region name or a list of them");
+    match v {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::String(s)) => Ok(vec![s.clone()]),
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|n| n.as_str().map(str::to_string).ok_or_else(bad))
+            .collect(),
+        Some(_) => Err(bad()),
+    }
 }
 
 /// Read a height band: `{ elevMin, elevMax, depthMin, depthMax }`, in metres.
@@ -402,7 +421,7 @@ mod tests {
         assert!(e.uses(crate::expr::Field::Tone));
         assert!(!e.uses(crate::expr::Field::Depth));
         let w = b.width_expr.unwrap();
-        assert!(w.constant_scalar() == false);
+        assert!(!w.constant_scalar());
         assert!(crate::expr::Expr::Scalar(w).uses(crate::expr::Field::Dist));
     }
 
@@ -428,7 +447,7 @@ mod tests {
             {"draw": "lines", "name": "hills", "shade": ["lerp", "#e8dcc8", "#2a1810", "tone"]}
         ]);
         let atlas = atlas_from(&script).unwrap();
-        let d = atlas.draw(&e, w, h, 200.0);
+        let d = atlas.draw(&crate::Surface::new(&e, w, h, 200.0), None).unwrap();
         assert!(!d.paths.is_empty());
         let out = drawing_to_json(&d);
         assert!(out["svg"].as_str().unwrap().contains("<svg"));

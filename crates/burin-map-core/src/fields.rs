@@ -255,6 +255,33 @@ pub fn heighten(f: &mut Fields, elev: &[f32], st: &Style) {
         });
 }
 
+/// Ease a batch's shading out towards the edge of its regions: the input is
+/// scaled by `weight(i)`, 0…1, so the ink thins as it does on lit ground —
+/// dark slopes keep theirs longer than flat ground — the spacing opens with
+/// it, and nothing is traced where the weight is 0.
+pub(crate) fn keep_to(f: &mut Fields, weight: impl Fn(usize) -> f32 + Sync, st: &Style) {
+    let shade_k = |t: f32| st.space_mul(t).max(0.05);
+    let (smin, smax) = (st.space_base() * 0.05, st.space_base() * 4.0);
+    f.input
+        .par_iter_mut()
+        .zip(&mut f.space)
+        .zip(&mut f.walkable)
+        .enumerate()
+        .for_each(|(i, ((t, s), walk))| {
+            if !*walk {
+                return;
+            }
+            let k = weight(i);
+            if k <= 0.0 {
+                *walk = false;
+                return;
+            }
+            let t1 = *t * k;
+            *s = (*s * shade_k(t1) / shade_k(*t)).clamp(smin, smax);
+            *t = t1;
+        });
+}
+
 /// Fields for one batch: rotate the contour direction by `batch.angle` degrees,
 /// rescale pitch to `batch.style.space_base()`, and optionally gate on `batch_floor`.
 pub fn batch_fields(base: &Fields, batch: &crate::style::Batch, base_space: f32) -> Fields {

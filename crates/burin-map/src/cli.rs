@@ -47,6 +47,7 @@ const GLOBAL: &[(&str, &str, Takes)] = &[
     ("style-file", "sf", Takes::One),
     ("style-json", "sj", Takes::One),
     ("water", "", Takes::One),
+    ("region", "", Takes::One),
     ("force-cpu", "", Takes::Zero),
 ];
 
@@ -122,6 +123,9 @@ pub fn command() -> Command {
                    passes; an escape hatch for a saved atlas, not the main path — see --script"))
         .arg(global("style-json").value_name("JSON")
             .help("inline JSON or JSON5 document (or a bare list of batches)"))
+        .arg(global("region").value_name("NAME=PATH").action(ArgAction::Append)
+            .help("a region the document's batches keep to (within) or give way to (outside): \
+                   a GeoJSON file of polygons in lon/lat, by the name the batches use. May repeat"))
         .next_help_heading("Water — sea, lakes and rivers from OpenStreetMap")
         .arg(global("water").value_name("JSON")
             .help("the document's water block, as JSON or JSON5: '{}' for the shoreline alone, or \
@@ -140,6 +144,7 @@ pub fn command() -> Command {
                 "engine" => "Engine — streamline tracer",
                 "batch" => "Batch style — per-pass floor, stroke, seed",
                 "water" => "Water style — only in water batches (inside --water)",
+                "mask" => "Mask style — easing out at the edge of the regions (see --region)",
                 other => other,
             };
             cmd = cmd.next_help_heading(heading);
@@ -158,6 +163,21 @@ pub fn command() -> Command {
         );
     }
     cmd
+}
+
+/// `--region NAME=PATH`: the GeoJSON file's polygons under that name.
+fn read_region(arg: &str) -> Result<(String, crate::GeoRegion), Error> {
+    let (name, path) = arg
+        .split_once('=')
+        .filter(|(n, p)| !n.is_empty() && !p.is_empty())
+        .ok_or_else(|| Error::Input(format!("--region {arg:?}: give it as NAME=PATH")))?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| Error::Input(format!("--region {name}: reading {path}: {e}")))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| Error::Input(format!("--region {name}: {path} is not JSON: {e}")))?;
+    let region = crate::GeoRegion::from_geojson(&json)
+        .map_err(|e| Error::Input(format!("--region {name}: {e}")))?;
+    Ok((name.to_string(), region))
 }
 
 /// Area to draw, frame to draw it in and a name for the area.
@@ -360,6 +380,12 @@ where
             json5::from_str(json).map_err(|e| Error::Input(format!("invalid --water: {e}")))?;
         doc.water = Some(water);
     }
+    let regions = m
+        .get_many::<String>("region")
+        .into_iter()
+        .flatten()
+        .map(|arg| read_region(arg))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let batches: Vec<Batch> = if !doc.batches.is_empty() {
         doc.batches.clone()
@@ -475,7 +501,7 @@ where
             s.spawn(|| p.tick());
         }
         let done = (|| -> Result<_, Box<dyn std::error::Error>> {
-            let map = crate::draw_with_water(&bounds, &batches, water, &frame, |p| match &panel {
+            let map = crate::draw_with_water(&bounds, &batches, water, &regions, &frame, |p| match &panel {
                 Some(panel) => panel.progress(p),
                 None => r.progress(p),
             })?;

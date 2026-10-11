@@ -242,13 +242,15 @@ const rustShorts = {
   batch_floor: 'bf', batch_stroke: 'bs', batch_seed: 'bseed',
   water_start: 'wst', water_reach: 'wr', water_fade: 'wf', water_size: 'ws', water_patches: 'wp',
   water_fray: 'wfr',
+  mask_start: 'mst', mask_reach: 'mr', mask_fade: 'mfd', mask_fray: 'mfr',
+  mask_start_m: 'mstm', mask_reach_m: 'mrm', mask_fray_m: 'mfrm',
 }
 for (const [full, short] of Object.entries(rustShorts)) {
   if (PARAM_SHORTS[full] !== short) missing.push(`drift: ${full} should be "${short}", got "${PARAM_SHORTS[full]}"`)
 }
 const extra = Object.keys(PARAM_SHORTS).filter((k) => !(k in rustShorts))
 if (extra.length) missing.push(`drift: param(s) not in Rust: ${extra.join(', ')}`)
-if (Object.keys(rustShorts).length !== 47) missing.push(`expected 47 params, Rust table has ${Object.keys(rustShorts).length}`)
+if (Object.keys(rustShorts).length !== 55) missing.push(`expected 55 params, Rust table has ${Object.keys(rustShorts).length}`)
 
 // Legacy #doc= base64 links still open.
 const legacy = `#doc=${Buffer.from(JSON.stringify(doc)).toString('base64')}`

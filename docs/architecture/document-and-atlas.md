@@ -28,6 +28,8 @@ Examples: `presets/*.js`. Default reference: `presets/contours.js`.
 
 `Atlas::batch` / `water` / `shore` mirror the JS library semantics.
 
+A land batch may name regions in `within` / `outside` (lines and dots only; fills refuse them). Only the names are in the atlas: the region data comes with the draw call (`Surface::regions`, `draw_document(…, regions, …)`, `--region`, `draw(regions=…)`). See [../regions.md](../regions.md).
+
 ## Saved documents (`burin-map::document`)
 
 `Document` in `crates/burin-map/src/document.rs`: optional `area`, `batches`, `water`, frame fields — used by CLI `--style-file`, bindings, and legacy share payloads. Not the primary authoring path for the web app (JS-only editor).
@@ -40,7 +42,7 @@ Examples: `presets/*.js`. Default reference: `presets/contours.js`.
 
 ## CLI / bindings
 
-- CLI `--script PATH`: `Document::from_script` then draw (`cli.rs`).
+- CLI `--script PATH`: `Document::from_script` then draw (`cli.rs`); `--region NAME=PATH` (GeoJSON, repeatable) supplies the regions batches name.
 - Python / Node: the same `burin.*` calls in the host language, `burin.draw()` → `burin_map::draw_document`; `drawScript` / `draw_script` run a document file; `evaluate(script)` → `{ atlas, area }`. See [bindings.md](bindings.md).
 
 ## Related

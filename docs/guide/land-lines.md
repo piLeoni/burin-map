@@ -56,6 +56,19 @@ burin.batch({ angle: 0, style: { dash_light: 0.5, dash_dark: 1 } });
 | Batch | `batch_floor` | 0 | |
 | | `batch_stroke` | 1.2 | |
 | | `batch_seed` | 1 | |
+| Mask | `mask_start` | 0 | |
+| | `mask_reach` | 40 | |
+| | `mask_fade` | 1 | |
+| | `mask_fray` | 0 | |
+| | `mask_start_m` | 0 | |
+| | `mask_reach_m` | 0 | |
+| | `mask_fray_m` | 0 | |
+
+**Mask:** only for a batch that keeps to regions (`within`) or gives way to them (`outside`),
+areas a program hands the document by name. The lines ease out over `mask_reach` px past
+`mask_start` from the edge, shaped by `mask_fade`, and break into dashes and dots over
+`mask_fray` px; the `_m` twins give the same distances in metres. The web app supplies no
+regions. Details: [SYNTAX.md](../../SYNTAX.md#regions).
 
 **Carries over (✓):** in a document with several batches, a batch that leaves one of these out
 takes it from the batch above, so a second pass (say a 45° crosshatch) follows the same light and

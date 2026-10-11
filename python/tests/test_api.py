@@ -146,9 +146,30 @@ def test_document_mistakes_are_caught_where_they_are_made(burin):
         burin.water("waves")
     with pytest.raises(ValueError, match="must be a number"):
         burin.batch(space_light="wide")
+    with pytest.raises(ValueError, match="region name"):
+        burin.batch(within=3)
+    with pytest.raises(ValueError, match="fills don't keep to regions"):
+        burin.fill(within="park")
     with pytest.raises(ValueError, match="nothing to draw"):
         burin.draw()
     assert burin.json() == []
+
+
+class _Shape:
+    """What Shapely and GeoPandas hand over: `__geo_interface__`."""
+    __geo_interface__ = {"type": "Point", "coordinates": [7, 46]}
+
+
+def test_batches_name_regions_and_draw_is_handed_them(burin):
+    assert burin.batch(within="park", outside=["a", "b"]) == {
+        "within": ["park"], "outside": ["a", "b"], "style": {}}
+    doc = ("burin.area({ bounds: [7.0, 46.0, 7.1, 46.05] })\n"
+           "burin.batch({ within: 'park' })\n"
+           "burin.draw()\n")
+    with pytest.raises(ValueError, match="region \"park\", which wasn't given"):
+        burin.draw_script(doc)
+    with pytest.raises(ValueError, match="regions are polygons"):
+        burin.draw_script(doc, regions={"park": _Shape()})
 
 
 def test_evaluate_runs_a_document():

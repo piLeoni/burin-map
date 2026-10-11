@@ -560,17 +560,17 @@ pub fn draw_batches(
     timings.push((terrain_label(fields.len(), "CPU"), now_ms() - t1));
     board::Board.reach(Step::Terrain, Stage::Done);
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(
-        &fields,
-        &batches,
-        layer.as_ref(),
-        elev,
-        now_ms,
-        &board::Board,
-        mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0),
-    );
+    let surface = surface(elev, w, h, px_m, mm_per_px);
+    let (d, t) =
+        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &surface, now_ms, &board::Board)
+            .map_err(|e| JsValue::from_str(&e))?;
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, geo, mm_per_px))
+}
+
+/// The page draws over the elevation alone: regions are for programs.
+fn surface(elev: &[f32], w: usize, h: usize, px_m: f32, mm_per_px: Option<f32>) -> burin_map_core::Surface<'_> {
+    burin_map_core::Surface::new(elev, w, h, px_m).px_per_mm(mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0))
 }
 
 fn terrain_label(n: usize, device: &str) -> String {
@@ -622,6 +622,7 @@ pub mod script_api {
 /// passes, the same JSON `burin-map-script` hands back and the CLI's `--script`
 /// draws.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn draw_atlas(
     elev: Vec<f32>,
     width: u32,
@@ -649,16 +650,10 @@ pub fn draw_atlas(
     }
     let t0 = now_ms();
     let wet = read_water(water, w, h)?;
-    let from_elev = atlas
-        .water
-        .is_some()
-        .then(|| elev.iter().map(|&e| (e <= 0.5) as u8 as f32).collect::<Vec<f32>>());
-    let coverage = wet
-        .as_ref()
-        .map(|(c, _, _)| c.as_slice())
-        .or(from_elev.as_deref());
-    let px_per_mm = mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0);
-    let d = atlas.draw_with(&elev, coverage, w, h, px_m, px_per_mm);
+    let coverage = wet.as_ref().map(|(c, _, _)| c.as_slice());
+    let d = atlas
+        .draw(&surface(&elev, w, h, px_m, mm_per_px), coverage)
+        .map_err(|e| JsValue::from_str(&e))?;
     Ok(finish(
         d,
         now_ms() - t0,
@@ -741,15 +736,10 @@ pub async fn draw_batches_gpu(
     timings.push((terrain_label(fields.len(), "GPU"), now_ms() - t1));
     board::Board.reach(Step::Terrain, Stage::Done);
     let layer = layer(&wet);
-    let (d, t) = burin_map_core::draw_fields_timed(
-        &fields,
-        &batches,
-        layer.as_ref(),
-        &elev,
-        now_ms,
-        &board::Board,
-        mm_per_px.map(|k| 1.0 / k).unwrap_or(1.0),
-    );
+    let surface = surface(&elev, w, h, px_m, mm_per_px);
+    let (d, t) =
+        burin_map_core::draw_fields_timed(&fields, &batches, layer.as_ref(), &surface, now_ms, &board::Board)
+            .map_err(|e| JsValue::from_str(&e))?;
     timings.extend(t);
     Ok(finish(d, now_ms() - t0, timings, &geo, mm_per_px))
 }

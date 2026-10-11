@@ -73,11 +73,13 @@
     /**
      * A batch of hatching, stippling or a fill. Everything burin's `batch`
      * takes: `name`, `angle`, `color`, `shade`, `width`, `cap`, `ground`,
-     * `draw`, `where`, and `style` or the parameters by name.
+     * `draw`, `where`, `within`, `outside`, and `style` or the parameters by
+     * name. `within` and `outside` name regions the program drawing the
+     * document hands over.
      */
     batch(options) {
       const o = object(options, "burin.batch");
-      const { style, where, color: c, shade, width, draw, ground, name, angle, cap, ...rest } = o;
+      const { style, where, color: c, shade, width, draw, ground, name, angle, cap, within, outside, ...rest } = o;
       if (draw !== undefined && draw !== "lines" && draw !== "dots" && draw !== "fill") {
         throw new Error(`burin.batch draw must be "lines", "dots" or "fill", not ${JSON.stringify(draw)}`);
       }
@@ -94,6 +96,8 @@
       if (shade !== undefined) out.shade = color(shade, "burin.batch shade");
       if (width !== undefined) out.width = scalar(width, "burin.batch width");
       if (where !== undefined) out.where = band(where, "burin.batch where");
+      if (within !== undefined) out.within = names(within, "burin.batch within");
+      if (outside !== undefined) out.outside = names(outside, "burin.batch outside");
       out.style = { ...styleParams(style), ...styleParams(rest) };
       return push(B.batch(JSON.stringify(out)));
     },
@@ -235,6 +239,15 @@
       out[k] = number(val, `style ${k}`);
     }
     return out;
+  }
+
+  /** Region names: one, or a list. */
+  function names(v, what) {
+    const list = Array.isArray(v) ? v : [v];
+    if (!list.every((n) => typeof n === "string")) {
+      throw new Error(`${what} must be a region name or a list of them`);
+    }
+    return list;
   }
 
   /** The heights or depths a fill keeps to, in metres. */

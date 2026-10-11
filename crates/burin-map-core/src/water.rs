@@ -9,9 +9,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::depth::{depth_weight, WaterWhere};
 use crate::fields::{wobble, Fields};
+use crate::fray::fray_along;
 use crate::grid::{blur, gradient};
 use crate::pen::{Cap, Ink};
-use crate::rng::Rng;
+use crate::rng::{noise_field, Rng};
 use crate::style::Style;
 use crate::Line;
 
@@ -931,7 +932,7 @@ pub fn fray(
     };
     // 0 where the lines give out, 1 where they are whole.
     let whole = move |p: [f32; 2]| (d(p) - st.water_start) / band + (wander(p) - 0.5) * 0.8;
-    fray_along(paths, w, h, st, whole)
+    fray_along(paths, st, FRAY_SALT, whole)
 }
 
 /// Like [`fray`], but along a batch [`WaterWhere`] depth limit (metres).
@@ -970,91 +971,11 @@ pub fn fray_by_depth(
         }
         t + (wander(p) - 0.5) * 0.35
     };
-    fray_along(paths, w, h, st, whole)
+    fray_along(paths, st, FRAY_SALT, whole)
 }
 
-fn fray_along(
-    paths: Vec<crate::Line>,
-    w: usize,
-    h: usize,
-    st: &Style,
-    whole: impl Fn([f32; 2]) -> f32 + Send + Sync,
-) -> Vec<crate::Line> {
-    let _ = (w, h);
-    let period = (st.space_base() * 1.5).max(3.0);
-    paths
-        .into_par_iter()
-        .enumerate()
-        .flat_map_iter(|(i, l)| {
-            if l.len() < 2 || l.iter().all(|&p| whole(p) >= 1.0) {
-                return vec![l];
-            }
-            let mut rng = Rng::new(st.batch_seed ^ 0xF4A7 ^ (i as u64).wrapping_mul(0x9E37_79B9));
-            let p = resample(&l, 1.0);
-            let mut out = Vec::new();
-            let mut piece: crate::Line = Vec::new();
-            let (mut s, mut cell, mut ink) = (0.0f32, usize::MAX, (0.0f32, f32::MAX));
-            for (k, &q) in p.iter().enumerate() {
-                if k > 0 {
-                    s += (q[0] - p[k - 1][0]).hypot(q[1] - p[k - 1][1]);
-                }
-                let c = (s / period) as usize;
-                if c != cell {
-                    cell = c;
-                    let t = whole(q);
-                    ink = if t >= 1.0 {
-                        (0.0, f32::MAX)
-                    } else {
-                        let t = t.max(0.0);
-                        let mut len = period * t.powf(0.8) * rng.uniform(0.6, 1.4) as f32;
-                        if len < 1.0 {
-                            len = if rng.uniform(0.0, 1.0) < (t * 1.5) as f64 {
-                                1.0
-                            } else {
-                                0.0
-                            };
-                        }
-                        let len = len.min(period);
-                        let at = c as f32 * period + rng.uniform(0.0, (period - len) as f64) as f32;
-                        (at, at + len)
-                    };
-                }
-                if s >= ink.0 && s <= ink.1 {
-                    piece.push(q);
-                } else if !piece.is_empty() {
-                    if piece.len() == 1 {
-                        piece.push(q);
-                    }
-                    out.push(std::mem::take(&mut piece));
-                }
-            }
-            if piece.len() >= 2 {
-                out.push(piece);
-            }
-            out
-        })
-        .collect()
-}
-
-/// Smooth noise, 0…1, varying over about `cell` px.
-fn noise_field(w: usize, h: usize, cell: f32, rng: &mut Rng) -> impl Fn([f32; 2]) -> f32 {
-    let cell = cell.max(1.0);
-    let (nw, nh) = (
-        (w as f32 / cell) as usize + 3,
-        (h as f32 / cell) as usize + 3,
-    );
-    let lattice: Vec<f32> = (0..nw * nh).map(|_| rng.f64() as f32).collect();
-    move |p: [f32; 2]| {
-        let (x, y) = ((p[0] / cell).max(0.0), (p[1] / cell).max(0.0));
-        let (i, j) = (x as usize, y as usize);
-        let e = |f: f32| f * f * (3.0 - 2.0 * f);
-        let (fx, fy) = (e(x - i as f32), e(y - j as f32));
-        let v = |a: usize, b: usize| lattice[b.min(nh - 1) * nw + a.min(nw - 1)];
-        let top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx;
-        let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
-        top + (bottom - top) * fy
-    }
-}
+/// Both water frays draw from this, as they always have.
+const FRAY_SALT: u64 = 0xF4A7;
 
 /// True when concentric shore lines should follow distance contours instead of
 /// the streamline tracer (avoids crossings when spacing varies).

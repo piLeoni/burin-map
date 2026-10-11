@@ -2,7 +2,7 @@
 
 Thin layers over `burin-map` (full pipeline) and/or `burin-map-core` (grid-only draw). Pack paths the same as core types where possible.
 
-Node and Python expose the **document API**: the same calls a document script makes (`area`, `batch`, `fill`, `water`, `shore`, `draw`, `json`, `parameters`, the fields and tree helpers), so a document reads the same in a preset, the web editor, `--script`, Node and Python. `draw()` hands `{ atlas, area }` to `burin_map::draw_document` and starts an empty document. `drawScript` / `draw_script` run a document file as is. `drawElevation` / `draw_elevation` stay for a caller's own grid (one batch, a flat style). There is no bounds-and-style `draw` any more.
+Node and Python expose the **document API**: the same calls a document script makes (`area`, `batch`, `fill`, `water`, `shore`, `draw`, `json`, `parameters`, the fields and tree helpers), so a document reads the same in a preset, the web editor, `--script`, Node and Python. `draw()` hands `{ atlas, area, regions }` to `burin_map::draw_document` and starts an empty document. `drawScript` / `draw_script` run a document file as is. Both take regions by name as GeoJSON in lon/lat (Python also anything with `__geo_interface__`), parsed natively by `burin_map::regions_from_json` and projected onto the DEM grid; batches name them with `within` / `outside`. The web app (wasm) supplies no regions. `drawElevation` / `draw_elevation` stay for a caller's own grid (one batch, a flat style). There is no bounds-and-style `draw` any more.
 
 ## Python (`crates/burin-map-py` + `python/burin_map/`)
 

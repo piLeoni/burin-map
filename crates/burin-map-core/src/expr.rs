@@ -501,10 +501,7 @@ pub fn colorize_paths(
     }
     let mut base = Pen::with_expr(ink.stroke, ink.color, ink.expr.as_ref(), ink.layer);
     base.cap = ink.cap;
-    let color = (ink.color.is_none())
-        .then(|| ink.expr.as_ref())
-        .flatten()
-        .cloned();
+    let color = ink.color.is_none().then_some(ink.expr.as_ref()).flatten().cloned();
     let width = ink.width.clone();
     if color.is_none() && width.is_none() {
         return vec![(base, inside(paths, ink.cap, ink.stroke))];
@@ -818,148 +815,6 @@ impl Steps {
         let last = (self.n - 1) as f32;
         let s = ((k - self.lo) / (self.hi - self.lo) * last).round();
         (self.lo + (self.hi - self.lo) * s / last, Some(s as u32))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ctx<'a>(elev: Option<&'a [f32]>, tone: Option<&'a [f32]>) -> ColorCtx<'a> {
-        ColorCtx {
-            w: 100,
-            h: 1,
-            elev,
-            tone,
-            dist: None,
-            depth: None,
-        }
-    }
-
-    /// A ramp of elevation 0…99 along x, one row.
-    fn ramp() -> Vec<f32> {
-        (0..100).map(|x| x as f32).collect()
-    }
-
-    #[test]
-    fn fields_and_arithmetic() {
-        let elev = ramp();
-        let c = ctx(Some(&elev), None);
-        let at = |s: Scalar, x: f32| eval_scalar_of(&s, &c, [x, 0.0]);
-        let e = Scalar::Field(Field::Elev);
-        assert_eq!(at(e.clone(), 40.0), 40.0);
-        let two = |a: Scalar, b: Scalar| Scalar::Bin(Bin::Sub, Box::new(a), Box::new(b));
-        assert_eq!(at(two(Scalar::Lit(10.0), Scalar::Lit(3.0)), 0.0), 7.0);
-        assert_eq!(
-            at(
-                Scalar::Bin(
-                    Bin::Div,
-                    Box::new(Scalar::Lit(12.0)),
-                    Box::new(Scalar::Lit(0.0))
-                ),
-                0.0
-            ),
-            0.0,
-            "dividing by nothing is nothing, not NaN"
-        );
-        assert_eq!(
-            at(
-                Scalar::Un(Un::Neg, Box::new(Scalar::Field(Field::Elev))),
-                4.0
-            ),
-            -4.0
-        );
-        assert_eq!(
-            at(
-                Scalar::Call(
-                    Func::Lerp,
-                    vec![
-                        Scalar::Lit(2.0),
-                        Scalar::Lit(0.5),
-                        Scalar::Bin(
-                            Bin::Div,
-                            Box::new(Scalar::Field(Field::Elev)),
-                            Box::new(Scalar::Lit(100.0))
-                        )
-                    ]
-                ),
-                50.0
-            ),
-            1.25
-        );
-        assert_eq!(
-            at(
-                Scalar::Call(
-                    Func::Clamp,
-                    vec![Scalar::Field(Field::Elev), Scalar::Lit(1.0), Scalar::Lit(0.0)]
-                ),
-                3.0
-            ),
-            1.0,
-            "lo and hi may come either way round"
-        );
-    }
-
-    #[test]
-    fn colours_mix_and_shade() {
-        let c = ctx(None, None);
-        let white = Color::gray(1.0);
-        let black = Color::gray(0.0);
-        let half = Color::mix(black.clone(), white.clone(), 0.5f32);
-        let rgb = eval_color_of(&Expr::Color(half), &c, [0.0, 0.0]);
-        assert!((rgb[0] - 0.5).abs() < 0.02);
-        let shade = Expr::Shade(Scalar::Lit(0.25));
-        assert_eq!(eval_color_of(&shade, &c, [0.0, 0.0]), [0.25, 0.25, 0.25]);
-        let ramp = [1.0f32; 100];
-        let tone = ctx(None, Some(&ramp));
-        // tone ramps white → black, so tone 1 is ink and tone 0 is paper.
-        let dark = Color::mix(white.clone(), black.clone(), Field::Tone);
-        assert_eq!(eval_color_of(&Expr::Color(dark), &tone, [0.0, 0.0]), [0.0; 3]);
-        let lit = ctx(None, Some(&[0.0f32; 100]));
-        let dark = Color::mix(white, black, Field::Tone);
-        assert_eq!(eval_color_of(&Expr::Color(dark), &lit, [0.0, 0.0]), [1.0; 3]);
-        assert!(Expr::from(Field::Elev).uses(Field::Elev));
-        assert!(Expr::from(Color::tone()).uses(Field::Tone));
-        assert!(!Expr::from(Color::tone()).uses(Field::Depth));
-        assert!(Expr::from(Color::gray(1.0)).constant());
-    }
-
-    #[test]
-    fn a_choice_picks_a_side() {
-        let elev = ramp();
-        let c = ctx(Some(&elev), None);
-        let pick = Scalar::Choose(
-            Box::new(Scalar::Bin(
-                Bin::Gt,
-                Box::new(Scalar::Field(Field::Elev)),
-                Box::new(Scalar::Lit(50.0)),
-            )),
-            Box::new(Scalar::Lit(2.0)),
-            Box::new(Scalar::Lit(0.5)),
-        );
-        assert_eq!(eval_scalar_of(&pick, &c, [10.0, 0.0]), 0.5);
-        assert_eq!(eval_scalar_of(&pick, &c, [60.0, 0.0]), 2.0);
-    }
-
-    #[test]
-    fn step_is_a_threshold() {
-        let c = ctx(None, None);
-        assert_eq!(
-            eval_scalar_of(
-                &Scalar::Call(Func::Step, vec![Scalar::Lit(1.0), Scalar::Lit(1.5)]),
-                &c,
-                [0.0, 0.0]
-            ),
-            1.0
-        );
-        assert_eq!(
-            eval_scalar_of(
-                &Scalar::Call(Func::Step, vec![Scalar::Lit(1.0), Scalar::Lit(0.5)]),
-                &c,
-                [0.0, 0.0]
-            ),
-            0.0
-        );
     }
 }
 
@@ -1326,5 +1181,147 @@ fn color_from_json(v: &serde_json::Value) -> Result<Color, String> {
             head.chars().next().unwrap(),
         )),
         other => Err(format!("{other:?} is not a colour")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx<'a>(elev: Option<&'a [f32]>, tone: Option<&'a [f32]>) -> ColorCtx<'a> {
+        ColorCtx {
+            w: 100,
+            h: 1,
+            elev,
+            tone,
+            dist: None,
+            depth: None,
+        }
+    }
+
+    /// A ramp of elevation 0…99 along x, one row.
+    fn ramp() -> Vec<f32> {
+        (0..100).map(|x| x as f32).collect()
+    }
+
+    #[test]
+    fn fields_and_arithmetic() {
+        let elev = ramp();
+        let c = ctx(Some(&elev), None);
+        let at = |s: Scalar, x: f32| eval_scalar_of(&s, &c, [x, 0.0]);
+        let e = Scalar::Field(Field::Elev);
+        assert_eq!(at(e.clone(), 40.0), 40.0);
+        let two = |a: Scalar, b: Scalar| Scalar::Bin(Bin::Sub, Box::new(a), Box::new(b));
+        assert_eq!(at(two(Scalar::Lit(10.0), Scalar::Lit(3.0)), 0.0), 7.0);
+        assert_eq!(
+            at(
+                Scalar::Bin(
+                    Bin::Div,
+                    Box::new(Scalar::Lit(12.0)),
+                    Box::new(Scalar::Lit(0.0))
+                ),
+                0.0
+            ),
+            0.0,
+            "dividing by nothing is nothing, not NaN"
+        );
+        assert_eq!(
+            at(
+                Scalar::Un(Un::Neg, Box::new(Scalar::Field(Field::Elev))),
+                4.0
+            ),
+            -4.0
+        );
+        assert_eq!(
+            at(
+                Scalar::Call(
+                    Func::Lerp,
+                    vec![
+                        Scalar::Lit(2.0),
+                        Scalar::Lit(0.5),
+                        Scalar::Bin(
+                            Bin::Div,
+                            Box::new(Scalar::Field(Field::Elev)),
+                            Box::new(Scalar::Lit(100.0))
+                        )
+                    ]
+                ),
+                50.0
+            ),
+            1.25
+        );
+        assert_eq!(
+            at(
+                Scalar::Call(
+                    Func::Clamp,
+                    vec![Scalar::Field(Field::Elev), Scalar::Lit(1.0), Scalar::Lit(0.0)]
+                ),
+                3.0
+            ),
+            1.0,
+            "lo and hi may come either way round"
+        );
+    }
+
+    #[test]
+    fn colours_mix_and_shade() {
+        let c = ctx(None, None);
+        let white = Color::gray(1.0);
+        let black = Color::gray(0.0);
+        let half = Color::mix(black.clone(), white.clone(), 0.5f32);
+        let rgb = eval_color_of(&Expr::Color(half), &c, [0.0, 0.0]);
+        assert!((rgb[0] - 0.5).abs() < 0.02);
+        let shade = Expr::Shade(Scalar::Lit(0.25));
+        assert_eq!(eval_color_of(&shade, &c, [0.0, 0.0]), [0.25, 0.25, 0.25]);
+        let ramp = [1.0f32; 100];
+        let tone = ctx(None, Some(&ramp));
+        // tone ramps white → black, so tone 1 is ink and tone 0 is paper.
+        let dark = Color::mix(white.clone(), black.clone(), Field::Tone);
+        assert_eq!(eval_color_of(&Expr::Color(dark), &tone, [0.0, 0.0]), [0.0; 3]);
+        let lit = ctx(None, Some(&[0.0f32; 100]));
+        let dark = Color::mix(white, black, Field::Tone);
+        assert_eq!(eval_color_of(&Expr::Color(dark), &lit, [0.0, 0.0]), [1.0; 3]);
+        assert!(Expr::from(Field::Elev).uses(Field::Elev));
+        assert!(Expr::from(Color::tone()).uses(Field::Tone));
+        assert!(!Expr::from(Color::tone()).uses(Field::Depth));
+        assert!(Expr::from(Color::gray(1.0)).constant());
+    }
+
+    #[test]
+    fn a_choice_picks_a_side() {
+        let elev = ramp();
+        let c = ctx(Some(&elev), None);
+        let pick = Scalar::Choose(
+            Box::new(Scalar::Bin(
+                Bin::Gt,
+                Box::new(Scalar::Field(Field::Elev)),
+                Box::new(Scalar::Lit(50.0)),
+            )),
+            Box::new(Scalar::Lit(2.0)),
+            Box::new(Scalar::Lit(0.5)),
+        );
+        assert_eq!(eval_scalar_of(&pick, &c, [10.0, 0.0]), 0.5);
+        assert_eq!(eval_scalar_of(&pick, &c, [60.0, 0.0]), 2.0);
+    }
+
+    #[test]
+    fn step_is_a_threshold() {
+        let c = ctx(None, None);
+        assert_eq!(
+            eval_scalar_of(
+                &Scalar::Call(Func::Step, vec![Scalar::Lit(1.0), Scalar::Lit(1.5)]),
+                &c,
+                [0.0, 0.0]
+            ),
+            1.0
+        );
+        assert_eq!(
+            eval_scalar_of(
+                &Scalar::Call(Func::Step, vec![Scalar::Lit(1.0), Scalar::Lit(0.5)]),
+                &c,
+                [0.0, 0.0]
+            ),
+            0.0
+        );
     }
 }

@@ -8,7 +8,7 @@
 //! layers stacked in the order they are written.
 
 use crate::water::{Shoreline, WaterBatch};
-use crate::{Batch, Drawing};
+use crate::{Batch, Drawing, Surface};
 
 pub use crate::water::Draw as WaterDraw;
 
@@ -53,22 +53,11 @@ impl Atlas {
         self
     }
 
-    /// Draw it over an elevation grid, `width` × `height` px at `px_m` metres
-    /// per pixel. The sea comes from the elevation, as `draw_batches` does.
-    pub fn draw(&self, elev: &[f32], width: usize, height: usize, px_m: f32) -> Drawing {
-        self.draw_with(elev, None, width, height, px_m, 1.0)
-    }
-
-    /// As [`Atlas::draw`], on a water coverage grid given from outside.
-    pub fn draw_with(
-        &self,
-        elev: &[f32],
-        coverage: Option<&[f32]>,
-        width: usize,
-        height: usize,
-        px_m: f32,
-        px_per_mm: f32,
-    ) -> Drawing {
-        crate::draw_atlas(self, elev, coverage, width, height, px_m, px_per_mm)
+    /// Draw it over a surface: the elevation, its scale and the regions the
+    /// batches name. The water is `coverage` (0…1 per pixel) when given, else
+    /// wherever the elevation is at or below 0.5 m. Fails when a batch names a
+    /// region the surface doesn't have, or a region doesn't fit the grid.
+    pub fn draw(&self, surface: &Surface, coverage: Option<&[f32]>) -> Result<Drawing, String> {
+        crate::draw_atlas(self, surface, coverage)
     }
 }

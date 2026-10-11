@@ -59,6 +59,13 @@ export const PARAM_SHORTS = {
   water_size: 'ws',
   water_patches: 'wp',
   water_fray: 'wfr',
+  mask_start: 'mst',
+  mask_reach: 'mr',
+  mask_fade: 'mfd',
+  mask_fray: 'mfr',
+  mask_start_m: 'mstm',
+  mask_reach_m: 'mrm',
+  mask_fray_m: 'mfrm',
 }
 
 /** short → full_name. */

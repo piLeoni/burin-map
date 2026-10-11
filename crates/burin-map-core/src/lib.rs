@@ -17,6 +17,7 @@ mod depth;
 pub mod engine;
 mod fields;
 pub mod fills;
+mod fray;
 pub mod geojson;
 #[cfg(feature = "gpu")]
 pub mod gpu;
@@ -25,6 +26,7 @@ mod order;
 pub mod panel;
 mod pen;
 pub mod progress;
+pub mod regions;
 mod rng;
 mod streamlines;
 mod style;
@@ -43,6 +45,8 @@ pub use order::{pen_up_travel, plot_order};
 pub use expr::{Color, Expr, Field, Func, Scalar};
 pub use pen::{Cap, Ink, Pen};
 pub use progress::{rows, Progress, Row, Stage, Step};
+pub use regions::{Region, Ring};
+use regions::Masks;
 pub use streamlines::{trace_streamlines, trace_stripes, Line};
 pub use style::{
     batches_inheriting, from_json_batches, from_json_style, to_json_batches, to_json_style, Batch,
@@ -129,17 +133,49 @@ pub fn draw_batches(
     draw_fields(&fields, batches, elev, 1.0)
 }
 
-/// An [`Atlas`] over an elevation grid: the water coverage worked out from
-/// the elevation when it is not given, then the engine run on it.
-pub fn draw_atlas(
-    atlas: &Atlas,
-    elev: &[f32],
-    coverage: Option<&[f32]>,
-    width: usize,
-    height: usize,
-    px_m: f32,
-    px_per_mm: f32,
-) -> Drawing {
+/// What a drawing is drawn over: the elevation, in metres on a grid of square
+/// pixels (row 0 north), the scale, and the regions batches keep to or give
+/// way to, by name.
+#[derive(Clone, Copy)]
+pub struct Surface<'a> {
+    pub elev: &'a [f32],
+    pub width: usize,
+    pub height: usize,
+    /// Metres per pixel.
+    pub px_m: f32,
+    /// Output pixels per millimetre on paper; line widths scale with it.
+    pub px_per_mm: f32,
+    pub regions: &'a [(&'a str, Region)],
+}
+
+impl<'a> Surface<'a> {
+    /// The elevation alone: 1 px per mm, no regions.
+    pub fn new(elev: &'a [f32], width: usize, height: usize, px_m: f32) -> Self {
+        Surface {
+            elev,
+            width,
+            height,
+            px_m,
+            px_per_mm: 1.0,
+            regions: &[],
+        }
+    }
+
+    pub fn px_per_mm(self, px_per_mm: f32) -> Self {
+        Surface { px_per_mm, ..self }
+    }
+
+    pub fn regions(self, regions: &'a [(&'a str, Region)]) -> Self {
+        Surface { regions, ..self }
+    }
+}
+
+/// An [`Atlas`] over a surface: the water coverage worked out from the
+/// elevation when it is not given, then the engine run on it. Fails when a
+/// batch names a region the surface doesn't have, or a region doesn't fit
+/// the grid.
+pub fn draw_atlas(atlas: &Atlas, s: &Surface, coverage: Option<&[f32]>) -> Result<Drawing, String> {
+    let (elev, width, height, px_m) = (s.elev, s.width, s.height, s.px_m);
     let own = if atlas.water.is_some() {
         // The land's mask when there is one, else from the elevation itself.
         coverage.map(<[f32]>::to_vec).or_else(|| {
@@ -159,23 +195,15 @@ pub fn draw_atlas(
         batches: atlas.water.as_ref().map_or(&[][..], |w| &w.batches),
     });
     let sea = sea_coverage(elev, coverage, &atlas.batches);
-    draw_fields_timed(
-        &terrain_groups(&atlas.batches)
-            .0
-            .iter()
-            .map(|&i| {
-                let cov = ground_coverage(&atlas.batches[i], coverage, sea.as_deref());
-                build_fields_with(elev, width, height, px_m, &atlas.batches[i].style, cov)
-            })
-            .collect::<Vec<_>>(),
-        &atlas.batches,
-        layer.as_ref(),
-        elev,
-        || 0.0,
-        &(),
-        px_per_mm,
-    )
-    .0
+    let fields: Vec<Fields> = terrain_groups(&atlas.batches)
+        .0
+        .iter()
+        .map(|&i| {
+            let cov = ground_coverage(&atlas.batches[i], coverage, sea.as_deref());
+            build_fields_with(elev, width, height, px_m, &atlas.batches[i].style, cov)
+        })
+        .collect();
+    Ok(draw_fields_timed(&fields, &atlas.batches, layer.as_ref(), s, || 0.0, &())?.0)
 }
 
 /// The mask `ground: sea` batches build their fields with: water where the
@@ -269,31 +297,16 @@ pub fn draw_batches_auto(
     draw_batches(elev, width, height, px_m, batches)
 }
 
-/// [`draw_batches_auto`] with water: its coverage decides the land, and its
-/// batches draw on it.
-pub fn draw_batches_auto_with(
-    elev: &[f32],
-    width: usize,
-    height: usize,
-    px_m: f32,
-    batches: &[Batch],
-    water: Option<&WaterLayer>,
-) -> Drawing {
-    draw_batches_auto_told(elev, width, height, px_m, batches, water, &(), 1.0)
-}
-
-/// [`draw_batches_auto_with`], telling `progress` each step as it goes,
-/// the terrain fields included.
+/// [`draw_batches_auto`] over a surface, with water: its coverage decides
+/// the land and its batches draw on it. Each step is told to `progress`, the
+/// terrain fields included. Fails as [`draw_atlas`] does.
 pub fn draw_batches_auto_told(
-    elev: &[f32],
-    width: usize,
-    height: usize,
-    px_m: f32,
+    s: &Surface,
     batches: &[Batch],
     water: Option<&WaterLayer>,
     progress: &dyn Progress,
-    px_per_mm: f32,
-) -> Drawing {
+) -> Result<Drawing, String> {
+    let (elev, width, height, px_m) = (s.elev, s.width, s.height, s.px_m);
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
     assert!(!batches.is_empty(), "need at least one batch");
     let coverage = water.map(|w| w.coverage);
@@ -310,7 +323,7 @@ pub fn draw_batches_auto_told(
             })
             .collect();
         progress.reach(Step::Terrain, Stage::Done);
-        return draw_fields_timed(&fields, batches, water, elev, || 0.0, progress, px_per_mm).0;
+        return Ok(draw_fields_timed(&fields, batches, water, s, || 0.0, progress)?.0);
     }
     let fields: Vec<Fields> = firsts
         .iter()
@@ -320,13 +333,18 @@ pub fn draw_batches_auto_told(
         })
         .collect();
     progress.reach(Step::Terrain, Stage::Done);
-    draw_fields_timed(&fields, batches, water, elev, || 0.0, progress, px_per_mm).0
+    Ok(draw_fields_timed(&fields, batches, water, s, || 0.0, progress)?.0)
 }
 
 /// `draw_batches` from fields already built (e.g. by `gpu::Gpu`): one per
-/// entry of [`terrain_groups`], from that batch's style.
+/// entry of [`terrain_groups`], from that batch's style. With no surface
+/// there are no regions: batches naming one need [`draw_fields_timed`].
 pub fn draw_fields(fields: &[Fields], batches: &[Batch], elev: &[f32], px_per_mm: f32) -> Drawing {
-    draw_fields_timed(fields, batches, None, elev, || 0.0, &(), px_per_mm).0
+    let s = Surface::new(elev, fields[0].w, fields[0].h, 1.0).px_per_mm(px_per_mm);
+    match draw_fields_timed(fields, batches, None, &s, || 0.0, &()) {
+        Ok((d, _)) => d,
+        Err(e) => panic!("{e}"),
+    }
 }
 
 /// Milliseconds per phase of a draw, in the order they ran. Phases that run
@@ -337,22 +355,27 @@ pub type Timings = Vec<(String, f64)>;
 /// each phase took.
 type Traced = (Vec<Line>, Vec<(Pen, Vec<Line>)>, Timings);
 
-/// [`draw_fields`], timing each phase with `now` (milliseconds), with water
-/// drawn alongside the land when there is some, and each step told to
-/// `progress` as it goes. The clock is passed in because
-/// `std::time::Instant` panics on wasm32.
+/// [`draw_fields`] over a surface, timing each phase with `now`
+/// (milliseconds), with water drawn alongside the land when there is some,
+/// and each step told to `progress` as it goes. The clock is passed in
+/// because `std::time::Instant` panics on wasm32. Fails as [`draw_atlas`] does.
 pub fn draw_fields_timed(
     fields: &[Fields],
     batches: &[Batch],
     water: Option<&WaterLayer>,
-    elev: &[f32],
+    s: &Surface,
     now: fn() -> f64,
     progress: &dyn Progress,
-    px_per_mm: f32,
-) -> (Drawing, Timings) {
+) -> Result<(Drawing, Timings), String> {
     assert!(!batches.is_empty(), "need at least one batch");
     let (width, height) = (fields[0].w, fields[0].h);
+    let (elev, px_per_mm) = (s.elev, s.px_per_mm);
     assert_eq!(elev.len(), width * height, "elevation grid size mismatch");
+    let masks = if batches.iter().any(Batch::is_masked) {
+        Masks::resolve(s.regions, batches, width, height, s.px_m)?
+    } else {
+        Masks::none()
+    };
     let depth_store = water
         .filter(|wl| needs_depth(wl.batches, wl.shoreline))
         .map(|wl| build_depth_grid(elev, wl.coverage, wl.depth_override));
@@ -364,6 +387,7 @@ pub fn draw_fields_timed(
                 batches,
                 elev,
                 water.map(|wl| wl.coverage),
+                &masks,
                 now,
                 progress,
                 px_per_mm,
@@ -421,14 +445,16 @@ pub fn draw_fields_timed(
         runs,
         fills,
     };
-    (d, timings)
+    Ok((d, timings))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn trace_land(
     fields: &[Fields],
     batches: &[Batch],
     elev: &[f32],
     water: Option<&[f32]>,
+    masks: &Masks,
     now: fn() -> f64,
     progress: &dyn Progress,
     px_per_mm: f32,
@@ -461,6 +487,10 @@ fn trace_land(
             let g = of[i];
             let mut bf = batch_fields(&fields[g], b, batches[firsts[g]].style.space_base());
             fields::heighten(&mut bf, elev, &st);
+            let mask = masks.of(b, &st);
+            if let Some(m) = &mask {
+                fields::keep_to(&mut bf, |i| m.weight(i), &st);
+            }
             let t1 = now();
             at(Stage::Trace);
             let (lines, paths, t) = if b.draw == Draw::Dots {
@@ -468,7 +498,12 @@ fn trace_land(
                 let marks = plot_order(water::land_dots(&bf, &st));
                 (Vec::new(), marks, [now() - t0, 0.0, 0.0])
             } else {
-                trace_batch(&bf, &st, false, now, &at)
+                let (lines, paths, t) = trace_batch(&bf, &st, false, now, &at);
+                let paths = match &mask {
+                    Some(m) => m.fray(paths, &st),
+                    None => paths,
+                };
+                (lines, paths, t)
             };
             let ctx = expr::ColorCtx {
                 w: bf.w,
@@ -971,14 +1006,13 @@ mod tests {
             shoreline: Some(&sh),
             batches: &batches,
         };
-        let d = draw_batches_auto_with(
-            &e,
-            w,
-            h,
-            30.0,
+        let d = draw_batches_auto_told(
+            &Surface::new(&e, w, h, 30.0),
             &[Batch::along(Style::default())],
             Some(&layer),
-        );
+            &(),
+        )
+        .unwrap();
         let (mut wet, mut dry) = (0, 0);
         for p in d.paths.iter().flatten() {
             let x = p[0] as usize;
@@ -1169,7 +1203,8 @@ mod tests {
             .map(|&i| build_fields(&elev, w, h, 200.0, &batches[i].style))
             .collect();
         let log = Log(Default::default());
-        draw_fields_timed(&fields, &batches, None, &elev, || 0.0, &log, 1.0);
+        draw_fields_timed(&fields, &batches, None, &Surface::new(&elev, w, h, 200.0), || 0.0, &log)
+            .unwrap();
         let log = log.0.into_inner().unwrap();
         let stages = |step| -> Vec<Stage> {
             log.iter()

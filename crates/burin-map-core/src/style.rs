@@ -36,6 +36,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("engine", "How lines are traced. Usually best left alone."),
     ("batch", "Settings for this batch only: line width, random seed, and where it draws."),
     ("water", "Lines on water: where they start and end away from the shore, and how they fade. Water batches only, but for the size and patches of dots on land."),
+    ("mask", "How lines ease out at the edge of the regions a batch keeps to (within) or gives way to (outside). Regions come from the program drawing the map."),
 ];
 
 macro_rules! style {
@@ -219,6 +220,14 @@ style! {
     water: water_patches ("wp"): f32 = 0.0, "how much ripples or dots gather in scattered patches: 0 evenly everywhere, 1 a few patches (dots on land too)";
     water: water_fray ("wfr"): f32 = 0.0, "how far out from water_start, in px, lines break up into shorter dashes and dots as they near the shore, with a ragged edge; 0 a clean edge";
     water: water_depth_fray ("wdf"): f32 = 0.0, "metres band at a batch depth limit where lines break up into dashes and dots with a ragged edge; uses where.depth_max or depth_min; 0 a clean cut";
+
+    mask: mask_start ("mst"): f32 = 0.0, "no lines nearer a region's edge than this, in px: inside it for within, outside it for outside";
+    mask: mask_reach ("mr"): f32 = 40.0, "distance past mask_start over which the shading, and with it the ink, eases in from nothing, in px";
+    mask: mask_fade ("mfd"): f32 = 1.0, "how it eases: above 1 the ink comes later, below 1 sooner";
+    mask: mask_fray ("mfr"): f32 = 0.0, "band past mask_start, in px, where lines break up into shorter dashes and dots with a ragged edge; 0 a clean edge";
+    mask: mask_start_m ("mstm"): f32 = 0.0, "mask_start in metres on the ground; wins over mask_start when above 0";
+    mask: mask_reach_m ("mrm"): f32 = 0.0, "mask_reach in metres on the ground; wins over mask_reach when above 0";
+    mask: mask_fray_m ("mfrm"): f32 = 0.0, "mask_fray in metres on the ground; wins over mask_fray when above 0";
 }
 
 /// Which ground a land batch draws: the land, or the seabed under the water,
@@ -275,6 +284,13 @@ pub struct Batch {
     /// The heights or depths a fill keeps to.
     #[serde(rename = "where", skip_serializing_if = "Band::is_open")]
     pub band: Band,
+    /// Regions the lines keep to, fading out at their edge; several are
+    /// taken together, as one area. Named here, given at draw time.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub within: Vec<String>,
+    /// Regions the lines give way to, fading out as they near them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<String>,
     pub style: Style,
 }
 
@@ -372,6 +388,23 @@ impl Batch {
         self
     }
 
+    /// Keep the lines to region `name` too, fading out at its edge.
+    pub fn within(mut self, name: &str) -> Self {
+        self.within.push(name.to_string());
+        self
+    }
+
+    /// Have the lines give way to region `name` too, fading out as they near it.
+    pub fn outside(mut self, name: &str) -> Self {
+        self.outside.push(name.to_string());
+        self
+    }
+
+    /// Whether the batch keeps to or gives way to any region.
+    pub fn is_masked(&self) -> bool {
+        !self.within.is_empty() || !self.outside.is_empty()
+    }
+
     pub fn along(style: Style) -> Self {
         Batch {
             name: None,
@@ -385,6 +418,8 @@ impl Batch {
             ground: Ground::Land,
             draw: Draw::Lines,
             band: Band::default(),
+            within: Vec::new(),
+            outside: Vec::new(),
             style,
         }
     }
@@ -495,6 +530,10 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         #[serde(default, rename = "where")]
         band: Band,
         #[serde(default)]
+        within: Vec<String>,
+        #[serde(default)]
+        outside: Vec<String>,
+        #[serde(default)]
         style: std::collections::BTreeMap<String, f64>,
     }
     let given = Vec::<Given>::deserialize(d)?;
@@ -509,6 +548,9 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
             return Err(serde::de::Error::custom(
                 "where on a land batch is for fills (draw: fill)",
             ));
+        }
+        if g.draw == Draw::Fill && !(g.within.is_empty() && g.outside.is_empty()) {
+            return Err(serde::de::Error::custom(FILL_REGIONS));
         }
         let mut style = Style::default();
         if g.draw == Draw::Dots {
@@ -539,11 +581,16 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
             ground: g.ground,
             draw: g.draw,
             band: g.band,
+            within: g.within,
+            outside: g.outside,
             style,
         });
     }
     Ok(out)
 }
+
+/// Why a fill naming regions is refused.
+pub(crate) const FILL_REGIONS: &str = "within and outside are for lines and dots; fills don't keep to regions";
 
 #[cfg(test)]
 mod tests {
@@ -562,7 +609,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 50);
+        assert_eq!(Style::PARAMS.len(), 57);
     }
 
     #[test]
@@ -638,6 +685,8 @@ mod json_tests {
                 ground: Ground::Sea,
                 draw: Draw::Dots,
                 band: Band::default(),
+                within: vec!["parks".into()],
+                outside: vec!["towns".into(), "roads".into()],
                 style: Style {
                     space_light: 6.0,
                     batch_floor: 0.4,
@@ -659,6 +708,15 @@ mod json_tests {
         assert!(!to_json_batches(&batches[..1]).contains("cap"));
         assert_eq!(back[1].style.space_light, 6.0);
         assert_eq!(back[1].style.batch_floor, 0.4);
+        assert_eq!(back[1].within, ["parks"]);
+        assert_eq!(back[1].outside, ["towns", "roads"]);
+        assert!(!to_json_batches(&batches[..1]).contains("within"));
+    }
+
+    #[test]
+    fn fills_take_no_regions() {
+        assert!(from_json_batches(r#"[{"draw": "fill", "within": ["parks"]}]"#).is_err());
+        assert!(from_json_batches(r#"[{"draw": "dots", "outside": ["towns"]}]"#).is_ok());
     }
 
     #[test]

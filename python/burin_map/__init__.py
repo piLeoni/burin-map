@@ -234,10 +234,34 @@ def area(**options) -> dict:
     return _area
 
 
+def _names(v, what: str) -> list[str]:
+    names = [v] if isinstance(v, str) else list(v) if isinstance(v, (list, tuple)) else None
+    if names is None or not all(isinstance(n, str) for n in names):
+        raise ValueError(f"{what} must be a region name or a list of them")
+    return names
+
+
+def _regions(regions) -> dict | None:
+    """Regions by name as GeoJSON: dicts, or anything with `__geo_interface__`
+    (Shapely, GeoPandas, …)."""
+    if regions is None:
+        return None
+    out = {}
+    for name, geo in _object(regions, "regions").items():
+        geo = getattr(geo, "__geo_interface__", geo)
+        if not isinstance(geo, dict):
+            raise ValueError(f"region {name!r} must be GeoJSON or have __geo_interface__")
+        out[str(name)] = geo
+    return out
+
+
 def batch(*, name=None, angle=None, draw=None, ground=None, color=None, shade=None,
-          width=None, cap=None, where=None, style=None, **params) -> dict:
+          width=None, cap=None, where=None, within=None, outside=None, style=None,
+          **params) -> dict:
     """A batch of lines, stippling or a fill, as `burin.batch({...})`. Style
-    parameters go in `style` (a dict, or a `Style` with every value) or by name."""
+    parameters go in `style` (a dict, or a `Style` with every value) or by name.
+    `within` / `outside` name regions handed to `draw(regions=...)`: lines and
+    dots keep to them, or give way to them, easing at the edge (`mask_*`)."""
     if draw not in (None, "lines", "dots", "fill"):
         raise ValueError(f'batch draw must be "lines", "dots" or "fill", not {draw!r}')
     if ground not in (None, "land", "sea"):
@@ -261,6 +285,10 @@ def batch(*, name=None, angle=None, draw=None, ground=None, color=None, shade=No
         out["width"] = _scalar(width, "batch width")
     if where is not None:
         out["where"] = _band(where, "batch where")
+    if within is not None:
+        out["within"] = _names(within, "batch within")
+    if outside is not None:
+        out["outside"] = _names(outside, "batch outside")
     out["style"] = {**_style_params(style), **_style_params(params)}
     return _keep("batch", out)
 
@@ -311,14 +339,16 @@ def shore(*, color=None, shade=None, width=None, lines=None, style=None, **param
     return _keep("shore", out)
 
 
-def draw(*, log: Callable[[str], None] | None = None) -> Drawing:
+def draw(*, regions=None, log: Callable[[str], None] | None = None) -> Drawing:
     """Draw what has been built — downloading the elevation, and the water when
-    there are water passes — and start a new, empty document. `log` gets a
-    line per step."""
+    there are water passes — and start a new, empty document. `regions` are
+    the polygons batches name in `within` / `outside`, by name, in lon/lat.
+    `log` gets a line per step."""
     global _area
     if not _items:
         raise ValueError("the document has nothing to draw: add a batch with batch(...)")
-    native = _burin.draw_document(_json.dumps({"atlas": _items, "area": _area}), log)
+    payload = {"atlas": _items, "area": _area, "regions": _regions(regions)}
+    native = _burin.draw_document(_json.dumps(payload), log)
     _items.clear()
     _area = None
     return Drawing(native, mm_per_px=native.mm_per_px)
@@ -408,9 +438,12 @@ def evaluate(script: str) -> dict:
     return _json.loads(_burin.evaluate(script))
 
 
-def draw_script(script: str, *, log: Callable[[str], None] | None = None) -> Drawing:
-    """Run a document script and draw it, as `burin-map --script` does."""
-    native = _burin.draw_document(_burin.evaluate(script), log)
+def draw_script(script: str, *, regions=None,
+                log: Callable[[str], None] | None = None) -> Drawing:
+    """Run a document script and draw it, as `burin-map --script` does;
+    `regions` as `draw` takes them."""
+    payload = {**_json.loads(_burin.evaluate(script)), "regions": _regions(regions)}
+    native = _burin.draw_document(_json.dumps(payload), log)
     return Drawing(native, mm_per_px=native.mm_per_px)
 
 

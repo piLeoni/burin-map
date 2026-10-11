@@ -180,15 +180,17 @@ pub fn burin_parameters() -> String {
     burin_map_core::script::parameters().to_string()
 }
 
-/// Draw a document, `{ atlas, area }` as JSON: what `evaluate` returns and
-/// `burin.draw()` hands over. Downloads the elevation (and the water, when the
-/// atlas has water passes) for the area.
+/// Draw a document, `{ atlas, area, regions }` as JSON: what `evaluate`
+/// returns and `burin.draw()` hands over, with the regions as GeoJSON
+/// polygons by name. Downloads the elevation (and the water, when the atlas
+/// has water passes) for the area.
 #[napi]
 pub fn draw_document(document: String) -> Result<Drawing> {
     let v: serde_json::Value = serde_json::from_str(&document)
         .map_err(|e| Error::from_reason(format!("invalid document JSON: {e}")))?;
     let doc = burin_map::Document::from_atlas(&v["atlas"], v.get("area")).map_err(js_err)?;
-    let inner = burin_map::draw_document(&doc, |_| {}).map_err(js_err)?;
+    let regions = burin_map::regions_from_json(&v["regions"]).map_err(js_err)?;
+    let inner = burin_map::draw_document(&doc, &regions, |_| {}).map_err(js_err)?;
     Ok(Drawing { inner })
 }
 

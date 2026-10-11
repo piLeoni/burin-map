@@ -10,6 +10,10 @@ The engine reads an **atlas**: ordered land `Batch` passes plus optional `Water`
 
 Flat JSON5 `Document` (`crates/burin-map/src/document.rs`) remains for `--style-file`, share links, and overrides — not the primary authoring model. See [document-and-atlas.md](document-and-atlas.md).
 
+## Regions: names in the atlas, data at draw time, pixels in the core
+
+Areas a batch keeps to or gives way to (`within` / `outside`) are named in the atlas but supplied with the draw call, like elevation and water coverage, so atlases stay small and serialisable and one atlas draws against different data. `burin-map-core` takes them as pixel coverage, pixel rings or signed distance; lon/lat polygons and GeoJSON belong to `burin-map`, which owns the projection. The fade scales the shading tone rather than replacing it, so steep dark ground keeps ink further into a fade; the ragged edge reuses water's `fray_along`. Regions named together merge as a union (no seam where two touch); `within` and `outside` combine by the minimum. A region a batch names but the host didn't give is an error, not a silent full or empty batch. See [../regions.md](../regions.md).
+
 ## GPU by default, CPU for reproducibility
 
 Native builds use GPU terrain fields when available (`burin-map-core` `engine` + `gpu`). Users do not pick a device in the UI. `--force-cpu`, `BURIN_ENGINE=cpu`, `?force-cpu` (web), `force_cpu()` / `forceCpu()` exist because GPU f32 vs CPU f64 changes dash placement — needed for golden tests and comparable bug reports. Late `force_cpu()` panics after the device is resolved.

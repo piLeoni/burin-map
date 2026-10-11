@@ -20,12 +20,14 @@ pub mod geo;
 mod panel;
 pub mod progress;
 pub mod raster;
+pub mod regions;
 pub mod tmerc;
 pub mod water;
 
 pub use burin_map_core::{
     Batch, Draw, Drawing, Follow, GeoTransform, Line, Shoreline, Style, WaterBatch,
 };
+pub use regions::{regions_from_json, GeoRegion, Region, Ring};
 pub use dem::{load_dem, projected_aspect, projected_size, Bounds, Dem};
 pub use document::{AreaDoc, Document, LandDoc, WaterDoc};
 pub use geo::{bounds_around, locate, parse_length_km, parse_scale};
@@ -130,12 +132,18 @@ pub fn draw(
     draw_batches(bounds, &[Batch::along(style.clone())], frame, progress)
 }
 
-/// Draw a whole document: the area it names, its land batches and its water.
-/// What `burin.draw()` does from Node and Python, and what `--script` draws.
-pub fn draw_document(doc: &Document, progress: impl Fn(&Progress) + Sync) -> Result<Map, Error> {
+/// Draw a whole document: the area it names, its land batches and its water,
+/// over the regions its batches keep to or give way to (none when they name
+/// none). What `burin.draw()` does from Node and Python, and what `--script`
+/// draws.
+pub fn draw_document(
+    doc: &Document,
+    regions: &[(String, GeoRegion)],
+    progress: impl Fn(&Progress) + Sync,
+) -> Result<Map, Error> {
     let (bounds, frame, _) = doc.area.clone().unwrap_or_default().resolve()?;
     let batches = doc.batches_or_default();
-    draw_with_water(&bounds, &batches, doc.water.as_ref(), &frame, progress)
+    draw_with_water(&bounds, &batches, doc.water.as_ref(), regions, &frame, progress)
 }
 
 /// Download elevation and draw with one or more batch passes (see `Batch`).
@@ -145,20 +153,33 @@ pub fn draw_batches(
     frame: &Frame,
     progress: impl Fn(&Progress) + Sync,
 ) -> Result<Map, Error> {
-    draw_with_water(bounds, batches, None, frame, progress)
+    draw_with_water(bounds, batches, None, &[], frame, progress)
 }
 
 /// [`draw_batches`], and with `water` the water from OpenStreetMap too: it
-/// decides where the land is, and its batches draw on it.
+/// decides where the land is, and its batches draw on it. `regions` are the
+/// areas the batches name in `within` and `outside`, in lon/lat.
 pub fn draw_with_water(
     bounds: &Bounds,
     batches: &[Batch],
     water: Option<&WaterDoc>,
+    regions: &[(String, GeoRegion)],
     frame: &Frame,
     progress: impl Fn(&Progress) + Sync,
 ) -> Result<Map, Error> {
     use std::time::Instant;
     assert!(!batches.is_empty());
+    // Before any download: a region nobody gave can't be drawn.
+    for (i, b) in batches.iter().enumerate() {
+        for name in b.within.iter().chain(&b.outside) {
+            if !regions.iter().any(|(n, _)| n == name) {
+                return Err(Error::Input(format!(
+                    "batch {:?} names region {name:?}, which wasn't given",
+                    b.label(i)
+                )));
+            }
+        }
+    }
     let style = &batches[0].style;
     let mut width = frame.px;
     let mut mm_per_px = None;
@@ -202,17 +223,18 @@ pub fn draw_with_water(
             (self.0)(&Progress::Step { step, stage });
         }
     }
+    let project = dem::projector(bounds, w, h);
+    let on_grid: Vec<(&str, Region)> = regions
+        .iter()
+        .map(|(name, r)| (name.as_str(), r.on_grid(&project)))
+        .collect();
+    let surface = burin_map_core::Surface::new(&dem.elev, w, h, dem.px_m as f32)
+        .px_per_mm(px_per_mm as f32)
+        .regions(&on_grid);
     let t = Instant::now();
-    let drawing = burin_map_core::draw_batches_auto_told(
-        &dem.elev,
-        w,
-        h,
-        dem.px_m as f32,
-        batches,
-        layer.as_ref(),
-        &Steps(&progress),
-        px_per_mm as f32,
-    );
+    let drawing =
+        burin_map_core::draw_batches_auto_told(&surface, batches, layer.as_ref(), &Steps(&progress))
+            .map_err(Error::Input)?;
     let secs = t.elapsed().as_secs_f64();
     progress(&Progress::Relief { secs: secs * 0.3 });
     progress(&Progress::Lines {

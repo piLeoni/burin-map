@@ -44,9 +44,10 @@ export declare function burinParameters(): string
 export declare function check(kind: string, json: string): void
 
 /**
- * Draw a document, `{ atlas, area }` as JSON: what `evaluate` returns and
- * `burin.draw()` hands over. Downloads the elevation (and the water, when the
- * atlas has water passes) for the area.
+ * Draw a document, `{ atlas, area, regions }` as JSON: what `evaluate`
+ * returns and `burin.draw()` hands over, with the regions as GeoJSON
+ * polygons by name. Downloads the elevation (and the water, when the atlas
+ * has water passes) for the area.
  */
 export declare function drawDocument(document: string): Drawing
 

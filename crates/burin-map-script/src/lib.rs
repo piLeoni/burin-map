@@ -143,7 +143,8 @@ pub fn install(ctx: &mut Context) -> JsResult<()> {
 /// Register the `__burin` natives the library is built on. Split out so the
 /// library can be re-evaluated over a fresh copy of them.
 fn register_natives(ctx: &mut Context) -> JsResult<()> {
-    let natives: [(&str, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 7] = [
+    type Native = fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>;
+    let natives: [(&str, usize, Native); 7] = [
         ("batch", 1, native_batch),
         ("water", 1, native_water),
         ("shore", 1, native_shore),
@@ -196,11 +197,11 @@ pub fn run_builder(ctx: &mut Context, callback: &JsValue, path: &str) -> Result<
     let burin = ctx
         .eval(Source::from_bytes("globalThis.__burinDoc").with_path(std::path::Path::new(LIBRARY_PATH)))
         .map_err(|e| ScriptError { message: e.to_string(), at: None })?;
-    let result = (|| {
+    (|| {
         callback
             .as_callable()
             .expect("checked above")
-            .call(&JsValue::undefined(), &[burin.clone()], ctx)
+            .call(&JsValue::undefined(), std::slice::from_ref(&burin), ctx)
             .map_err(|e| script_error(e, "", ctx))?;
         let json = burin
             .as_object()
@@ -212,8 +213,7 @@ pub fn run_builder(ctx: &mut Context, callback: &JsValue, path: &str) -> Result<
             .and_then(|v| v.to_json(ctx))
             .map_err(|e| script_error(e, "", ctx))?
             .ok_or_else(|| ScriptError { message: "the burin document built nothing to draw".into(), at: None })
-    })();
-    result
+    })()
 }
 
 // ---------------------------------------------------------------------------

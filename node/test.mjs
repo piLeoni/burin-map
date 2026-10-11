@@ -46,6 +46,24 @@ test('mistakes are caught where they are made', () => {
   assert.throws(() => burin.batch({ cap: 'square' }), /round, round-inside or butt/)
   assert.throws(() => burin.area({ centre: '46,7' }), /not one of/)
   assert.throws(() => burin.water('waves'), /lines, ripples or dots/)
+  assert.throws(() => burin.batch({ within: 3 }), /region name/)
+  assert.throws(() => burin.fill({ within: 'park' }), /fills don't keep to regions/)
+})
+
+test('batches name regions, and draw is handed them', () => {
+  assert.deepEqual(burin.batch({ within: 'park', outside: ['a', 'b'] }), {
+    within: ['park'],
+    outside: ['a', 'b'],
+    style: {},
+  })
+  const doc = `
+    burin.area({ bounds: [7.0, 46.0, 7.1, 46.05] })
+    burin.batch({ within: 'park' })
+    burin.draw()
+  `
+  assert.throws(() => burin.drawScript(doc), /region "park", which wasn't given/)
+  const point = { type: 'Point', coordinates: [7, 46] }
+  assert.throws(() => burin.drawScript(doc, { regions: { park: point } }), /regions are polygons/)
 })
 
 test('evaluate runs a document script and returns its atlas', () => {

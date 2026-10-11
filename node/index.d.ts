@@ -70,9 +70,24 @@ export interface BatchOptions {
   cap?: 'round' | 'round-inside' | 'butt'
   /** for a fill: the band it keeps to */
   where?: Where
+  /** lines and dots: keep to these regions (given to `draw`), easing out at
+   * their edge as the `mask_*` parameters say */
+  within?: string | string[]
+  /** lines and dots: give way to these regions, easing in from their edge */
+  outside?: string | string[]
   style?: Style
   /** a style parameter given by name, outside `style` */
   [parameter: string]: any
+}
+
+/** GeoJSON in lon/lat: a Polygon, MultiPolygon, Feature, FeatureCollection or
+ * GeometryCollection of polygons. */
+export type GeoJSON = object
+
+/** What `draw` and `drawScript` take beside the document. */
+export interface DrawOptions {
+  /** the regions batches name in `within` / `outside`, by name */
+  regions?: Record<string, GeoJSON>
 }
 
 /** A pass over the water. */
@@ -130,7 +145,7 @@ export declare function water(kind?: 'lines' | 'ripples' | 'dots' | WaterOptions
 export declare function shore(options?: ShoreOptions): object
 /** Draw what has been built (downloading elevation and water), and start a
  * new, empty document. */
-export declare function draw(): Drawing
+export declare function draw(options?: DrawOptions): Drawing
 /** The atlas built so far, without drawing it. */
 export declare function json(): object[]
 /** The style parameters, by name, with their help. */
@@ -160,7 +175,7 @@ export declare function mix(a: Color, b: Color, t: number): Color
 // ---- documents as files, and everything around them -------------------------
 
 /** Run a document script (its source) and draw it. */
-export declare function drawScript(source: string): Drawing
+export declare function drawScript(source: string, options?: DrawOptions): Drawing
 /** Run a document script and return what it built. */
 export declare function evaluate(source: string): Built
 /** Draw any elevation grid (metres, row 0 = north). Values ≤ 0.5 m are sea. */

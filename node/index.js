@@ -39,7 +39,7 @@ function mount() {
       return JSON.parse(json)
     },
     draw(json) {
-      const drawing = native.drawDocument(JSON.stringify({ atlas: JSON.parse(json), area }))
+      const drawing = native.drawDocument(JSON.stringify({ atlas: JSON.parse(json), area, regions }))
       current = mount()
       return drawing
     },
@@ -50,12 +50,25 @@ function mount() {
 }
 
 let current = mount()
+/** The regions the `draw` under way was given. */
+let regions = null
 
 const call = (name) => (...args) => current[name](...args)
 
+/** Draw what has been built, with `{ regions }`: GeoJSON by name. */
+function draw(options) {
+  regions = options?.regions ?? null
+  try {
+    return current.draw()
+  } finally {
+    regions = null
+  }
+}
+
 /** Run a document script (its source text) and draw it. */
-function drawScript(source) {
-  return native.drawDocument(native.evaluate(source))
+function drawScript(source, options) {
+  const built = JSON.parse(native.evaluate(source))
+  return native.drawDocument(JSON.stringify({ ...built, regions: options?.regions ?? null }))
 }
 
 /** Run a document script and return what it built, `{ atlas, area }`. */
@@ -71,7 +84,7 @@ exports.batch = call('batch')
 exports.fill = call('fill')
 exports.water = call('water')
 exports.shore = call('shore')
-exports.draw = call('draw')
+exports.draw = draw
 exports.json = call('json')
 exports.parameters = call('parameters')
 exports.elev = current.elev

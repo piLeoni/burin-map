@@ -285,6 +285,36 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 | Batch | `batch_floor` | 0 |  |
 |  | `batch_stroke` | 1.2 |  |
 |  | `batch_seed` | 1 |  |
+| Mask | `mask_start` | 0 |  |
+|  | `mask_reach` | 40 |  |
+|  | `mask_fade` | 1 |  |
+|  | `mask_fray` | 0 |  |
+|  | `mask_start_m` | 0 |  |
+|  | `mask_reach_m` | 0 |  |
+|  | `mask_fray_m` | 0 |  |
+
+The mask parameters only matter for a batch with `within` or `outside` (see [Regions](#regions)).
+
+### Regions
+
+A program drawing a document can hand it areas by name — parks, city limits — and a batch of lines or dots can keep to them or give way to them, easing out at the edge instead of being cut:
+
+```js
+burin.batch({ angle: 0, within: 'parks', mask_reach_m: 200, mask_fray_m: 80 })
+burin.batch({ angle: 90, outside: ['city', 'airport'] })
+```
+
+| Parameter | Short | Meaning |
+|---|---|---|
+| `mask_start` | `mst` | no lines nearer the edge than this, px (inside for `within`, outside for `outside`) |
+| `mask_reach` | `mr` | distance past `mask_start` over which the ink comes in, px |
+| `mask_fade` | `mfd` | how it comes in: above 1 later, below 1 sooner |
+| `mask_fray` | `mfr` | band past `mask_start` where lines break into dashes and dots with a ragged edge, px; 0 a clean edge |
+| `mask_start_m`, `mask_reach_m`, `mask_fray_m` | `mstm`, `mrm`, `mfrm` | the same in metres on the ground; above 0 they win over the px value |
+
+Several names merge into one area; a batch with both `within` and `outside` keeps to the first and gives way to the second. The fade scales the shading, so dark slopes keep their ink further towards the edge than flat ground. Fills don't take regions.
+
+The regions themselves come from the program, not the document: `burin_map.draw(regions={"parks": geojson})` in Python, `burin.draw({ regions })` in Node, `--region parks=parks.geojson` on the command line, `Surface::regions` in Rust. Naming a region that wasn't given is an error. The web app has none. More in [docs/regions.md](docs/regions.md).
 
 ### Carries over
 

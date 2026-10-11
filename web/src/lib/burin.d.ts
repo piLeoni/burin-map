@@ -58,6 +58,11 @@ interface BatchOptions {
   width?: Scalar
   /** for a fill: the band of heights or depths it keeps to */
   where?: Where
+  /** lines and dots: keep to these regions, easing out at their edge (`mask_*`).
+   * Regions come from the program drawing the document; the page has none. */
+  within?: string | string[]
+  /** lines and dots: give way to these regions, easing in from their edge */
+  outside?: string | string[]
   /** the style parameters, by name */
   style?: Style
   [parameter: string]: any

@@ -94,6 +94,26 @@ impl Rng {
     }
 }
 
+/// Smooth noise, 0…1, varying over about `cell` px.
+pub fn noise_field(w: usize, h: usize, cell: f32, rng: &mut Rng) -> impl Fn([f32; 2]) -> f32 {
+    let cell = cell.max(1.0);
+    let (nw, nh) = (
+        (w as f32 / cell) as usize + 3,
+        (h as f32 / cell) as usize + 3,
+    );
+    let lattice: Vec<f32> = (0..nw * nh).map(|_| rng.f64() as f32).collect();
+    move |p: [f32; 2]| {
+        let (x, y) = ((p[0] / cell).max(0.0), (p[1] / cell).max(0.0));
+        let (i, j) = (x as usize, y as usize);
+        let e = |f: f32| f * f * (3.0 - 2.0 * f);
+        let (fx, fy) = (e(x - i as f32), e(y - j as f32));
+        let v = |a: usize, b: usize| lattice[b.min(nh - 1) * nw + a.min(nw - 1)];
+        let top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx;
+        let bottom = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
+        top + (bottom - top) * fy
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

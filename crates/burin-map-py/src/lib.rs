@@ -167,17 +167,19 @@ fn projected_size(bounds: (f64, f64, f64, f64)) -> (f64, f64) {
     burin_map::projected_size(&[bounds.0, bounds.1, bounds.2, bounds.3])
 }
 
-/// Draw a document, `{"atlas": [...], "area": {...}}` as JSON: what
-/// `evaluate` returns and `burin_map.draw()` hands over.
+/// Draw a document, `{"atlas": [...], "area": {...}, "regions": {...}}` as
+/// JSON: what `evaluate` returns and `burin_map.draw()` hands over, with the
+/// regions as GeoJSON polygons by name.
 #[pyfunction]
 #[pyo3(signature = (document, log=None))]
 fn draw_document(py: Python<'_>, document: &str, log: Option<Py<PyAny>>) -> PyResult<Map> {
     let v: serde_json::Value = serde_json::from_str(document)
         .map_err(|e| PyValueError::new_err(format!("invalid document JSON: {e}")))?;
     let doc = burin_map::Document::from_atlas(&v["atlas"], v.get("area")).map_err(py_err)?;
+    let regions = burin_map::regions_from_json(&v["regions"]).map_err(py_err)?;
     let log = logger(log);
     let inner = py
-        .detach(|| burin_map::draw_document(&doc, log))
+        .detach(|| burin_map::draw_document(&doc, &regions, log))
         .map_err(py_err)?;
     Ok(Map { inner })
 }
