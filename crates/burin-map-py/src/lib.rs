@@ -3,7 +3,7 @@
 //! under it. Arrays cross as raw little-endian bytes so the wheel needs no
 //! numpy at build time and one abi3 wheel serves every Python version.
 
-use burin_map::{Error, Frame, Style};
+use burin_map::{Error, Style};
 use burin_map_core::{Batch, Line};
 use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -167,36 +167,42 @@ fn projected_size(bounds: (f64, f64, f64, f64)) -> (f64, f64) {
     burin_map::projected_size(&[bounds.0, bounds.1, bounds.2, bounds.3])
 }
 
+/// Draw a document, `{"atlas": [...], "area": {...}}` as JSON: what
+/// `evaluate` returns and `burin_map.draw()` hands over.
 #[pyfunction]
-#[pyo3(signature = (bounds, style=None, frame_size_mm=None, frame_pen_mm=0.3, log=None))]
-fn draw(
-    py: Python<'_>,
-    bounds: (f64, f64, f64, f64),
-    style: Option<&Bound<'_, PyDict>>,
-    frame_size_mm: Option<Vec<f64>>,
-    frame_pen_mm: f64,
-    log: Option<Py<PyAny>>,
-) -> PyResult<Map> {
-    let st = style_from(style)?;
-    let size_mm = match frame_size_mm {
-        Some(v) => Some(burin_map::document::size_pair(&v).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(
-                "frame_size_mm needs 1 or 2 numbers: (side,) or (width, height)",
-            )
-        })?),
-        None => None,
-    };
-    let frame = Frame {
-        size_mm,
-        pen_width: frame_pen_mm,
-        ..Frame::default()
-    };
-    let b = [bounds.0, bounds.1, bounds.2, bounds.3];
+#[pyo3(signature = (document, log=None))]
+fn draw_document(py: Python<'_>, document: &str, log: Option<Py<PyAny>>) -> PyResult<Map> {
+    let v: serde_json::Value = serde_json::from_str(document)
+        .map_err(|e| PyValueError::new_err(format!("invalid document JSON: {e}")))?;
+    let doc = burin_map::Document::from_atlas(&v["atlas"], v.get("area")).map_err(py_err)?;
     let log = logger(log);
     let inner = py
-        .detach(|| burin_map::draw(&b, &st, &frame, log))
+        .detach(|| burin_map::draw_document(&doc, log))
         .map_err(py_err)?;
     Ok(Map { inner })
+}
+
+/// Check one entry of a document — `batch`, `water`, `shore` or `area` — as
+/// a document script's own calls are checked.
+#[pyfunction]
+fn check(kind: &str, json: &str) -> PyResult<()> {
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| PyValueError::new_err(format!("invalid JSON: {e}")))?;
+    use burin_map_core::script;
+    let checked = match kind {
+        "batch" => script::batch_from(&v).map(drop),
+        "water" => script::water_from(&v, v.get("draw").and_then(|d| d.as_str())).map(drop),
+        "shore" => script::shore_from(&v).map(drop),
+        "area" => script::area_from(&v).map(drop),
+        other => Err(format!("nothing to check called {other:?}")),
+    };
+    checked.map_err(PyValueError::new_err)
+}
+
+/// The style parameters, as a document script's `burin.parameters()` lists them.
+#[pyfunction]
+fn parameters() -> String {
+    burin_map_core::script::parameters().to_string()
 }
 
 /// `elev`: little-endian f32 heights, row 0 = north, `width` × `height`.
@@ -316,7 +322,9 @@ fn _burin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(locate, m)?)?;
     m.add_function(wrap_pyfunction!(bounds_around, m)?)?;
     m.add_function(wrap_pyfunction!(projected_size, m)?)?;
-    m.add_function(wrap_pyfunction!(draw, m)?)?;
+    m.add_function(wrap_pyfunction!(draw_document, m)?)?;
+    m.add_function(wrap_pyfunction!(check, m)?)?;
+    m.add_function(wrap_pyfunction!(parameters, m)?)?;
     m.add_function(wrap_pyfunction!(draw_elevation, m)?)?;
     m.add_function(wrap_pyfunction!(fields, m)?)?;
     m.add_function(wrap_pyfunction!(engine, m)?)?;

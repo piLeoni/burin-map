@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict'
 
-const { runCli } = require('./index.js')
+const { runCli } = require('./native.js')
 
 try {
   runCli(['burin-map', ...process.argv.slice(2)])

@@ -40,8 +40,8 @@ Examples: `presets/*.js`. Default reference: `presets/contours.js`.
 
 ## CLI / bindings
 
-- CLI `--script PATH`: `burin_map_script::evaluate_document` then draw (`cli.rs`).
-- Python / Node: `evaluate(script)` → `{ atlas, area }` dict/object; draw APIs consume atlas or simplified style paths per binding docs.
+- CLI `--script PATH`: `Document::from_script` then draw (`cli.rs`).
+- Python / Node: the same `burin.*` calls in the host language, `burin.draw()` → `burin_map::draw_document`; `drawScript` / `draw_script` run a document file; `evaluate(script)` → `{ atlas, area }`. See [bindings.md](bindings.md).
 
 ## Related
 

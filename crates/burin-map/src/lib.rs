@@ -130,6 +130,14 @@ pub fn draw(
     draw_batches(bounds, &[Batch::along(style.clone())], frame, progress)
 }
 
+/// Draw a whole document: the area it names, its land batches and its water.
+/// What `burin.draw()` does from Node and Python, and what `--script` draws.
+pub fn draw_document(doc: &Document, progress: impl Fn(&Progress) + Sync) -> Result<Map, Error> {
+    let (bounds, frame, _) = doc.area.clone().unwrap_or_default().resolve()?;
+    let batches = doc.batches_or_default();
+    draw_with_water(&bounds, &batches, doc.water.as_ref(), &frame, progress)
+}
+
 /// Download elevation and draw with one or more batch passes (see `Batch`).
 pub fn draw_batches(
     bounds: &Bounds,

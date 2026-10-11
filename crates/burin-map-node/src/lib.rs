@@ -1,7 +1,7 @@
 //! Node.js bindings (N-API): the native addon behind the `burin-map` npm package.
 //! The public JS API is the generated `index.js` plus a thin `cli.js` for `npx`.
 
-use burin_map::{Error as BurinError, Frame, Style};
+use burin_map::{Error as BurinError, Style};
 use burin_map_core::Line;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -78,9 +78,11 @@ impl Drawing {
         pack(&self.inner.drawing.lines)
     }
 
+    /// SVG, sized in mm when the area has a paper size (or `mmPerPx` is given).
     #[napi]
     pub fn svg(&self, mm_per_px: Option<f64>) -> String {
-        self.inner.drawing.to_svg(mm_per_px.map(|k| k as f32))
+        let k = mm_per_px.or(self.inner.mm_per_px);
+        self.inner.drawing.to_svg(k.map(|k| k as f32))
     }
 
     #[napi]
@@ -178,32 +180,40 @@ pub fn burin_parameters() -> String {
     burin_map_core::script::parameters().to_string()
 }
 
-/// Download elevation for the lon/lat box and draw it.
+/// Draw a document, `{ atlas, area }` as JSON: what `evaluate` returns and
+/// `burin.draw()` hands over. Downloads the elevation (and the water, when the
+/// atlas has water passes) for the area.
 #[napi]
-pub fn draw(
-    west: f64,
-    south: f64,
-    east: f64,
-    north: f64,
-    style: Option<Object>,
-    frame_size_mm: Option<Vec<f64>>,
-    frame_pen_mm: Option<f64>,
-) -> Result<Drawing> {
-    let st = style_from(style)?;
-    let size_mm = match frame_size_mm {
-        Some(v) => Some(burin_map::document::size_pair(&v).ok_or_else(|| {
-            Error::from_reason("frameSizeMm needs 1 or 2 numbers: [side] or [width, height]")
-        })?),
-        None => None,
-    };
-    let frame = Frame {
-        size_mm,
-        pen_width: frame_pen_mm.unwrap_or(0.3),
-        ..Frame::default()
-    };
-    let b = [west, south, east, north];
-    let inner = burin_map::draw(&b, &st, &frame, |_| {}).map_err(js_err)?;
+pub fn draw_document(document: String) -> Result<Drawing> {
+    let v: serde_json::Value = serde_json::from_str(&document)
+        .map_err(|e| Error::from_reason(format!("invalid document JSON: {e}")))?;
+    let doc = burin_map::Document::from_atlas(&v["atlas"], v.get("area")).map_err(js_err)?;
+    let inner = burin_map::draw_document(&doc, |_| {}).map_err(js_err)?;
     Ok(Drawing { inner })
+}
+
+/// Check one entry the library builds — `batch`, `water`, `shore` or
+/// `area` — as a document script's own calls are checked.
+#[napi]
+pub fn check(kind: String, json: String) -> Result<()> {
+    let v: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| Error::from_reason(format!("invalid JSON: {e}")))?;
+    use burin_map_core::script;
+    let checked = match kind.as_str() {
+        "batch" => script::batch_from(&v).map(drop),
+        "water" => script::water_from(&v, v.get("draw").and_then(|d| d.as_str())).map(drop),
+        "shore" => script::shore_from(&v).map(drop),
+        "area" => script::area_from(&v).map(drop),
+        other => Err(format!("nothing to check called {other:?}")),
+    };
+    checked.map_err(Error::from_reason)
+}
+
+/// The source of the `burin` library documents call, the same one the CLI and
+/// the web page run.
+#[napi]
+pub fn library_source() -> String {
+    burin_map_script::LIBRARY.to_string()
 }
 
 /// Draw any elevation grid (metres, row 0 = north). Values ≤ 0.5 m are sea.

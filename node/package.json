@@ -10,12 +10,14 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "native.js",
+    "native.d.ts",
     "cli.js",
     "*.node"
   ],
   "scripts": {
-    "build": "napi build --platform --release --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir .",
-    "build:debug": "napi build --platform --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir .",
+    "build": "napi build --platform --release --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir . --js native.js --dts native.d.ts",
+    "build:debug": "napi build --platform --manifest-path ../crates/burin-map-node/Cargo.toml --package burin-map-node --output-dir . --js native.js --dts native.d.ts",
     "test": "node --test test.mjs"
   },
   "napi": {

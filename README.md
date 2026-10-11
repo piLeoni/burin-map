@@ -103,31 +103,34 @@ pip install "git+https://github.com/piLeoni/burin-map.git"
 # or from a local clone:  pip install .    # editable: pip install -e ".[dev]"
 ```
 
+The calls are a document's (see [SYNTAX.md](SYNTAX.md)), with Python's
+keywords: build the drawing up, then `draw()`.
+
 ```python
-import burin_map
+import burin_map as burin
 
-lat, lon, name = burin_map.locate("Twin Peaks, San Francisco")   # or "37.75,-122.45"
-area = burin_map.bounds_around(lat, lon, 14, 14)                 # km
-
-d = burin_map.draw(area)                     # 2400 px wide; frame_size_mm=... for paper
+burin.area(at="Twin Peaks, San Francisco", size_km=[14, 14])   # or at="37.75,-122.45"
+burin.batch(angle=0, style={"space_light": 6})                 # or style=burin.Style(...): every value
+burin.water("lines", follow="shore")
+burin.shore(lines=2)
+d = burin.draw(log=print)                    # 2400 px wide; size_mm=[297, 420] in area() for paper
 d.save_png("tp.png")
 d.save_svg("tp.svg")
 d.paths                                  # dashes: list of N×2 numpy arrays, px
 
-# Tweak the style (print(burin_map.style_help()) lists every parameter)
-d = burin_map.draw(area, burin_map.Style(input_gain=4, mod_wobble=30))
-
-# Frame in mm (plotter / print): scale follows from frame and pen
-d = burin_map.draw(area, frame_size_mm=(297, 420), frame_pen_mm=0.3, log=print)
+# A document file, as it is
+d = burin.draw_script(open("presets/engraved-sea.js").read())
 
 # Any elevation grid you already have (metres, square pixels, row 0 = north)
-d = burin_map.draw_elevation(elev, px_m=30.0)
+d = burin.draw_elevation(elev, px_m=30.0)
 
-# Run a document (JavaScript) and get the graph it builds, as a dict:
-doc = burin_map.evaluate(open("presets/contours.js").read())
+# What a document builds, without drawing it
+doc = burin.evaluate(open("presets/contours.js").read())
 doc["atlas"]          # the batches and water passes the engine draws, in order
 doc["area"]           # the area the script asked for, or None
 ```
+
+`print(burin.style_help())` lists every style parameter.
 
 Elevation is downloaded on demand (see [Data](#data)); addresses are looked
 up with OpenStreetMap's [Nominatim](https://nominatim.org/) (one request
@@ -148,22 +151,29 @@ That installs `import` / `require("burin-map")` and the `burin-map` command.
 Prebuilt binaries cover the usual platforms; from source you need a
 [Rust toolchain](https://rustup.rs).
 
+`burin` here is the very library a document script calls, so a document is
+written the same way in a preset, in the web editor and in Node:
+
 ```js
-import { locate, boundsAround, draw, drawElevation } from "burin-map";
-import { writeFileSync } from "node:fs";
+import burin from "burin-map";
+import { readFileSync, writeFileSync } from "node:fs";
 
-const [lat, lon] = locate("Twin Peaks, San Francisco");
-const [west, south, east, north] = boundsAround(lat, lon, 14, 14);
-
-const d = draw(west, south, east, north, { input_gain: 4, mod_wobble: 30 });
+burin.area({ at: "Twin Peaks, San Francisco", size_km: [14, 14] });
+burin.batch({ angle: 0, style: { space_light: 6 } });
+burin.water("lines", { follow: "shore" });
+burin.shore({ lines: 2 });
+const d = burin.draw();                  // and a new, empty document
 writeFileSync("tp.png", d.png());
-writeFileSync("tp.svg", d.svg());
+writeFileSync("tp.svg", d.svg());        // in mm when the area has size_mm
 
-// Or any elevation grid you already have (metres, row 0 = north):
-// const d = drawElevation(elevFloat32Array, width, height, pxM, { space_light: 6 });
+// A document file, as it is:
+// const d = burin.drawScript(readFileSync("presets/engraved-sea.js", "utf8"));
 
-// Run a document (JavaScript) and get the graph it builds, as JSON:
-// const { atlas, area } = JSON.parse(evaluate(readFileSync("presets/contours.js", "utf8")));
+// Any elevation grid you already have (metres, row 0 = north):
+// const d = burin.drawElevation(elevFloat32Array, width, height, pxM, { space_light: 6 });
+
+// What a document builds, without drawing it:
+// const { atlas, area } = burin.evaluate(readFileSync("presets/contours.js", "utf8"));
 ```
 
 ## How it works

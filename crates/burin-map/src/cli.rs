@@ -15,20 +15,11 @@ use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use burin_map_core::panel::Event;
 use burin_map_core::{Stage, Step};
 
-use crate::document::{size_pair, AreaDoc};
+use crate::document::PLACES;
 use crate::geo::{parse_length_km, parse_scale};
 use crate::panel::Panel;
-use crate::progress::{latlon, relief};
-use crate::{
-    bounds_around, dem::projected_size, locate, Batch, Bounds, Document, Error, Frame, Progress,
-    Style,
-};
-
-const PLACES: &[(&str, Bounds)] = &[
-    ("bern", [7.10, 46.70, 7.80, 47.20]),
-    ("matterhorn", [7.40, 45.80, 8.00, 46.20]),
-    ("san-francisco", [-122.75, 37.45, -122.05, 38.05]),
-];
+use crate::progress::relief;
+use crate::{dem::projected_size, Batch, Bounds, Document, Error, Frame, Progress, Style};
 
 /// Values taken by a terrain / frame / out flag.
 #[derive(Clone, Copy)]
@@ -169,185 +160,43 @@ pub fn command() -> Command {
     cmd
 }
 
-/// Area to draw, frame to draw it in and a name for the area, from the
-/// `san-francisco` → `San Francisco`.
-fn place_title(name: &str) -> String {
-    name.split('-')
-        .map(|w| w[..1].to_uppercase() + &w[1..])
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// Area to draw, frame to draw it in and a name for the area.
 ///
 /// Explicit command-line flags always win. Anything left unset falls back to
-/// the area block of the JSON document (`--style-json` / `--style-file`).
+/// the document's area block (`burin.area(...)` in a script).
 fn area_and_frame(m: &ArgMatches, doc: &Document) -> Result<(Bounds, Frame, String), Error> {
-    let area = doc.area.clone().unwrap_or_default();
+    let mut area = doc.area.clone().unwrap_or_default();
     let given = |name: &str| matches!(m.value_source(name), Some(ValueSource::CommandLine));
-
-    let paper = if given("frame-size") {
-        m.get_many::<f64>("frame-size")
-            .map(|v| v.copied().collect::<Vec<_>>())
-    } else {
-        area.size_mm.clone()
-    };
-    let paper = match paper {
-        Some(v) => Some(
-            size_pair(&v)
-                .filter(|p| p.iter().all(|x| *x > 0.0))
-                .ok_or_else(|| {
-                    Error::Input("the paper size needs 1 or 2 positive numbers in mm".into())
-                })?,
-        ),
-        None => None,
-    };
-    let mut frame = Frame {
-        size_mm: paper,
-        pen_width: if given("pen-width") {
-            *m.get_one("pen-width").unwrap()
-        } else {
-            area.pen_mm.unwrap_or(0.3)
-        },
-        ..Frame::default()
-    };
-    let scale = if given("export-scale") {
-        m.get_one::<String>("export-scale")
-            .map(|s| parse_scale(s))
-            .transpose()?
-    } else {
-        area.scale
-    };
-    let size = if given("terrain-size") {
-        match m.get_many::<String>("terrain-size") {
-            Some(v) => {
-                let v: Vec<f64> = v.map(|s| parse_length_km(s)).collect::<Result<_, _>>()?;
-                Some((v[0], v.get(1).copied()))
-            }
-            None => None,
-        }
-    } else {
-        area.size_km
-            .as_ref()
-            .filter(|s| !s.is_empty())
-            .map(|s| (s[0], s.get(1).copied()))
-    };
-    let frame_aspect = frame.size_mm.map(|[w, h]| h / w);
-    // Paper for a ground of the given projected size at 1:n.
-    let paper_for = |b: &Bounds, n: f64| {
-        let (pw, ph) = projected_size(b);
-        [pw * 1000.0 / n, ph * 1000.0 / n]
-    };
-
-    // Where: explicit bounds, a named place, or a centre to look up. CLI first,
-    // then the document's area block.
-    let at = if given("terrain-at") {
-        m.get_one::<String>("terrain-at").cloned()
-    } else {
-        area.at.clone()
-    };
-    let cli_bounds = m.get_many::<f64>("terrain-bounds").map(|b| {
+    // Where: one of bounds, a centre or a named place replaces the others. A
+    // fixed area also drops the document's ground size, which is the size
+    // around its centre.
+    if let Some(b) = m.get_many::<f64>("terrain-bounds") {
         let b: Vec<f64> = b.copied().collect();
-        [b[0], b[1], b[2], b[3]]
-    });
-    let place = if given("terrain-place") {
-        m.get_one::<String>("terrain-place").cloned()
-    } else {
-        area.place
-            .clone()
-            .or_else(|| m.get_one::<String>("terrain-place").cloned())
-    };
-
-    // A fixed area (bounds or place) needs no size at all: the ground is known.
-    let fixed: Option<Bounds> = cli_bounds.or(area.bounds).or_else(|| {
-        // Only treat the place as fixed when the CLI default wasn't overridden
-        // by an explicit --terrain-at.
-        if at.is_none() {
-            place
-                .as_ref()
-                .and_then(|name| PLACES.iter().find(|p| p.0 == name).map(|p| p.1))
-        } else {
-            None
-        }
-    });
-
-    let Some(q) = at else {
-        if size.is_some() {
-            return Err(Error::Input(
-                "--terrain-size only applies with --terrain-at".into(),
-            ));
-        }
-        let (bounds, label) = match fixed {
-            Some(b) => {
-                if cli_bounds.is_some() {
-                    (
-                        b,
-                        format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])),
-                    )
-                } else {
-                    let name = place.as_deref().unwrap_or("san-francisco");
-                    (b, place_title(name))
-                }
-            }
-            None => {
-                let name = place.as_deref().unwrap_or("san-francisco");
-                (
-                    PLACES
-                        .iter()
-                        .find(|p| p.0 == name)
-                        .map(|p| p.1)
-                        .unwrap_or(PLACES[0].1),
-                    place_title(name),
-                )
-            }
-        };
-        if let Some(n) = scale {
-            if frame.size_mm.is_some() {
-                return Err(Error::Input(
-                    "the area, --frame-size and --export-scale can't all be fixed: drop one".into(),
-                ));
-            }
-            frame.size_mm = Some(paper_for(&bounds, n));
-        }
-        return Ok((bounds, frame, label));
-    };
-
-    let (w_km, h_km) = match (size, scale, frame.size_mm) {
-        (Some(_), Some(_), Some(_)) => {
-            return Err(Error::Input(
-                "--terrain-size, --frame-size and --export-scale can't all be given: drop one"
-                    .into(),
-            ));
-        }
-        (Some((w, h)), _, _) => (w, h.unwrap_or(w * frame_aspect.unwrap_or(1.0))),
-        (None, Some(n), Some([fw, fh])) => (fw * n / 1e6, fh * n / 1e6),
-        (None, Some(_), None) => {
-            return Err(Error::Input(
-                "with --terrain-at, --export-scale needs --terrain-size or --frame-size".into(),
-            ));
-        }
-        (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
-    };
-    let (lat, lon, label) = locate(&q)?;
-    // Degrees per km is approximate; correct against the projection so the
-    // area (and any scale derived from it) comes out as asked.
-    let mut bounds = bounds_around(lat, lon, w_km, h_km);
-    for _ in 0..2 {
-        let (pw, ph) = projected_size(&bounds);
-        let (w0, s0, e0, n0) = (bounds[0], bounds[1], bounds[2], bounds[3]);
-        let (fx, fy) = (w_km * 1000.0 / pw, h_km * 1000.0 / ph);
-        let (cx, cy, hx, hy) = (
-            (w0 + e0) / 2.0,
-            (s0 + n0) / 2.0,
-            (e0 - w0) / 2.0 * fx,
-            (n0 - s0) / 2.0 * fy,
-        );
-        bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
+        area.bounds = Some([b[0], b[1], b[2], b[3]]);
+        (area.at, area.place, area.size_km) = (None, None, None);
     }
-    if let (Some(n), None) = (scale, frame.size_mm) {
-        frame.size_mm = Some(paper_for(&bounds, n));
+    if given("terrain-at") {
+        area.at = m.get_one::<String>("terrain-at").cloned();
+        (area.bounds, area.place) = (None, None);
     }
-    Ok((bounds, frame, label))
+    if given("terrain-place") {
+        area.place = m.get_one::<String>("terrain-place").cloned();
+        (area.at, area.bounds, area.size_km) = (None, None, None);
+    }
+    if given("terrain-size") {
+        let v = m.get_many::<String>("terrain-size").unwrap();
+        area.size_km = Some(v.map(|s| parse_length_km(s)).collect::<Result<_, _>>()?);
+    }
+    if given("frame-size") {
+        area.size_mm = m.get_many::<f64>("frame-size").map(|v| v.copied().collect());
+    }
+    if given("export-scale") {
+        area.scale = Some(parse_scale(m.get_one::<String>("export-scale").unwrap())?);
+    }
+    if given("pen-width") {
+        area.pen_mm = m.get_one::<f64>("pen-width").copied();
+    }
+    area.resolve()
 }
 
 /// Coloured, aligned progress on stdout. Colour is dropped automatically
@@ -495,18 +344,8 @@ where
     let mut doc: Document = if let Some(path) = m.get_one::<PathBuf>("script") {
         let source = std::fs::read_to_string(path)
             .map_err(|e| Error::Input(format!("reading {}: {e}", path.display())))?;
-        let built = burin_map_script::evaluate_document(&source)
-            .map_err(|e| Error::Input(format!("{}: {e}", path.display())))?;
-        let area = match built.area {
-            None => None,
-            Some(v) => Some(
-                serde_json::from_value::<AreaDoc>(v)
-                    .map_err(|e| Error::Input(format!("{}: area: {e}", path.display())))?,
-            ),
-        };
-        let atlas = burin_map_core::script::atlas_from(&built.atlas)
-            .map_err(|e| Error::Input(format!("{}: {e}", path.display())))?;
-        atlas_into_document(atlas, area)
+        Document::from_script(&source)
+            .map_err(|e| Error::Input(format!("{}: {e}", path.display())))?
     } else if let Some(json) = m.get_one::<String>("style-json") {
         Document::parse(json).map_err(|e| Error::Input(format!("invalid --style-json: {e}")))?
     } else if let Some(path) = m.get_one::<PathBuf>("style-file") {
@@ -691,28 +530,6 @@ where
         t.elapsed().as_secs_f64()
     );
     Ok(())
-}
-
-/// The atlas a script built, as the document the CLI draws: its batches, and
-/// its water passes when it has any. `area`, when the script set one, is the
-/// area block the command line falls back to.
-fn atlas_into_document(
-    atlas: burin_map_core::atlas::Atlas,
-    area: Option<AreaDoc>,
-) -> Document {
-    let water = atlas.water.map(|w| crate::WaterDoc {
-        classes: None,
-        shoreline: w.shoreline,
-        source: None,
-        batches: w.batches,
-    });
-    Document {
-        area,
-        batches: atlas.batches,
-        land: None,
-        water,
-        bathymetry: None,
-    }
 }
 
 /// Style from the flags before the first `--batch`: defaults, overridden by
@@ -951,6 +768,27 @@ mod tests {
                 "{old}"
             );
         }
+    }
+
+    #[test]
+    fn flags_win_over_the_scripts_area() {
+        let doc = Document::from_script(
+            r#"burin.area({ at: "46,7.7", size_km: [8, 6], pen_mm: 0.5 }); burin.batch({}); burin.draw()"#,
+        )
+        .unwrap();
+        let resolve_with = |args: &[&str]| {
+            let m = command().try_get_matches_from(argv(args)).unwrap();
+            area_and_frame(&m, &doc).unwrap()
+        };
+        let (b, f, _) = resolve_with(&[]);
+        let (w, h) = projected_size(&b);
+        assert!((w - 8000.0).abs() < 10.0 && (h - 6000.0).abs() < 10.0, "{w} {h}");
+        assert_eq!(f.pen_width, 0.5);
+        let (b, f, label) = resolve_with(&["--tp", "bern", "--pen-width", "0.2"]);
+        assert_eq!((b, label.as_str(), f.pen_width), (PLACES[0].1, "Bern", 0.2));
+        let (b, _, _) = resolve_with(&["--terrain-size", "4km"]);
+        let (w, h) = projected_size(&b);
+        assert!((w - 4000.0).abs() < 10.0 && (h - 4000.0).abs() < 10.0, "{w} {h}");
     }
 
     #[test]

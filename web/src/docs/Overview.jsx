@@ -19,7 +19,7 @@ const STYLES = [
 const INTERFACES = [
   {
     name: 'JavaScript documents',
-    desc: 'The main way to describe a map: a small JS program that calls burin.area(), burin.batch(), burin.water(), burin.shore() and ends with burin.draw(). It runs in a JS interpreter embedded in the engine (Boa), so no Node is needed. The map editor and the CLI run documents directly, and the Node and Python packages can evaluate them; every preset is one.',
+    desc: 'The main way to describe a map: a small JS program that calls burin.area(), burin.batch(), burin.water(), burin.shore() and ends with burin.draw(). It runs in a JS interpreter embedded in the engine (Boa), so no Node is needed. The map editor and the CLI run documents directly, the Node and Python packages make the same calls; every preset is one.',
     where: 'crates/burin-map-script · presets/*.js',
     use: 'burin.area({ at: "37.7,-122.62", size_km: [40, 28] });\nburin.batch({ angle: 0, style: { dash_light: 0.5 } });\nburin.water("lines", { follow: "shore", angle: 0, style: {} });\nburin.shore({ lines: 2 });\nburin.draw();',
   },
@@ -37,15 +37,15 @@ const INTERFACES = [
   },
   {
     name: 'Node.js package',
-    desc: 'Native bindings (napi-rs): draw an area or your own elevation grid and get SVG, PNG or raw polylines back, or evaluate a document into the atlas the engine reads.',
+    desc: 'Native bindings (napi-rs). The package is the same burin a document calls, so a document is written the same here; draw() gives SVG, PNG or raw polylines. Also: run a document file as it is, or draw your own elevation grid.',
     where: 'crates/burin-map-node · node/',
-    use: "const burin = require('burin-map')\nconst [w, s, e, n] = burin.boundsAround(37.75, -122.45, 20, 20)\nconst d = burin.draw(w, s, e, n, { dash_light: 0.5 })\nrequire('fs').writeFileSync('sf.svg', d.svg())",
+    use: "const burin = require('burin-map')\nburin.area({ at: '37.75,-122.45', size_km: [20, 20] })\nburin.batch({ angle: 0, style: { dash_light: 0.5 } })\nrequire('fs').writeFileSync('sf.svg', burin.draw().svg())",
   },
   {
     name: 'Python package',
-    desc: 'Native bindings (PyO3): the same calls, with numpy arrays and a Style dataclass listing every parameter.',
+    desc: 'Native bindings (PyO3): the same calls with Python keywords, numpy arrays, and a Style dataclass listing every parameter.',
     where: 'crates/burin-map-py · python/',
-    use: 'import burin_map\nlat, lon, _ = burin_map.locate("Twin Peaks, San Francisco")\nd = burin_map.draw(burin_map.bounds_around(lat, lon, 20, 20))\nd.save_svg("sf.svg")',
+    use: 'import burin_map as burin\nburin.area(at="37.75,-122.45", size_km=[20, 20])\nburin.batch(angle=0, style={"dash_light": 0.5})\nburin.draw().save_svg("sf.svg")',
   },
 ]
 

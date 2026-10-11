@@ -7,8 +7,10 @@ A document describes a whole drawing, and a document is a **JavaScript script**:
 it calls `burin.*` and ends with `burin.draw()`, and running it builds a *graph*
 of typed operations (the *atlas*) — the batches and water passes the engine
 draws, in order. The CLI runs it with `--script`; the web editor edits the same
-kind of file. See [JavaScript documents](#5-javascript-documents) for the
-vocabulary.
+kind of file. The Node package is the same `burin` (`require('burin-map')`), and
+the Python package makes the same calls with keywords
+(`burin.batch(angle=0, style={...})`). See
+[JavaScript documents](#5-javascript-documents) for the vocabulary.
 
 A saved atlas — the graph by itself, without the script — is still read as
 **JSON5** with `--style-file` / `--style-json`, as an escape hatch for a drawing

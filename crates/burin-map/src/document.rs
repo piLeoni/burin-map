@@ -8,7 +8,26 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Batch, Frame, Shoreline, Style, WaterBatch};
+use crate::progress::latlon;
+use crate::{
+    bounds_around, locate, projected_size, Batch, Bounds, Error, Frame, Shoreline, Style,
+    WaterBatch,
+};
+
+/// The named areas, `[west, south, east, north]` in degrees.
+pub const PLACES: &[(&str, Bounds)] = &[
+    ("bern", [7.10, 46.70, 7.80, 47.20]),
+    ("matterhorn", [7.40, 45.80, 8.00, 46.20]),
+    ("san-francisco", [-122.75, 37.45, -122.05, 38.05]),
+];
+
+/// `san-francisco` → `San Francisco`.
+fn place_title(name: &str) -> String {
+    name.split('-')
+        .map(|w| w[..1].to_uppercase() + &w[1..])
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 /// Where on the ground to draw and on what. The ground is a named place,
 /// explicit bounds, or a centre with a size; the paper is optional. The same
@@ -37,6 +56,112 @@ pub struct AreaDoc {
     /// Pen width on paper, mm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pen_mm: Option<f64>,
+}
+
+impl AreaDoc {
+    /// The ground to draw, the paper it goes on, and a name for it. The ground
+    /// is explicit `bounds`, a named `place`, or a centre `at` (looked up by
+    /// name, one request, unless it is `"lat,lon"`) with `size_km`. Of ground
+    /// size, paper size and scale any two decide the third. Nothing at all is
+    /// San Francisco.
+    pub fn resolve(&self) -> Result<(Bounds, Frame, String), Error> {
+        let paper = match &self.size_mm {
+            Some(v) => Some(
+                size_pair(v)
+                    .filter(|p| p.iter().all(|x| *x > 0.0))
+                    .ok_or_else(|| {
+                        Error::Input("the paper size needs 1 or 2 positive numbers in mm".into())
+                    })?,
+            ),
+            None => None,
+        };
+        let mut frame = Frame {
+            size_mm: paper,
+            pen_width: self.pen_mm.unwrap_or(0.3),
+            ..Frame::default()
+        };
+        let scale = self.scale;
+        let size = self
+            .size_km
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| (s[0], s.get(1).copied()));
+        let frame_aspect = frame.size_mm.map(|[w, h]| h / w);
+        // Paper for a ground of the given projected size at 1:n.
+        let paper_for = |b: &Bounds, n: f64| {
+            let (pw, ph) = projected_size(b);
+            [pw * 1000.0 / n, ph * 1000.0 / n]
+        };
+
+        let Some(q) = &self.at else {
+            if size.is_some() {
+                return Err(Error::Input(
+                    "a ground size (size_km, --terrain-size) only applies with a centre (at, --terrain-at)"
+                        .into(),
+                ));
+            }
+            let (bounds, label) = match (self.bounds, &self.place) {
+                (Some(b), _) => (
+                    b,
+                    format!("{} to {}", latlon(b[1], b[0]), latlon(b[3], b[2])),
+                ),
+                (None, place) => {
+                    let name = place.as_deref().unwrap_or("san-francisco");
+                    let b = PLACES.iter().find(|p| p.0 == name).map(|p| p.1).ok_or_else(|| {
+                        let names: Vec<_> = PLACES.iter().map(|p| p.0).collect();
+                        Error::Input(format!("place {name:?} is not one of {}", names.join(", ")))
+                    })?;
+                    (b, place_title(name))
+                }
+            };
+            if let Some(n) = scale {
+                if frame.size_mm.is_some() {
+                    return Err(Error::Input(
+                        "a fixed area, a paper size and a scale can't all be given: drop one"
+                            .into(),
+                    ));
+                }
+                frame.size_mm = Some(paper_for(&bounds, n));
+            }
+            return Ok((bounds, frame, label));
+        };
+
+        let (w_km, h_km) = match (size, scale, frame.size_mm) {
+            (Some(_), Some(_), Some(_)) => {
+                return Err(Error::Input(
+                    "a ground size, a paper size and a scale can't all be given: drop one".into(),
+                ));
+            }
+            (Some((w, h)), _, _) => (w, h.unwrap_or(w * frame_aspect.unwrap_or(1.0))),
+            (None, Some(n), Some([fw, fh])) => (fw * n / 1e6, fh * n / 1e6),
+            (None, Some(_), None) => {
+                return Err(Error::Input(
+                    "around a centre, a scale needs a ground size or a paper size too".into(),
+                ));
+            }
+            (None, None, _) => (30.0, 30.0 * frame_aspect.unwrap_or(1.0)),
+        };
+        let (lat, lon, label) = locate(q)?;
+        // Degrees per km is approximate; correct against the projection so the
+        // area (and any scale derived from it) comes out as asked.
+        let mut bounds = bounds_around(lat, lon, w_km, h_km);
+        for _ in 0..2 {
+            let (pw, ph) = projected_size(&bounds);
+            let (w0, s0, e0, n0) = (bounds[0], bounds[1], bounds[2], bounds[3]);
+            let (fx, fy) = (w_km * 1000.0 / pw, h_km * 1000.0 / ph);
+            let (cx, cy, hx, hy) = (
+                (w0 + e0) / 2.0,
+                (s0 + n0) / 2.0,
+                (e0 - w0) / 2.0 * fx,
+                (n0 - s0) / 2.0 * fy,
+            );
+            bounds = [cx - hx, cy - hy, cx + hx, cy + hy];
+        }
+        if let (Some(n), None) = (scale, frame.size_mm) {
+            frame.size_mm = Some(paper_for(&bounds, n));
+        }
+        Ok((bounds, frame, label))
+    }
 }
 
 /// `[side]` or `[width, height]` as a pair; `None` for any other length.
@@ -133,19 +258,8 @@ impl Document {
                 .as_array()
                 .is_some_and(|a| a.iter().any(|i| i.get("kind").is_some()));
             if is_atlas {
-                let mut atlas =
-                    burin_map_core::script::atlas_from(&value).map_err(|e| e.to_string())?;
-                let water = atlas.water.take().map(|w| WaterDoc {
-                    classes: None,
-                    shoreline: w.shoreline,
-                    source: None,
-                    batches: w.batches,
-                });
-                return Ok(Document {
-                    batches: atlas.batches,
-                    water,
-                    ..Default::default()
-                });
+                let atlas = burin_map_core::script::atlas_from(&value)?;
+                return Ok(Document::with_atlas(atlas, None));
             }
             let batches = burin_map_core::batches_inheriting(&mut json5::Deserializer::from_str(s))
                 .map_err(|e| e.to_string())?;
@@ -165,6 +279,46 @@ impl Document {
             doc.batches = land.batches;
         }
         Ok(doc)
+    }
+
+    /// Run a document script and return what it built.
+    pub fn from_script(source: &str) -> Result<Document, Error> {
+        let built = burin_map_script::evaluate_document(source)
+            .map_err(|e| Error::Input(e.to_string()))?;
+        Document::from_atlas(&built.atlas, built.area.as_ref())
+    }
+
+    /// What a script builds — its atlas (the batches, water passes and shore,
+    /// in draw order) and the area it asked for, if any — as a document.
+    pub fn from_atlas(
+        atlas: &serde_json::Value,
+        area: Option<&serde_json::Value>,
+    ) -> Result<Document, Error> {
+        let area = match area {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => Some(
+                serde_json::from_value::<AreaDoc>(v.clone())
+                    .map_err(|e| Error::Input(format!("area: {e}")))?,
+            ),
+        };
+        let atlas = burin_map_core::script::atlas_from(atlas).map_err(Error::Input)?;
+        Ok(Document::with_atlas(atlas, area))
+    }
+
+    fn with_atlas(atlas: burin_map_core::atlas::Atlas, area: Option<AreaDoc>) -> Document {
+        let water = atlas.water.map(|w| WaterDoc {
+            classes: None,
+            shoreline: w.shoreline,
+            source: None,
+            batches: w.batches,
+        });
+        Document {
+            area,
+            batches: atlas.batches,
+            land: None,
+            water,
+            bathymetry: None,
+        }
     }
 
     /// The batches, or one default pass when the document has none.
@@ -332,6 +486,63 @@ mod tests {
         );
         let off = Document::parse(r#"{ water: { shoreline: false } }"#).unwrap();
         assert!(off.water.unwrap().shoreline.is_none());
+    }
+
+    #[test]
+    fn a_script_is_a_document() {
+        let doc = Document::from_script(
+            r#"burin.area({ at: "46,7.7", size_km: [8, 6] })
+               burin.batch({ angle: 90, style: { space_light: 5 } })
+               burin.water("dots")
+               burin.shore({ lines: 2 })
+               burin.draw()"#,
+        )
+        .unwrap();
+        assert_eq!(doc.area.as_ref().unwrap().at.as_deref(), Some("46,7.7"));
+        assert_eq!(doc.batches.len(), 1);
+        assert_eq!(doc.batches[0].angle, 90.0);
+        let water = doc.water.unwrap();
+        assert_eq!(water.batches.len(), 1);
+        assert_eq!(water.shoreline.unwrap().lines, 2);
+        let err = Document::from_script("burin.draw()").unwrap_err().to_string();
+        assert!(err.contains("nothing to draw"), "{err}");
+    }
+
+    #[test]
+    fn an_area_resolves_on_its_own() {
+        let bern = AreaDoc {
+            place: Some("bern".into()),
+            ..Default::default()
+        };
+        let (b, f, label) = bern.resolve().unwrap();
+        assert_eq!((b, label.as_str()), (PLACES[0].1, "Bern"));
+        assert_eq!((f.size_mm, f.pen_width), (None, 0.3));
+
+        let bounds = [7.0, 46.0, 7.1, 46.1];
+        let fixed = AreaDoc {
+            bounds: Some(bounds),
+            ..Default::default()
+        };
+        assert_eq!(fixed.resolve().unwrap().0, bounds);
+
+        let around = AreaDoc {
+            at: Some("46,7.7".into()),
+            size_km: Some(vec![8.0, 6.0]),
+            size_mm: Some(vec![200.0]),
+            pen_mm: Some(0.5),
+            ..Default::default()
+        };
+        let (b, f, _) = around.resolve().unwrap();
+        let (w, h) = projected_size(&b);
+        assert!((w - 8000.0).abs() < 10.0 && (h - 6000.0).abs() < 10.0, "{w} {h}");
+        assert_eq!((f.size_mm, f.pen_width), (Some([200.0, 200.0]), 0.5));
+
+        let nowhere = AreaDoc {
+            place: Some("atlantis".into()),
+            ..Default::default()
+        };
+        assert!(nowhere.resolve().unwrap_err().to_string().contains("atlantis"));
+        assert_eq!(AreaDoc::default().resolve().unwrap().2, "San Francisco");
     }
 
     #[test]

@@ -94,6 +94,63 @@ def test_bad_input_raises(island):
         draw_elevation(island[0], PX_M)
 
 
+@pytest.fixture
+def burin():
+    """The module as a document uses it, with an empty document."""
+    burin_map._items.clear()
+    burin_map._area = None
+    yield burin_map
+    burin_map._items.clear()
+    burin_map._area = None
+
+
+def test_the_document_calls_are_the_scripts(burin):
+    for name in ("area", "batch", "fill", "water", "shore", "draw", "json", "parameters",
+                 "lerp", "rgb", "clamp", "smoothstep", "step", "abs", "floor", "ceil",
+                 "round", "min", "max", "mix"):
+        assert callable(getattr(burin, name)), name
+    assert (burin.elev, burin.tone, burin.dist, burin.depth) == ("elev", "tone", "dist", "depth")
+    assert burin.lerp("#fff", "#000", burin.tone) == ["lerp", "#fff", "#000", "tone"]
+    assert any(p["name"] == "dash_cutoff_soft" for p in burin.parameters())
+
+
+def test_a_document_builds_as_a_script_does(burin):
+    burin.area(at="46,7.7", size_km=[8, 6])
+    burin.batch(angle=0, style={"space_light": 5}, dash_light=0.5)
+    burin.fill(color="#8a7a5c", where={"elevMin": 0, "elevMax": 200})
+    burin.water("dots", color="#9db4c0")
+    burin.shore(lines=2)
+    assert burin.json() == [
+        {"angle": 0, "style": {"space_light": 5, "dash_light": 0.5}},
+        {"draw": "fill", "color": "#8a7a5c", "where": {"elevMin": 0, "elevMax": 200}, "style": {}},
+        {"draw": "dots", "kind": "water", "color": "#9db4c0", "style": {}},
+        {"kind": "shore", "lines": 2, "style": {}},
+    ]
+    assert burin._area == {"at": "46,7.7", "size_km": [8, 6]}
+
+
+def test_a_full_style_writes_every_value(burin):
+    burin.batch(style=Style(space_light=8))
+    st = burin.json()[0]["style"]
+    assert len(st) == len(dataclasses.fields(Style)) and st["space_light"] == 8
+
+
+def test_document_mistakes_are_caught_where_they_are_made(burin):
+    with pytest.raises(ValueError, match='"lines", "dots" or "fill"'):
+        burin.batch(draw="hatch")
+    with pytest.raises(ValueError, match="round, round-inside or butt"):
+        burin.batch(cap="square")
+    with pytest.raises(ValueError, match="not one of"):
+        burin.area(centre="46,7")
+    with pytest.raises(ValueError, match="lines, ripples or dots"):
+        burin.water("waves")
+    with pytest.raises(ValueError, match="must be a number"):
+        burin.batch(space_light="wide")
+    with pytest.raises(ValueError, match="nothing to draw"):
+        burin.draw()
+    assert burin.json() == []
+
+
 def test_evaluate_runs_a_document():
     """A document is a script; `evaluate` is the front end that runs it."""
     doc = burin_map.evaluate(

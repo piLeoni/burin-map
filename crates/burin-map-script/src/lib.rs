@@ -30,7 +30,9 @@ use std::fmt;
 #[cfg(test)]
 mod tests;
 
-const LIBRARY: &str = include_str!("library.js");
+/// The `burin` library a document calls, in JavaScript. Node runs this same
+/// source over its own natives.
+pub const LIBRARY: &str = include_str!("library.js");
 
 /// The name scripts run under; positions in other sources (the library) are
 /// not the user's.
