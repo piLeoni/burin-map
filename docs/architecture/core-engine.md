@@ -9,10 +9,10 @@ Pure computation: square-pixel elevation grid in metres → polylines (dashes), 
 | `draw` / `draw_batches` | `src/lib.rs` | Single or multi-batch land draw |
 | `draw_atlas` | `src/lib.rs` | Land + water from `Atlas` |
 | `Atlas` | `src/atlas.rs` | Accumulate batches, `draw` / `draw_with` |
-| `Style`, `Batch` | `src/style.rs` | Parameters and batch passes (angle, ground, caps) |
+| `Style`, `Batch` | `src/style.rs` | Parameters and batch passes (angle, ground, caps). `Style::default()` is the hand-drawn land-lines look; `Style::plain()` (modifiers off) is the base for water, shore and dot defaults |
 | `batch_fields`, `build_fields` | `src/fields.rs` | Direction, input, spacing fields |
 | `trace_streamlines`, `trace_stripes` | `src/streamlines.rs` | Contour-parallel lines; striped parallel trace |
-| `dash_lines`, `dash_lines_by` | `src/dashes.rs` | Input-driven dashing |
+| `dash_lines`, `dash_lines_by` | `src/dashes.rs` | Input-driven dashing; `dash_cutoff` thins by `Style::passes_cutoff` (also used by land dots) |
 | `plot_order`, `pen_up_travel` | `src/order.rs` | Plotting order |
 | Water / shoreline | `src/water.rs` | Water batches, shoreline passes |
 | Depth / bathymetry grid | `src/depth.rs` | Depth-weighted expressions on water |

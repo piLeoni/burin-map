@@ -248,17 +248,18 @@ The ones worth touching first:
 
 | parameter | default | effect |
 |---|---|---|
-| `space_light` | 4.8 | distance between lines in full light, px |
-| `space_dark` | 3.4 | distance between lines in full shadow, px |
+| `space_light` | 6 | distance between lines in full light, px |
+| `space_dark` | 7 | distance between lines in full shadow, px |
 | `space_steep` | 0.4 | how much steep ground tightens space (`0` = off, `1` = max) |
-| `dash_light` | 0.15 | ink fraction in full light |
-| `dash_dark` | 1.0 | ink fraction in full shadow |
+| `dash_light` | 0.3 | ink fraction in full light |
+| `dash_dark` | 0.8 | ink fraction in full shadow |
 | `dash_mid` | −1 | ink fraction at mid tone (below 0: halfway) |
 | `dash_period` | 10.5 | dash+gap length, px |
 | `dash_levels` | 0 | round the tone to this many levels: flat zones of ink |
-| `dash_cutoff` / `dash_solid` | 0 / 1 | no ink below / always solid above this tone (off) |
-| `mod_jitter` | 0 | uneven dashes, same average ink; 0 looks machine-made |
-| `mod_flat` | 0 | lottery on flat, lit ground: dashes left out or flat-inked |
+| `dash_cutoff` / `dash_solid` | 0.15 / 1 | no ink below / always solid above this tone (0 and 1 are off) |
+| `dash_cutoff_soft` | 1 | edge of the cutoff: 0 hard, 1 fading in from tone 0 |
+| `mod_jitter` | 1 | uneven dashes, same average ink; 0 looks machine-made |
+| `mod_flat` | 0.5 | lottery on flat, lit ground: dashes left out or flat-inked |
 | `mod_breaks` | 0 | breaks in otherwise solid runs |
 | `mod_smooth` | 6 | smoothness of the line curves |
 | `input_gain` | 3.0 | contrast of the relief |
@@ -266,8 +267,10 @@ The ones worth touching first:
 | `batch_seed` | 1 | different drawing of the same place |
 
 Flat ranges mean a flat channel: `--space-light 5 --space-dark 5` keeps
-uniform space; `--dash-light 1 --dash-dark 1` draws continuous lines. Every
-`mod_*` that touches the ink is off by default. Narrative guide:
+uniform space; `--dash-light 1 --dash-dark 1 --mod-jitter 0 --mod-flat 0
+--dash-cutoff 0` draws continuous lines. Land lines default to a hand-drawn
+look (jitter, the flat lottery, thinning on lit ground); water, the shore and
+dots default to even ink with the modifiers off. Narrative guide:
 [docs/guide/README.md](docs/guide/README.md) (also **Docs** in the web app).
 
 Every flag has a short form made of its initials (`--space-light` → `--sl`,

@@ -5,7 +5,7 @@
 //! form for when you know what you're doing:
 //!   space_*   distance between lines, px in light and in shadow
 //!   dash_*    ink along each line, share in light and in shadow
-//!   mod_*     character (jitter, flat, breaks, wobble, smooth), all off but the path ones
+//!   mod_*     character (jitter, flat, breaks, wobble, smooth)
 //!   input_*   0…1 field from DEM + sun
 //!   sun_*     sun direction / elevation
 //!   engine_*  streamline tracer
@@ -93,6 +93,21 @@ impl Style {
             .map(|p| p.name)
     }
 
+    /// Even ink with every modifier off: what water, the shore and dots build
+    /// their defaults on. The default style is for land lines, drawn by hand.
+    pub fn plain() -> Style {
+        Style {
+            space_light: 4.8,
+            space_dark: 3.4,
+            dash_light: 0.15,
+            dash_dark: 1.0,
+            dash_cutoff: 0.0,
+            mod_jitter: 0.0,
+            mod_flat: 0.0,
+            ..Style::default()
+        }
+    }
+
     /// The one distance between lines where a single one is needed, and the
     /// px the spacing fields scale from: the lit spacing.
     pub fn space_base(&self) -> f32 {
@@ -117,6 +132,24 @@ impl Style {
         d.clamp(0.0, 1.0)
     }
 
+    /// Whether ink survives `dash_cutoff` at tone `t`; `u` gives a uniform
+    /// 0…1, asked for only inside the fade.
+    /// Nothing survives below `dash_cutoff × (1 − dash_cutoff_soft)`; from
+    /// there up to the cutoff the chance rises as the square of the way
+    /// across. Soft, lit ground thins out as the cutoff rises instead of
+    /// vanishing at once: much of it sits on one tone, `input_light_floor`.
+    pub fn passes_cutoff(&self, t: f32, u: impl FnOnce() -> f64) -> bool {
+        if t >= self.dash_cutoff {
+            return true;
+        }
+        let lo = self.dash_cutoff * (1.0 - self.dash_cutoff_soft.clamp(0.0, 1.0));
+        if t < lo {
+            return false;
+        }
+        let r = ((t - lo) / (self.dash_cutoff - lo)) as f64;
+        u() < r * r
+    }
+
     /// `t` rounded to `dash_levels` even levels from 0 to 1; as is below 2.
     pub fn quantize(&self, t: f32) -> f32 {
         let n = self.dash_levels;
@@ -129,21 +162,22 @@ impl Style {
 }
 
 style! {
-    space: space_light ("sl"): f32 = 4.8, "distance between neighbouring lines on fully lit slopes, in px";
-    space: space_dark ("sd"): f32 = 3.4, "distance between neighbouring lines in full shadow, in px";
+    space: space_light ("sl"): f32 = 6.0, "distance between neighbouring lines on fully lit slopes, in px";
+    space: space_dark ("sd"): f32 = 7.0, "distance between neighbouring lines in full shadow, in px";
     space: space_steep ("ss"): f32 = 0.4, "how much steep ground tightens the spacing: 0 off, 1 full";
     space: space_steep_gamma ("ssg"): f32 = 1.0, "shape of that tightening; higher values keep it for the steepest ground";
 
-    dash: dash_light ("dl"): f32 = 0.15, "inked share of each dash period at tone 0 (full light), 0 to 1";
-    dash: dash_dark ("dd"): f32 = 1.0, "inked share of each dash period at tone 1 (full shadow), 0 to 1";
+    dash: dash_light ("dl"): f32 = 0.3, "inked share of each dash period at tone 0 (full light), 0 to 1";
+    dash: dash_dark ("dd"): f32 = 0.8, "inked share of each dash period at tone 1 (full shadow), 0 to 1";
     dash: dash_mid ("dm"): f32 = -1.0, "inked share at tone 0.5; below 0 halfway between dash_light and dash_dark";
     dash: dash_period ("dp"): f32 = 10.5, "length of one dash plus its gap, in px";
     dash: dash_levels ("dlv"): u32 = 0, "round the tone to this many even levels before inking, for flat zones of ink; 0 smooth";
-    dash: dash_cutoff ("dc"): f32 = 0.0, "no ink where the tone is below this; 0 off";
+    dash: dash_cutoff ("dc"): f32 = 0.15, "no ink below this tone, for the lightest ground; 0 off";
+    dash: dash_cutoff_soft ("dcs"): f32 = 1.0, "how gradually ink fades out towards dash_cutoff: 0 a hard edge, 1 thinning all the way down from the cutoff to tone 0";
     dash: dash_solid ("dsol"): f32 = 1.0, "solid line where the tone is above this, whatever the modifiers; 1 off";
 
-    mod: mod_jitter ("mj"): f32 = 0.0, "uneven dashes: varies dash and period length, keeping the average ink; 0 mechanical";
-    mod: mod_flat ("mf"): f32 = 0.0, "on flat and lit ground, chance a dash is left out or takes the flat ground's ink; 0 off";
+    mod: mod_jitter ("mj"): f32 = 1.0, "uneven dashes: varies dash and period length, keeping the average ink; 0 mechanical";
+    mod: mod_flat ("mf"): f32 = 0.5, "on flat and lit ground, chance a dash is left out or takes the flat ground's ink; 0 off";
     mod: mod_breaks ("mb"): f32 = 0.0, "chance of a small break in an otherwise solid dash; 0 off";
     mod: mod_wobble ("mw"): f32 = 20.0, "how far lines wander off course on flat ground, in degrees";
     mod: mod_wobble_size ("mws"): f32 = 12.0, "length of each wander, in px";
@@ -265,7 +299,7 @@ impl Batch {
             draw: Draw::Dots,
             style: Style {
                 water_size: LAND_DOT,
-                ..Style::default()
+                ..Style::plain()
             },
             ..Batch::along(Style::default())
         }
@@ -478,7 +512,10 @@ pub fn batches_inheriting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
         }
         let mut style = Style::default();
         if g.draw == Draw::Dots {
-            style.water_size = LAND_DOT;
+            style = Style {
+                water_size: LAND_DOT,
+                ..Style::plain()
+            };
         }
         // Fills trace no terrain: they neither take it nor hand it on.
         if g.draw != Draw::Fill {
@@ -525,7 +562,7 @@ mod tests {
         assert_eq!(st.batch_seed, 9);
         assert!(!st.set("spacing", 1.0));
         assert!(!st.set("nope", 1.0));
-        assert_eq!(Style::PARAMS.len(), 49);
+        assert_eq!(Style::PARAMS.len(), 50);
     }
 
     #[test]

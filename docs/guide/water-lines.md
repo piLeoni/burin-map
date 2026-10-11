@@ -19,7 +19,7 @@ burin.water("lines", { follow: "shore", angle: 0, style: { water_reach: 60 } });
 | | `space_dark` | 3.2 | spacing near the shore, px (tighter rings) |
 | Dash | `dash_light` | 0.25 | ink far from the shore |
 | | `dash_dark` | 1 | ink near the shore |
-| | `dash_mid`, `dash_period`, `dash_levels`, `dash_cutoff`, `dash_solid` | as on land | same ink model, same tone meaning (near = dark) |
+| | `dash_mid`, `dash_period`, `dash_levels`, `dash_cutoff`, `dash_cutoff_soft`, `dash_solid` | -1, 10.5, 0, 0, 1, 1 | same ink model as on land, same tone meaning (near = dark) |
 | Mod | `mod_jitter` | 0 | |
 | | `mod_flat` | 0.6 | leaves out dashes below `input_flat`'s tone |
 | | `mod_breaks` | 0 | |

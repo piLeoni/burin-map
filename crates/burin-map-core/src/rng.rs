@@ -2,6 +2,16 @@
 
 const MULT: u64 = 6_364_136_223_846_793_005;
 
+/// A fixed value in [0, 1) for `x` (SplitMix64): noise that stays put where a
+/// stream of draws would depend on the order things are visited in.
+pub fn hash01(x: u64) -> f64 {
+    let mut z = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^= z >> 31;
+    (z >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+}
+
 #[derive(Clone)]
 pub struct Rng {
     state: u64,

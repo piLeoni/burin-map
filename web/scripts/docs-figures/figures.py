@@ -167,25 +167,34 @@ def shore_doc(shore):
 
 
 def figures():
+    # The defaults draw by hand (jitter, flat lottery, cutoff); the ink figures
+    # turn that off so each shows one rule on its own.
+    plain = {"mod_jitter": 0, "mod_flat": 0, "dash_cutoff": 0}
+    half = {"dash_light": 0.5, "dash_dark": 1, **plain}
     compare("land-lines-spacing", [
         ({"space_light": 5, "space_dark": 5}, "uniform 5 px", None),
-        ({}, "default (4.8 / 3.4)", None),
+        ({}, "default (6 / 7)", None),
         ({"space_light": 11, "space_dark": 2}, "exaggerated (11 / 2)", None),
     ], land_doc(), LAND_BOX, 2)
     compare("land-lines-ink", [
-        ({"dash_light": 1, "dash_dark": 1}, "solid everywhere", None),
-        ({"dash_light": 0.5, "dash_dark": 1}, "even 50% dashes in light", None),
-        ({"dash_light": 0.5, "dash_dark": 1, "mod_jitter": 1}, "same ink, by hand", None),
+        ({"dash_light": 1, "dash_dark": 1, **plain}, "solid everywhere", None),
+        (half, "even 50% dashes in light", None),
+        ({**half, "mod_jitter": 1}, "same ink, by hand", None),
     ], land_doc(), LAND_BOX, 2)
     compare("land-lines-modifiers", [
-        ({"dash_light": 0.5, "dash_dark": 1}, "modifiers off", None),
-        ({"dash_light": 0.5, "dash_dark": 1, "mod_flat": 1}, "mod_flat: 1", None),
-        ({"dash_light": 0.5, "dash_dark": 1, "mod_breaks": 1}, "mod_breaks: 1", None),
+        (half, "modifiers off", None),
+        ({**half, "mod_flat": 1}, "mod_flat: 1", None),
+        ({**half, "mod_breaks": 1}, "mod_breaks: 1", None),
+    ], land_doc(), LAND_BOX, 2)
+    compare("land-lines-cutoff", [
+        ({"dash_cutoff": 0}, "no cutoff", None),
+        ({}, "default: 0.15, soft", None),
+        ({"dash_cutoff_soft": 0}, "0.15, hard edge", None),
     ], land_doc(), LAND_BOX, 2)
     compare("land-lines-levels", [
-        ({}, "smooth (default)", None),
-        ({"dash_levels": 3, "dash_light": 0.1, "dash_mid": 0.5, "dash_dark": 1}, "three levels",
-         None),
+        (plain, "smooth", None),
+        ({"dash_levels": 3, "dash_light": 0.1, "dash_mid": 0.5, "dash_dark": 1, **plain},
+         "three levels", None),
     ], land_doc(), LAND_BOX, 2)
     compare("land-dots", [
         ({}, "default", None),

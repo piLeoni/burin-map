@@ -24,4 +24,10 @@ Draw and script interpreters are built with `web/build-wasm.sh` and committed un
 
 ## External data
 
+## Defaults: hand-drawn land lines, plain everything else; presets pin every value
+
+`Style::default()` is the land-lines look (`mod_jitter: 1`, `mod_flat: 0.5`, `dash_cutoff: 0.15`, ink rather than spacing carrying the shadow). Water (`Style::water`), the shore (`Style::shoreline`) and dots (`Batch::dots`) build on `Style::plain()` instead: even ink, modifiers off, the earlier defaults. Every preset writes out a full style object and spreads it into each batch, so a later change of defaults never changes a preset; `presets/contours.js` spells out the current defaults. Checking that a style passed to a batch sets every parameter was considered and not done: partial styles are what the bindings, CLI flags and short examples rely on.
+
+`dash_cutoff` is a fixed tone, not a share of the frame, so a place draws the same in any view. Its edge is set by `dash_cutoff_soft` (default 1: ink fades in from tone 0, a dash surviving with chance `(t / cutoff)²`; 0: the earlier hard edge). Soft is the default because lit slopes are clamped to `input_light_floor`, so a hard edge removes them all within a hundredth of the value.
+
 Elevation: Terrarium PNG tiles (via `terramask`, optional fetch in CLI). Geocoding: Nominatim. Water vectors: OpenMapTiles-style tiles (default OpenFreeMap). Bathymetry for depth expressions may need separate fetches in the web app.

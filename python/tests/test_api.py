@@ -27,8 +27,8 @@ def drawing(island):
 
 def test_style_mirrors_the_engine():
     st = Style()
-    assert st.space_light == pytest.approx(4.8) and st.batch_seed == 1
-    assert dataclasses.replace(st, space_light=6).space_light == 6
+    assert st.space_light == pytest.approx(6) and st.batch_seed == 1
+    assert dataclasses.replace(st, space_light=8).space_light == 8
     assert "space_light" in burin_map.style_help()
     assert any(g[0] == "space" for g in burin_map.style_groups())
     with pytest.raises(TypeError):

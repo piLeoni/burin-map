@@ -34,7 +34,7 @@ fn dash(line: &Line, s: &[f32], (a, b): (f32, f32)) -> Line {
 
 /// Inked share of one period at tone `t`, 0 to 1, with its modifiers.
 fn ink(st: &Style, t: f32, jit: f64, rng: &mut Rng) -> f64 {
-    if t < st.dash_cutoff {
+    if !st.passes_cutoff(t, || rng.f64()) {
         return 0.0;
     }
     if t > st.dash_solid {
@@ -158,7 +158,7 @@ mod tests {
         let st = Style {
             dash_light: 0.5,
             mod_breaks,
-            ..Style::default()
+            ..Style::plain()
         };
         dashed(1.0, st)
     }
@@ -184,7 +184,7 @@ mod tests {
                 dash_dark: 1.0,
                 mod_jitter,
                 dash_period: 7.0,
-                ..Style::default()
+                ..Style::plain()
             };
             for tone in [0.0, 0.3, 1.0] {
                 assert_eq!(dashed(tone, st.clone()).len(), 1);
@@ -197,7 +197,7 @@ mod tests {
         let st = Style {
             dash_light: 0.5,
             dash_period: 10.0,
-            ..Style::default()
+            ..Style::plain()
         };
         let out = dashed(0.0, st);
         assert!((inked(&out) - 0.5).abs() < 0.02, "{}", inked(&out));
@@ -213,7 +213,7 @@ mod tests {
                 dash_light: share,
                 dash_period: 6.0,
                 mod_jitter: 1.0,
-                ..Style::default()
+                ..Style::plain()
             };
             let got = inked(&dashed(0.0, st));
             assert!((got - share).abs() < 0.06, "{share}: {got}");
@@ -226,13 +226,50 @@ mod tests {
             dash_light: 0.3,
             dash_dark: 0.3,
             dash_cutoff: 0.2,
+            dash_cutoff_soft: 0.0,
             dash_solid: 0.6,
             mod_breaks: 1.0,
-            ..Style::default()
+            ..Style::plain()
         };
-        assert!(dashed(0.1, st.clone()).is_empty());
+        assert!(dashed(0.19, st.clone()).is_empty());
         assert_eq!(dashed(0.8, st.clone()).len(), 1);
         assert!((inked(&dashed(0.4, st)) - 0.3).abs() < 0.05);
+    }
+
+    #[test]
+    fn ink_thins_below_the_cutoff_instead_of_stopping() {
+        let st = Style {
+            dash_light: 0.5,
+            dash_dark: 0.5,
+            dash_period: 4.0,
+            dash_cutoff: 0.2,
+            ..Style::plain()
+        };
+        let full = inked(&dashed(0.3, st.clone()));
+        let half = inked(&dashed(0.1, st.clone()));
+        // (0.1 / 0.2)² of the dashes survive.
+        assert!((half / full - 0.25).abs() < 0.06, "{}", half / full);
+        // A cutoff just past the tone takes away a little, not everything.
+        let at = inked(&dashed(0.1, Style { dash_cutoff: 0.1, ..st.clone() }));
+        let past = inked(&dashed(0.1, Style { dash_cutoff: 0.102, ..st }));
+        assert!(past > 0.9 * at, "{at} {past}");
+    }
+
+    #[test]
+    fn half_soft_cuts_the_lower_half_and_fades_the_rest() {
+        let st = Style {
+            dash_light: 0.5,
+            dash_dark: 0.5,
+            dash_period: 4.0,
+            dash_cutoff: 0.2,
+            dash_cutoff_soft: 0.5,
+            ..Style::plain()
+        };
+        let full = inked(&dashed(0.3, st.clone()));
+        assert!(dashed(0.09, st.clone()).is_empty());
+        // Halfway across the fade, 0.1 to 0.2: a quarter survives.
+        let mid = inked(&dashed(0.15, st));
+        assert!((mid / full - 0.25).abs() < 0.06, "{}", mid / full);
     }
 
     #[test]
@@ -242,7 +279,7 @@ mod tests {
             dash_light: 0.1,
             dash_mid: 0.5,
             dash_dark: 1.0,
-            ..Style::default()
+            ..Style::plain()
         };
         assert!((st.duty(st.quantize(0.2)) - 0.1).abs() < 1e-6);
         assert!((st.duty(st.quantize(0.5)) - 0.5).abs() < 1e-6);

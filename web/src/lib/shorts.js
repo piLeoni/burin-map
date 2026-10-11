@@ -21,6 +21,7 @@ export const PARAM_SHORTS = {
   dash_period: 'dp',
   dash_levels: 'dlv',
   dash_cutoff: 'dc',
+  dash_cutoff_soft: 'dcs',
   dash_solid: 'dsol',
   mod_jitter: 'mj',
   mod_flat: 'mf',

@@ -1239,7 +1239,7 @@ mod tests {
             dash_dark: 1.0,
             space_dark: 2.4,
             space_light: 7.7,
-            ..Style::default()
+            ..Style::plain()
         };
         let d = draw(&e, w, h, 30.0, &st);
         assert_eq!(

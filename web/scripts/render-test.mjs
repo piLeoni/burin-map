@@ -231,7 +231,7 @@ for (const bad of mustThrow) {
 const rustShorts = {
   space_light: 'sl', space_dark: 'sd', space_steep: 'ss',
   space_steep_gamma: 'ssg', dash_light: 'dl', dash_dark: 'dd', dash_mid: 'dm', dash_period: 'dp',
-  dash_levels: 'dlv', dash_cutoff: 'dc', dash_solid: 'dsol', mod_jitter: 'mj', mod_flat: 'mf', mod_breaks: 'mb',
+  dash_levels: 'dlv', dash_cutoff: 'dc', dash_cutoff_soft: 'dcs', dash_solid: 'dsol', mod_jitter: 'mj', mod_flat: 'mf', mod_breaks: 'mb',
   mod_wobble: 'mw', mod_wobble_size: 'mws', mod_smooth: 'ms', mod_wave: 'mwv',
   mod_wave_size: 'mwvs', mod_wave_zone: 'mwz',
   mod_wave_even: 'mwe', input_flat: 'if',

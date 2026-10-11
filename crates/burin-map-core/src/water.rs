@@ -216,7 +216,7 @@ impl Style {
             mod_flat: 0.6,
             mod_wobble: 0.0,
             mod_smooth: 3.0,
-            ..Style::default()
+            ..Style::plain()
         }
     }
 
@@ -335,7 +335,7 @@ impl Style {
             dash_dark: 1.0,
             mod_wobble: 0.0,
             mod_smooth: 0.0,
-            ..Style::default()
+            ..Style::plain()
         }
     }
 }
@@ -606,7 +606,7 @@ pub fn wave_marks(
 
 /// Dots on land: as far apart as the batch's fields set the spacing — closer in
 /// shadow and on steep ground, as lines would be — wherever the batch may
-/// draw and the input reaches `dash_cutoff`. Each is `water_size` px across,
+/// draw and the input passes `dash_cutoff`. Each is `water_size` px across,
 /// turned along the batch's direction.
 pub fn land_dots(f: &crate::Fields, st: &Style) -> Vec<crate::Line> {
     let (w, h) = (f.w, f.h);
@@ -615,7 +615,12 @@ pub fn land_dots(f: &crate::Fields, st: &Style) -> Vec<crate::Line> {
         (x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h)
             .then(|| y as usize * w + x as usize)
     };
-    let open = |p: [f32; 2]| at(p).is_some_and(|i| f.walkable[i] && f.input[i] >= st.dash_cutoff);
+    let open = |p: [f32; 2]| {
+        at(p).is_some_and(|i| {
+            f.walkable[i]
+                && st.passes_cutoff(f.input[i], || crate::rng::hash01(i as u64 ^ (st.batch_seed << 32)))
+        })
+    };
     let (lo, hi) = f
         .space
         .iter()

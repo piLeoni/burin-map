@@ -91,7 +91,7 @@ export default function Overview() {
             {
               src: hero.src,
               label: 'The San Francisco peninsula, default style',
-              code: 'burin.batch({ angle: 0, style: {} });  // presets/contours.js',
+              code: 'burin.batch({ angle: 0, style: {} });  // the defaults, written out in presets/contours.js',
             },
           ]}
           columns={1}

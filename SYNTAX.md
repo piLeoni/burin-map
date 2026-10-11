@@ -138,7 +138,7 @@ batches:
 
 ### Land dots
 
-`draw: dots` stipples the land instead of tracing lines: the dots sit as close as lines would (`space_light`, `space_dark`, `space_steep`, `input_height`), and nothing is drawn where the input is below `dash_cutoff`. The dot size and clumping come from the water parameters `water_size` (default 1.2 on land) and `water_patches`, as for dots at sea: `mod_jitter` varies their size and `mod_wobble` bends them. Ripples are only for water.
+`draw: dots` stipples the land instead of tracing lines: the dots sit as close as lines would (`space_light`, `space_dark`, `space_steep`, `input_height`), and none are drawn where the input is below `dash_cutoff` (they fade in with `dash_cutoff_soft`, as dashes do). The dot size and clumping come from the water parameters `water_size` (default 1.2 on land) and `water_patches`, as for dots at sea: `mod_jitter` varies their size and `mod_wobble` bends them. Ripples are only for water.
 
 ```yaml
 batches:
@@ -241,19 +241,20 @@ A plotter's pen always ends round, so `cap` shows on screen, in print and in SVG
 
 | Group | Parameter | Default | Carries over |
 |---|---|---|---|
-| Space | `space_light` | 4.8 | ✓ |
-|  | `space_dark` | 3.4 | ✓ |
+| Space | `space_light` | 6 | ✓ |
+|  | `space_dark` | 7 | ✓ |
 |  | `space_steep` | 0.4 | ✓ |
 |  | `space_steep_gamma` | 1 | ✓ |
-| Dash | `dash_light` | 0.15 |  |
-|  | `dash_dark` | 1 |  |
+| Dash | `dash_light` | 0.3 |  |
+|  | `dash_dark` | 0.8 |  |
 |  | `dash_mid` | -1 |  |
 |  | `dash_period` | 10.5 |  |
 |  | `dash_levels` | 0 |  |
-|  | `dash_cutoff` | 0 |  |
+|  | `dash_cutoff` | 0.15 |  |
+|  | `dash_cutoff_soft` | 1 |  |
 |  | `dash_solid` | 1 |  |
-| Mod | `mod_jitter` | 0 |  |
-|  | `mod_flat` | 0 |  |
+| Mod | `mod_jitter` | 1 |  |
+|  | `mod_flat` | 0.5 |  |
 |  | `mod_breaks` | 0 |  |
 |  | `mod_wobble` | 20 | ✓ |
 |  | `mod_wobble_size` | 12 | ✓ |
@@ -295,7 +296,7 @@ batches:
     style:
       sun_azimuth: 270    # light from the west
       dash_light: 0.5
-  - angle: 90             # still sun_azimuth 270; dash_light is back to 0.15
+  - angle: 90             # still sun_azimuth 270; dash_light is back to 0.3
   - angle: 45
     style:
       sun_azimuth: 135    # this one, and any batch after it, lit from the south-east
@@ -558,7 +559,7 @@ Only those that mean something on a line that is already drawn.
 | Dash | `dash_dark` | 1 | ink on the line at the shore (1 is solid) |
 | | `dash_light` | 1 | ink on the lines further out (1 is solid) |
 | | `dash_period` | 10.5 | length of one dash plus gap, px |
-| | `dash_cutoff` | 0 | below this tone a dash disappears |
+| | `dash_cutoff` | 0 | no ink below this tone; `dash_cutoff_soft` fades it in instead |
 | Mod | `mod_jitter` | 0 | random variation in dash length, same average ink |
 | | `mod_breaks` | 0 | chance of a small break in the line |
 | | `mod_wobble` | 0 | hand-drawn wander, degrees |

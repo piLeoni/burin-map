@@ -19,7 +19,7 @@ Only the ones that mean something on a line that is already drawn:
 | Dash | `dash_dark` | 1 | ink on the line at the shore (1 is solid) |
 | | `dash_light` | 1 | ink on the lines further out (1 is solid) |
 | | `dash_period` | 10.5 | length of one dash plus gap, px |
-| | `dash_cutoff` | 0 | below this tone a dash disappears |
+| | `dash_cutoff` | 0 | no ink below this tone; `dash_cutoff_soft` fades it in instead |
 | Mod | `mod_jitter` | 0 | random variation in dash length, same average ink |
 | | `mod_breaks` | 0 | chance of a small break in the line |
 | | `mod_wobble` | 0 | hand-drawn wander, degrees |

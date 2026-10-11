@@ -24,7 +24,8 @@ dark = near.
 
 Lines are walked in cycles of **`dash_period`** px. At each cycle's midpoint:
 
-1. **`dash_cutoff`** — below this tone, no ink (0 = off)
+1. **`dash_cutoff`** — no ink below this tone (0 = off); **`dash_cutoff_soft`**
+   from 0 (a hard edge) to 1 (ink fades in all the way from tone 0)
 2. **`dash_solid`** — above this tone, always full (1 = off)
 3. **`mod_flat`** — on flat and lit ground, a lottery to leave a dash out
 4. **`dash_levels`** — optionally round tone to N flat zones first
@@ -32,8 +33,13 @@ Lines are walked in cycles of **`dash_period`** px. At each cycle's midpoint:
 6. **`mod_jitter`** — uneven dash/period length, same average ink
 7. **`mod_breaks`** — a chance to break an otherwise full period
 
-**Guarantees:** `dash_light: 1, dash_dark: 1` with modifiers off → every line
-is continuous. `dash_light: 0.5` with `mod_jitter: 0` → even dashes, tone 0.
+**Guarantees:** `dash_light: 1, dash_dark: 1` with modifiers off and
+`dash_cutoff: 0` → every line is continuous. `dash_light: 0.5` with
+`mod_jitter: 0` → even dashes, tone 0.
+
+**Defaults:** land lines default to a hand-drawn style (`mod_jitter: 1`,
+`mod_flat: 0.5`, `dash_cutoff: 0.15`). Water, the shore and dots default to
+even ink with every modifier off.
 
 ## What is *not* this model
 

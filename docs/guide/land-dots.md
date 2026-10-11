@@ -1,8 +1,9 @@
 # Land — dots
 
 Stippling instead of lines: `burin.batch({ draw: "dots", style })`. Dots sit
-as close as lines would — the same spacing field — and nothing is drawn where
-the tone is below `dash_cutoff`.
+as close as lines would — the same spacing field — and none are drawn where
+the tone is below `dash_cutoff` (they fade in with `dash_cutoff_soft`, as
+dashes do). Unlike lines, dots default to even ink with every modifier off.
 
 ```js
 burin.batch({ angle: 0, draw: "dots", style: { water_patches: 0.6 } });
@@ -15,7 +16,7 @@ to decide density, plus:
 
 | Group | Parameter | Default | What it does |
 |---|---|---|---|
-| Dash | `dash_cutoff` | 0 | no dots where the tone is below this |
+| Dash | `dash_cutoff` | 0 | no dots below this tone; `dash_cutoff_soft` fades them in |
 | Mod | `mod_jitter` | 0 | how much dot size varies |
 | | `mod_wobble` | 20 | bends the field dots are placed on, on flat ground |
 | Water | `water_size` | 1.2 (land default) | each dot's length, px |

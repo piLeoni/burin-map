@@ -11,7 +11,7 @@
         },
         {
           "src": "/docs/svg/land-lines-spacing-1.svg",
-          "label": "default (4.8 / 3.4)",
+          "label": "default (6 / 7)",
           "code": "style: {}  // all defaults"
         },
         {
@@ -28,17 +28,17 @@
         {
           "src": "/docs/svg/land-lines-ink-0.svg",
           "label": "solid everywhere",
-          "code": "style: { dash_light: 1, dash_dark: 1 }"
+          "code": "style: { dash_light: 1, dash_dark: 1, mod_jitter: 0, mod_flat: 0, dash_cutoff: 0 }"
         },
         {
           "src": "/docs/svg/land-lines-ink-1.svg",
           "label": "even 50% dashes in light",
-          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 0, mod_flat: 0, dash_cutoff: 0 }"
         },
         {
           "src": "/docs/svg/land-lines-ink-2.svg",
           "label": "same ink, by hand",
-          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 1 }"
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 1, mod_flat: 0, dash_cutoff: 0 }"
         }
       ]
     },
@@ -49,17 +49,17 @@
         {
           "src": "/docs/svg/land-lines-modifiers-0.svg",
           "label": "modifiers off",
-          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 0, mod_flat: 0, dash_cutoff: 0 }"
         },
         {
           "src": "/docs/svg/land-lines-modifiers-1.svg",
           "label": "mod_flat: 1",
-          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_flat: 1 }"
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 0, mod_flat: 1, dash_cutoff: 0 }"
         },
         {
           "src": "/docs/svg/land-lines-modifiers-2.svg",
           "label": "mod_breaks: 1",
-          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_breaks: 1 }"
+          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 0, mod_flat: 0, dash_cutoff: 0, mod_breaks: 1 }"
         }
       ]
     },
@@ -69,13 +69,13 @@
       "tiles": [
         {
           "src": "/docs/svg/land-lines-levels-0.svg",
-          "label": "smooth (default)",
-          "code": "style: {}  // all defaults"
+          "label": "smooth",
+          "code": "style: { mod_jitter: 0, mod_flat: 0, dash_cutoff: 0 }"
         },
         {
           "src": "/docs/svg/land-lines-levels-1.svg",
           "label": "three levels",
-          "code": "style: { dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1 }"
+          "code": "style: { dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1, mod_jitter: 0, mod_flat: 0, dash_cutoff: 0 }"
         }
       ]
     },
@@ -191,40 +191,61 @@
         {
           "src": "/docs/svg/ink-classic.svg",
           "label": "presets/ink-classic.js",
-          "code": "style: { dash_cutoff: 0.03, mod_jitter: 0.8, mod_flat: 1, mod_breaks: 0.15 }"
+          "code": "style: { ...style, dash_cutoff: 0.03, mod_jitter: 0.8, mod_flat: 1, mod_breaks: 0.15 }"
         },
         {
           "src": "/docs/svg/ink-solid.svg",
           "label": "presets/ink-solid.js",
-          "code": "style: { dash_light: 1, dash_dark: 1 }"
+          "code": "style: { ...style, dash_light: 1, dash_dark: 1 }"
         },
         {
           "src": "/docs/svg/ink-half.svg",
           "label": "presets/ink-half.js",
-          "code": "style: { dash_light: 0.5, dash_dark: 1 }"
+          "code": "style: { ...style, dash_light: 0.5, dash_dark: 1 }"
         },
         {
           "src": "/docs/svg/ink-jitter.svg",
           "label": "presets/ink-jitter.js",
-          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_jitter: 1 }"
+          "code": "style: { ...style, dash_light: 0.5, dash_dark: 1, mod_jitter: 1 }"
         },
         {
           "src": "/docs/svg/ink-levels.svg",
           "label": "presets/ink-levels.js",
-          "code": "style: { dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1 }"
+          "code": "style: { ...style, dash_levels: 3, dash_light: 0.1, dash_mid: 0.5, dash_dark: 1 }"
         },
         {
           "src": "/docs/svg/ink-flat.svg",
           "label": "presets/ink-flat.js",
-          "code": "style: { dash_light: 0.5, dash_dark: 1, mod_flat: 1 }"
+          "code": "style: { ...style, dash_light: 0.5, dash_dark: 1, mod_flat: 1 }"
         },
         {
           "src": "/docs/svg/ink-thresholds.svg",
           "label": "presets/ink-thresholds.js",
-          "code": "style: { dash_light: 0.3, dash_dark: 0.3, dash_cutoff: 0.15, dash_solid: 0.6 }"
+          "code": "style: { ...style, dash_light: 0.3, dash_dark: 0.3, dash_cutoff: 0.15, dash_solid: 0.6 }"
         }
       ],
       "columns": 3
+    },
+    "land-lines-cutoff": {
+      "w": 440,
+      "h": 440,
+      "tiles": [
+        {
+          "src": "/docs/svg/land-lines-cutoff-0.svg",
+          "label": "no cutoff",
+          "code": "style: { dash_cutoff: 0 }"
+        },
+        {
+          "src": "/docs/svg/land-lines-cutoff-1.svg",
+          "label": "default: 0.15, soft",
+          "code": "style: {}  // all defaults"
+        },
+        {
+          "src": "/docs/svg/land-lines-cutoff-2.svg",
+          "label": "0.15, hard edge",
+          "code": "style: { dash_cutoff_soft: 0 }"
+        }
+      ]
     }
   },
   "examples": {

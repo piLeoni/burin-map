@@ -19,9 +19,10 @@ const EXAMPLES = [
     id: 'contours',
     title: 'Contours (the default)',
     source: contours,
-    lede: 'One pass along the contours with every parameter at its default — what you get from an empty style.',
+    lede: 'One pass along the contours with the engine defaults, every one written out so you can change it — the same drawing as an empty style.',
     how: [
-      ['Nothing set', <><code>burin.batch({'{'} angle: 0, style: {'{}'} {'}'})</code>. Light decides spacing and ink: wide and broken on lit slopes, tight and solid in shadow.</>],
+      ['By hand', <><code>mod_jitter: 1</code> makes every dash and gap a little different; <code>dash_light: 0.3</code> to <code>dash_dark: 0.8</code> lets the ink, not the spacing, carry the shadow.</>],
+      ['Lit ground breaks up', <><code>mod_flat: 0.5</code> leaves dashes out on lit flats, and <code>dash_cutoff: 0.15</code> thins the lightest slopes further, fewer dashes the lighter the ground.</>],
     ],
   },
   {
