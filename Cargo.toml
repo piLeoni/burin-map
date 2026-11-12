@@ -26,7 +26,10 @@ burin-map-core = { path = "crates/burin-map-core", version = "0.1.0" }
 burin-map = { path = "crates/burin-map", version = "0.1.0" }
 burin-map-script = { path = "crates/burin-map-script", version = "0.1.0" }
 # Without its HTTP client: the core only reads tiles, the CLI turns `fetch` on.
-terramask = { path = "../terramask/crates/terramask", version = "0.2.0", default-features = false }
+# From crates.io, so CI (and anyone) builds without a terramask checkout
+# beside this one. To work on both at once, patch it locally:
+#   [patch.crates-io] terramask = { path = "../terramask/crates/terramask" }
+terramask = { version = "0.2.0", default-features = false }
 
 [profile.release]
 opt-level = 3
