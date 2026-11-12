@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+readme = "../../README.md"
+keywords = ["plotter", "terrain", "hatching", "cartography", "svg"]
+categories = ["graphics", "science::geo"]
 description = "burin-map documents in JavaScript: a script in, the atlas it builds out"
 
 [lib]

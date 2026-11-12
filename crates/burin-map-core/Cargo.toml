@@ -4,8 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
+keywords = ["plotter", "terrain", "hatching", "cartography", "svg"]
+categories = ["graphics", "science::geo"]
 description = "Drawing engine of burin-map: pen-and-ink terrain lines from an elevation grid"
-publish = false
 
 [features]
 # build_fields on the GPU (wgpu). Output differs slightly from the CPU path.
